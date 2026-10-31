@@ -56,7 +56,7 @@ for (var i = 0; i < STRIPS; ++i) {
 	strip.fader = surface.makeFader(x, 4, 2, 8)
 	strip.faderTouch = surface.makeCustomValueVariable('faderTouch' + (i + 1))
 	strip.vpush = surface.makeButton(x, 12, 2, 1)
-	strip.editor = surface.makeButton(x, 13, 2, 1)
+	strip.softKey = surface.makeButton(x, 13, 2, 1)
 
 	strip.select.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
@@ -67,7 +67,7 @@ for (var i = 0; i < STRIPS; ++i) {
 	strip.cut.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
 		.bindToNote(0, 16 + i)
-	strip.editor.mSurfaceValue.mMidiBinding
+	strip.softKey.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
 		.bindToNote(0, 48 + i)
 	strip.vpush.mSurfaceValue.mMidiBinding
@@ -125,11 +125,11 @@ for (var i = 0; i < STRIPS; ++i) {
 		.setTypeToggle()
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute)
 		.setTypeToggle()
-	// V-pot push = record-enable for the track.
-	page.makeValueBinding(strip.vpush.mSurfaceValue, channel.mValue.mRecordEnable)
+	// Top soft key = record-enable for the track (its LED shows the state).
+	page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
 		.setTypeToggle()
-	// Top soft key = open the channel editor for the track.
-	page.makeValueBinding(strip.editor.mSurfaceValue, channel.mValue.mEditorOpen)
+	// V-pot push = open the channel editor for the track.
+	page.makeValueBinding(strip.vpush.mSurfaceValue, channel.mValue.mEditorOpen)
 		.setTypeToggle()
 
 	// Scribble strip: send the track's name and colour to the bridge as SysEx
