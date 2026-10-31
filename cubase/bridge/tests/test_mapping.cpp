@@ -22,6 +22,9 @@ int main()
     CHECK(*buttonToNote(0x37) == kNoteSel + 7);
     CHECK(*buttonToNote(0x08) == kNoteVPush);
     CHECK(*buttonToNote(0x78) == 46 && *buttonToNote(0x79) == 47);
+    CHECK(*buttonToNote(0x18) == 48 && *buttonToNote(0x1F) == 55);
+    CHECK(*buttonToNote(0x59) == 56 && *buttonToNote(0x5A) == 57);
+    CHECK(*buttonToNote(0x00) == 62 && *buttonToNote(0x01) == 63);
     CHECK(!buttonToNote(0x40));
     CHECK(vpotToCc(1) == 1 && vpotToCc(-1) == 65 && vpotToCc(-31) == 95 && vpotToCc(0) == 0);
     CHECK(noteToLed(10)->strip == 2 && noteToLed(10)->cls == 0);

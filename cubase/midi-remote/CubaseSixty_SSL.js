@@ -55,6 +55,8 @@ for (var i = 0; i < STRIPS; ++i) {
 	strip.vpot = surface.makeKnob(x, 2, 2, 2)
 	strip.fader = surface.makeFader(x, 4, 2, 8)
 	strip.faderTouch = surface.makeCustomValueVariable('faderTouch' + (i + 1))
+	strip.vpush = surface.makeButton(x, 12, 2, 1)
+	strip.editor = surface.makeButton(x, 13, 2, 1)
 
 	strip.select.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
@@ -65,6 +67,12 @@ for (var i = 0; i < STRIPS; ++i) {
 	strip.cut.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
 		.bindToNote(0, 16 + i)
+	strip.editor.mSurfaceValue.mMidiBinding
+		.setInputPort(midiInput).setOutputPort(midiOutput)
+		.bindToNote(0, 48 + i)
+	strip.vpush.mSurfaceValue.mMidiBinding
+		.setInputPort(midiInput).setOutputPort(midiOutput)
+		.bindToNote(0, 32 + i)
 	strip.vpot.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput)
 		.bindToControlChange(0, 16 + i)
@@ -79,11 +87,11 @@ for (var i = 0; i < STRIPS; ++i) {
 	strips.push(strip)
 }
 
-var bankLeft = surface.makeButton(0, 13, 2, 1)
-var bankRight = surface.makeButton(2, 13, 2, 1)
-var stopButton = surface.makeButton(6, 13, 2, 1)
-var playButton = surface.makeButton(8, 13, 2, 1)
-var recordButton = surface.makeButton(10, 13, 2, 1)
+var bankLeft = surface.makeButton(0, 14, 2, 1)
+var bankRight = surface.makeButton(2, 14, 2, 1)
+var stopButton = surface.makeButton(6, 14, 2, 1)
+var playButton = surface.makeButton(8, 14, 2, 1)
+var recordButton = surface.makeButton(10, 14, 2, 1)
 
 bankLeft.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 46)
 bankRight.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 47)
@@ -116,6 +124,12 @@ for (var i = 0; i < STRIPS; ++i) {
 	page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
 		.setTypeToggle()
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute)
+		.setTypeToggle()
+	// V-pot push = record-enable for the track.
+	page.makeValueBinding(strip.vpush.mSurfaceValue, channel.mValue.mRecordEnable)
+		.setTypeToggle()
+	// Top soft key = open the channel editor for the track.
+	page.makeValueBinding(strip.editor.mSurfaceValue, channel.mValue.mEditorOpen)
 		.setTypeToggle()
 
 	// Scribble strip: send the track's name and colour to the bridge as SysEx
@@ -161,6 +175,15 @@ for (var i = 0; i < STRIPS; ++i) {
 	}
 }
 
+// Automation Read / Write act on the selected track (the UF8 buttons are global).
+var autoRead = surface.makeButton(12, 14, 2, 1)
+var autoWrite = surface.makeButton(14, 14, 2, 1)
+autoRead.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 56)
+autoWrite.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 57)
+var selectedTrack = page.mHostAccess.mTrackSelection.mMixerChannel
+page.makeValueBinding(autoRead.mSurfaceValue, selectedTrack.mValue.mAutomationRead).setTypeToggle()
+page.makeValueBinding(autoWrite.mSurfaceValue, selectedTrack.mValue.mAutomationWrite).setTypeToggle()
+
 page.makeActionBinding(bankLeft.mSurfaceValue, bankZone.mAction.mPrevBank)
 page.makeActionBinding(bankRight.mSurfaceValue, bankZone.mAction.mNextBank)
 
@@ -168,6 +191,14 @@ var transport = page.mHostAccess.mTransport.mValue
 page.makeValueBinding(stopButton.mSurfaceValue, transport.mStop).setTypeToggle()
 page.makeValueBinding(playButton.mSurfaceValue, transport.mStart).setTypeToggle()
 page.makeValueBinding(recordButton.mSurfaceValue, transport.mRecord).setTypeToggle()
+
+// Foot switches 1 and 2: play and record.
+var foot1 = surface.makeButton(16, 14, 2, 1)
+var foot2 = surface.makeButton(18, 14, 2, 1)
+foot1.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 62)
+foot2.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 63)
+page.makeValueBinding(foot1.mSurfaceValue, transport.mStart).setTypeToggle()
+page.makeValueBinding(foot2.mSurfaceValue, transport.mRecord).setTypeToggle()
 
 // ---------------------------------------------------------------------------
 // SysEx helpers: scribble-strip name and colour

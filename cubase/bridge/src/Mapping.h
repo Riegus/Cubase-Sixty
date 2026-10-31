@@ -32,11 +32,15 @@ inline uint16_t midi14ToPb(uint16_t v)
 // Notes (channel 0). Same numbers as the script.
 constexpr uint8_t kNoteSolo = 8, kNoteCut = 16, kNoteSel = 24, kNoteVPush = 32;
 constexpr uint8_t kNoteTouch = 104, kNoteBankLeft = 46, kNoteBankRight = 47;
+constexpr uint8_t kNoteTopSoft = 48;   // 48..55: top soft keys 1..8 (channel editor)
+constexpr uint8_t kNoteAutoRead = 56, kNoteAutoWrite = 57;
+constexpr uint8_t kNoteFoot1 = 62, kNoteFoot2 = 63;
 constexpr uint8_t kCcVPot = 16;
 
 // What a UF8 button id (FF 22 03 <id> 00 <state>) means on the wire.
 // Per-strip ids: V-pot push 0x08..0x0F, SOLO/CUT/SEL 0x20..0x37 (3 per strip),
-// bank 0x78 / 0x79 (as in Rea-Sixty's main.cpp). Transport has no mapping yet.
+// top soft keys 0x18..0x1F, automation Read/Write 0x59/0x5A, foot switches 0x00/0x01,
+// bank 0x78 / 0x79 (as in Rea-Sixty's main.cpp). The UF8 has no transport keys.
 inline std::optional<uint8_t> buttonToNote(uint8_t id)
 {
     if (id >= 0x08 && id <= 0x0F) return uint8_t(kNoteVPush + (id - 0x08));
@@ -48,6 +52,11 @@ inline std::optional<uint8_t> buttonToNote(uint8_t id)
             default: return uint8_t(kNoteSel + strip);
         }
     }
+    if (id >= 0x18 && id <= 0x1F) return uint8_t(kNoteTopSoft + (id - 0x18));
+    if (id == 0x59) return kNoteAutoRead;
+    if (id == 0x5A) return kNoteAutoWrite;
+    if (id == 0x00) return kNoteFoot1;
+    if (id == 0x01) return kNoteFoot2;
     if (id == 0x78) return kNoteBankLeft;
     if (id == 0x79) return kNoteBankRight;
     return std::nullopt;
