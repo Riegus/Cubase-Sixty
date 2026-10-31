@@ -40,6 +40,13 @@ int main()
     auto c = parseColour({0xF0, 0x7D, 0x52, 0x36, 0x02, 1, 127, 0, 0, 0xF7});
     CHECK(c && c->strip == 1 && c->r == 127);
     CHECK(colourToPalette(127, 0, 0) <= 15);
+    // UF1
+    CHECK(*uf1m::buttonToNote(0x3D) == uf1m::kNotePlay && *uf1m::buttonToNote(0x1D) == kNoteSolo);
+    CHECK(*uf1m::buttonToNote(0x08) == kNoteVPush && *uf1m::buttonToNote(0x0D) == kNoteVPush + 5);
+    CHECK(!uf1m::buttonToNote(0x40));
+    CHECK(uf1m::noteToLed(uf1m::kNotePlay)->id == 0x25 && !uf1m::noteToLed(60));
+    CHECK(uf1m::pos15ToMidi14(0) == 0 && uf1m::pos15ToMidi14(0x7FFF) == 16383);
+    CHECK(uf1m::midi14ToPos15(16383) == 0x7FFF && uf1m::midi14ToPos15(0) == 0);
     std::puts("all mapping tests passed");
     return 0;
 }

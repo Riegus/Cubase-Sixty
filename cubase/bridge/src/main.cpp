@@ -26,6 +26,7 @@
 #include "UF8Device.h"
 #include "Uf8Fader.h"
 #include "Uf8Frames.h"
+#include "Uf1Bridge.h"
 
 using namespace cs;
 
@@ -49,8 +50,15 @@ std::mutex        g_faderMx;
 uint8_t           g_palette[kStrips] = {};
 std::mutex        g_paletteMx;
 
+bool g_trace8 = false;
+
 void sendMidi(std::vector<unsigned char> m)
 {
+    if (g_trace8 && !(m.size() && (m[0] & 0xF0) == 0xE0)) {
+        std::printf("[UF8 MIDI out]");
+        for (unsigned char b : m) std::printf(" %02X", b);
+        std::printf("\n");
+    }
     std::lock_guard<std::mutex> lk(g_outMx);
     try { g_out.sendMessage(&m); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
 }
@@ -88,7 +96,14 @@ void handleFrame(const uf8frames::Frame& fr)
     }
     case 0x22: {   // button: FF 22 03 id 00 state ck
         const bool pressed = d[5] == 0x01;
-        if (auto n = buttonToNote(d[3])) note(*n, pressed);
+        if (auto n = buttonToNote(d[3])) {
+            // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
+            // which started the transport. Ignore the foot switches for the first seconds.
+            static const auto t0 = std::chrono::steady_clock::now();
+            const bool foot = (*n == 62 || *n == 63);
+            if (foot && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(4)) break;
+            note(*n, pressed);
+        }
         break;
     }
     case 0x24: {   // v-pot: FF 24 02 strip raw ck
@@ -190,41 +205,55 @@ int findPort(RtMidi& api, const std::string& needle)
 
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); g_trace8 = true; }
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
 
-    const int po = findPort(g_out, kPortToCubase);
-    const int pi = findPort(g_in, kPortFromCubase);
-    if (po < 0 || pi < 0) {
-        std::fprintf(stderr, "Could not find loopMIDI ports \"%s\" and \"%s\".\n"
-                             "Create them in loopMIDI first (see cubase/midi-remote/README.md).\n",
-                     kPortToCubase, kPortFromCubase);
+    // Each surface is optional: it is skipped (with a message) if its ports or device are missing.
+    bool uf8Ok = false;
+    {
+        const int po = findPort(g_out, kPortToCubase);
+        const int pi = findPort(g_in, kPortFromCubase);
+        if (po < 0 || pi < 0) {
+            std::fprintf(stderr, "UF8: loopMIDI ports \"%s\" / \"%s\" not found; skipping the UF8.\n",
+                         kPortToCubase, kPortFromCubase);
+        } else if (!g_dev.open()) {
+            std::fprintf(stderr, "UF8: could not open the device: %s\n"
+                                 "Is SSL 360 (or SSL 360 Core) still running? Quit it first.\n",
+                         g_dev.lastError().c_str());
+        } else {
+            g_out.openPort(unsigned(po), kPortToCubase);
+            g_in.ignoreTypes(false, true, true);   // keep SysEx
+            g_in.setCallback(&onMidiIn);
+            g_in.openPort(unsigned(pi), kPortFromCubase);
+            g_dev.setRawInputHandler(onUsbInput);
+            std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
+            uf8Ok = true;
+        }
+    }
+    const bool uf1Ok = cs::uf1Start();
+    if (!uf8Ok && !uf1Ok) {
+        std::fprintf(stderr, "Nothing to bridge. Exiting.\n");
         return 1;
     }
-    g_out.openPort(unsigned(po), kPortToCubase);
-    g_in.ignoreTypes(false, true, true);   // keep SysEx
-    g_in.setCallback(&onMidiIn);
-    g_in.openPort(unsigned(pi), kPortFromCubase);
-
-    if (!g_dev.open()) {
-        std::fprintf(stderr, "Could not open the UF8: %s\n"
-                             "Is SSL 360 (or SSL 360 Core) still running? Quit it first.\n"
-                             "On Windows the UF8 also needs the WinUSB driver (see extension/resources/rea_sixty_winusb.inf).\n",
-                     g_dev.lastError().c_str());
-        return 2;
+    std::printf("Bridging; Ctrl+C to stop.\n");
+    if (uf1Ok) {
+        bool lamp = false;
+        for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--lamptest") lamp = true;
+        if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
     }
-    g_dev.setRawInputHandler(onUsbInput);
-    std::printf("UF8 open (serial %s). Bridging; Ctrl+C to stop.\n", g_dev.serial().c_str());
 
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        if (g_dev.needsReopen()) {
-            std::fprintf(stderr, "UF8 went away; exiting (restart the bridge).\n");
+        if ((uf8Ok && g_dev.needsReopen()) || cs::uf1NeedsReopen()) {
+            std::fprintf(stderr, "A surface went away; exiting (restart the bridge).\n");
             break;
         }
     }
-    g_dev.close();
+    if (uf8Ok) g_dev.close();
+    cs::uf1Stop();
     return 0;
 }

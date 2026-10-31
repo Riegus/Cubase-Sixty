@@ -48,7 +48,11 @@ FetchContent_MakeAvailable(rtmidi)
 add_executable(cubase_sixty_bridge
     src/main.cpp
     src/Mapping.h
+    src/Uf1Bridge.cpp
+    src/Uf1Bridge.h
     ${EXT_SRC}/UF8Device.cpp
+    ${EXT_SRC}/UF1Device.cpp
+    ${EXT_SRC}/UF1Protocol.cpp
     ${EXT_SRC}/Protocol.cpp
     ${EXT_SRC}/Palette.cpp
     ${EXT_SRC}/LogPath.cpp)

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "Palette.h"
+#include "UF1Protocol.h"
 
 namespace cs {
 
@@ -115,5 +116,69 @@ inline uint8_t colourToPalette(uint8_t r, uint8_t g, uint8_t b)
     auto up = [](uint8_t v) { return uint8_t((unsigned(v) * 255u + 63u) / 127u); };
     return uf8::quantize(uf8::Rgb{up(r), up(g), up(b)});
 }
+
+// ---------------------------------------------------------------------------
+// UF1 (one channel strip, so everything is on MIDI channel 0)
+// Same note numbers as the UF8's strip 1, plus transport and encoders.
+// ---------------------------------------------------------------------------
+namespace uf1m {
+
+constexpr uint8_t kNoteRwd = 91, kNoteFfw = 92, kNoteStop = 93, kNotePlay = 94, kNoteRec = 95;
+constexpr uint8_t kNoteCycle = 86, kNoteClick = 87;
+constexpr uint8_t kNoteFaderTouch = 104;
+constexpr uint8_t kCcEncoder = 16;   // 16 + encoder id (0 above-fader, 1..4 V-pots, 5 channel, 6 jog)
+
+inline std::optional<uint8_t> buttonToNote(uint8_t id)
+{
+    switch (id) {
+        case 0x1D: return kNoteSolo;
+        case 0x1E: return kNoteCut;
+        case 0x1F: return kNoteSel;
+        case 0x3A: return kNoteRwd;
+        case 0x3B: return kNoteFfw;
+        case 0x3C: return kNoteStop;
+        case 0x3D: return kNotePlay;
+        case 0x3E: return kNoteRec;
+        case 0x32: return kNoteCycle;
+        case 0x33: return kNoteClick;
+        case 0x21: return kNoteBankLeft;
+        case 0x23: return kNoteBankRight;
+        default: break;
+    }
+    if (id >= 0x08 && id <= 0x0D) return uint8_t(kNoteVPush + (id - 0x08));   // pushes 32..37
+    return std::nullopt;
+}
+
+// Feedback note -> UF1 LED element id and the colour it lights in (0xRRGGBB).
+struct Led { uint8_t id; uint32_t rgb; };
+inline std::optional<Led> noteToLed(uint8_t note)
+{
+    switch (note) {
+        case kNoteSolo:  return Led{0x05, 0xFFFF00};
+        case kNoteCut:   return Led{0x06, 0xFF0000};
+        case kNoteRwd:   return Led{0x22, 0xFFFFFF};
+        case kNoteFfw:   return Led{0x23, 0xFFFFFF};
+        case kNoteStop:  return Led{0x24, 0xFFFFFF};
+        case kNotePlay:  return Led{0x25, 0x00FF00};
+        case kNoteRec:   return Led{0x26, 0xFF0000};
+        case kNoteCycle: return Led{0x1A, 0xFFFF00};
+        case kNoteClick: return Led{0x1B, 0xFFFF00};
+        default: return std::nullopt;
+    }
+}
+
+// UF1 fader: 15-bit with end snap <-> 14-bit MIDI pitch bend.
+inline uint16_t pos15ToMidi14(uint16_t pos)
+{
+    const double n = ::uf1::faderPosToNorm(pos);
+    return static_cast<uint16_t>(n * 16383.0 + 0.5);
+}
+inline uint16_t midi14ToPos15(uint16_t v)
+{
+    if (v > 16383) v = 16383;
+    return static_cast<uint16_t>((uint32_t(v) * ::uf1::kFaderMax + 8191u) / 16383u);
+}
+
+} // namespace uf1m
 
 } // namespace cs
