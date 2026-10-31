@@ -30,6 +30,10 @@ int main()
     CHECK(noteToLed(10)->strip == 2 && noteToLed(10)->cls == 0);
     CHECK(noteToLed(31)->strip == 7 && noteToLed(31)->cls == 2);
     CHECK(!noteToLed(40));
+    CHECK(noteToLed(48)->cls == 3 && noteToLed(48)->strip == 0);
+    CHECK(noteToLed(55)->cls == 3 && noteToLed(55)->strip == 7);
+    CHECK(noteToLed(56)->cls == 4 && noteToLed(57)->cls == 5);
+    CHECK(!noteToLed(58));
     auto n = parseName({0xF0, 0x7D, 0x52, 0x36, 0x01, 3, 'B', 'a', 's', 's', 0xF7});
     CHECK(n && n->strip == 3 && n->text.size() == 4);
     CHECK(!parseName({0xF0, 0x7D, 0x52, 0x36, 0x01, 9, 'x', 0xF7}));

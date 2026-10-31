@@ -178,8 +178,8 @@ for (var i = 0; i < STRIPS; ++i) {
 // Automation Read / Write act on the selected track (the UF8 buttons are global).
 var autoRead = surface.makeButton(12, 14, 2, 1)
 var autoWrite = surface.makeButton(14, 14, 2, 1)
-autoRead.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 56)
-autoWrite.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 57)
+autoRead.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 56)
+autoWrite.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 57)
 var selectedTrack = page.mHostAccess.mTrackSelection.mMixerChannel
 page.makeValueBinding(autoRead.mSurfaceValue, selectedTrack.mValue.mAutomationRead).setTypeToggle()
 page.makeValueBinding(autoWrite.mSurfaceValue, selectedTrack.mValue.mAutomationWrite).setTypeToggle()

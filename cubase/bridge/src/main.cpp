@@ -111,12 +111,28 @@ void onUsbInput(const uint8_t* data, size_t len)
 
 // ---------------------------------------------------------------- Cubase -> UF8
 
-void setLed(int strip, int cls, bool on)
+void sendLedFrames(const uf8::LedColourFrames& frames)
 {
-    const auto frames = uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on);
     g_dev.send(frames.ff38);
     g_dev.send(frames.ff39);
     if (!frames.legacy.empty()) g_dev.send(frames.legacy);
+}
+
+// cls: 0 solo, 1 cut, 2 sel, 3 top soft key, 4 automation Read, 5 automation Write
+void setLed(int strip, int cls, bool on)
+{
+    switch (cls) {
+    case 0: case 1: case 2:
+        sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on));
+        break;
+    case 3:
+        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(strip),
+            on ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
+        break;
+    case 4: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoRead, on)); break;
+    case 5: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoWrite, on)); break;
+    default: break;
+    }
 }
 
 void pushPalette()

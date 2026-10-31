@@ -71,10 +71,15 @@ inline uint8_t vpotToCc(int delta)
     return delta > 0 ? uint8_t(delta) : uint8_t(64 - delta);
 }
 
-// Which LED a Cubase feedback note drives. cls: 0 solo, 1 cut, 2 sel.
+// Which LED a Cubase feedback note drives.
+// cls: 0 solo, 1 cut, 2 sel (per strip), 3 top soft key (per strip: channel editor open),
+//      4 automation Read, 5 automation Write (global, strip = 0).
 struct LedTarget { int strip; int cls; };
 inline std::optional<LedTarget> noteToLed(uint8_t note)
 {
+    if (note >= kNoteTopSoft && note < kNoteTopSoft + kStrips) return LedTarget{note - kNoteTopSoft, 3};
+    if (note == kNoteAutoRead)  return LedTarget{0, 4};
+    if (note == kNoteAutoWrite) return LedTarget{0, 5};
     if (note >= kNoteSolo && note < kNoteSolo + kStrips) return LedTarget{note - kNoteSolo, 0};
     if (note >= kNoteCut  && note < kNoteCut  + kStrips) return LedTarget{note - kNoteCut, 1};
     if (note >= kNoteSel  && note < kNoteSel  + kStrips) return LedTarget{note - kNoteSel, 2};
