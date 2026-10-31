@@ -128,6 +128,8 @@ for (var i = 0; i < STRIPS; ++i) {
 			dbg('title strip ' + (index + 1) + ': [' + title + ']')
 			sendStripName(activeDevice, index, title)
 		}
+		// Known Cubase limit: this only fires when a track is selected or banked in, not the
+		// moment its colour is changed (tested on Cubase 15 with several other colour hooks).
 		channel.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
 			dbg('color strip ' + (index + 1) + ': r=' + r + ' g=' + g + ' b=' + b + ' a=' + a + ' active=' + isActive)
 			sendStripColor(activeDevice, index, r, g, b)
@@ -194,3 +196,4 @@ function sendStripName(activeDevice, index, text) {
 function sendStripColor(activeDevice, index, r, g, b) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_COLOR, index, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
 }
+
