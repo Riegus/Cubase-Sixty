@@ -9,6 +9,22 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
+// SysEx constants live at the top: the name/colour callbacks fire while the
+// mapping below is still being built, before later `var` lines have run.
+var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
+var SYSEX_NAME = 0x01
+var SYSEX_COLOR = 0x02
+var MAX_NAME_BYTES = 32
+
+// Debug logging to the MIDI Remote Script Console. Set to true to log every
+// fader, solo, mute, name and colour change (very chatty while a fader moves).
+var DEBUG = false
+var SCRIPT_VERSION = '0.1.0-dev (ports: to Cubase / from Cubase)'
+function dbg(text) {
+	if (DEBUG) console.log('[CubaseSixty] ' + text)
+}
+console.log('[CubaseSixty] script loaded, version ' + SCRIPT_VERSION)
+
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'SSL', 'Riegus')
 
 var midiInput = deviceDriver.mPorts.makeMidiInput()
@@ -17,8 +33,8 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 deviceDriver
 	.makeDetectionUnit()
 	.detectPortPair(midiInput, midiOutput)
-	.expectInputNameEquals('Cubase-Sixty UF8')
-	.expectOutputNameEquals('Cubase-Sixty UF8')
+	.expectInputNameEquals('Cubase-Sixty UF8 to Cubase')
+	.expectOutputNameEquals('Cubase-Sixty UF8 from Cubase')
 
 var surface = deviceDriver.mSurface
 
@@ -102,9 +118,45 @@ for (var i = 0; i < STRIPS; ++i) {
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute)
 		.setTypeToggle()
 
+	// Scribble strip: send the track's name and colour to the bridge as SysEx
+	// (see "Scribble strips and track colours" in the protocol doc).
+	// These callbacks belong to the mixer bank channel itself (host side), not to
+	// the fader's surface value: the surface-value versions only fired when a
+	// track was renamed and never for colours.
+	;(function (index) {
+		channel.mOnTitleChange = function (activeDevice, activeMapping, title) {
+			dbg('title strip ' + (index + 1) + ': [' + title + ']')
+			sendStripName(activeDevice, index, title)
+		}
+		channel.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
+			dbg('color strip ' + (index + 1) + ': r=' + r + ' g=' + g + ' b=' + b + ' a=' + a + ' active=' + isActive)
+			sendStripColor(activeDevice, index, r, g, b)
+		}
+	})(i)
+
+	;(function (index, fader) {
+		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value, diff) {
+			dbg('fader ' + (index + 1) + ' value ' + Number(value).toFixed(4))
+		}
+		strips[index].solo.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			dbg('strip ' + (index + 1) + ' SOLO ' + Number(value).toFixed(2))
+		}
+		strips[index].cut.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			dbg('strip ' + (index + 1) + ' MUTE ' + Number(value).toFixed(2))
+		}
+		if (fader.mSurfaceValue.mTouchState) {
+			fader.mSurfaceValue.mTouchState.mOnProcessValueChange = function (activeDevice, value) {
+				dbg('fader ' + (index + 1) + ' touch ' + value)
+			}
+		}
+	})(i, strip.fader)
+
 	// Fader touch: tell Cubase the fader is held, so automation in Touch mode
-	// behaves like a touch-sensitive fader.
-	page.makeValueBinding(strip.faderTouch, channel.mValue.mVolume.mTouched)
+	// behaves like a touch-sensitive fader. Needs MIDI Remote API 1.1 (Cubase 13+);
+	// the guard keeps the script loading on older versions.
+	if (strip.fader.mSurfaceValue.mTouchState) {
+		strip.fader.mSurfaceValue.mTouchState.bindTo(strip.faderTouch)
+	}
 }
 
 page.makeActionBinding(bankLeft.mSurfaceValue, bankZone.mAction.mPrevBank)
@@ -114,3 +166,31 @@ var transport = page.mHostAccess.mTransport.mValue
 page.makeValueBinding(stopButton.mSurfaceValue, transport.mStop).setTypeToggle()
 page.makeValueBinding(playButton.mSurfaceValue, transport.mStart).setTypeToggle()
 page.makeValueBinding(recordButton.mSurfaceValue, transport.mRecord).setTypeToggle()
+
+// ---------------------------------------------------------------------------
+// SysEx helpers: scribble-strip name and colour
+// ---------------------------------------------------------------------------
+
+
+function toAscii7(text) {
+	var out = []
+	var str = text || ''
+	for (var n = 0; n < str.length && out.length < MAX_NAME_BYTES; ++n) {
+		var code = str.charCodeAt(n)
+		out.push(code < 0x80 ? code : 0x3F)
+	}
+	return out
+}
+
+function to7bit(value) {
+	// The API reports colour components as 0..1.
+	return Math.max(0, Math.min(127, Math.round(value * 127)))
+}
+
+function sendStripName(activeDevice, index, text) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_NAME, index], toAscii7(text), [0xF7]))
+}
+
+function sendStripColor(activeDevice, index, r, g, b) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_COLOR, index, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
+}
