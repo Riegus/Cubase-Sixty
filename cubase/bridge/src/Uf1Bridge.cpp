@@ -143,6 +143,7 @@ void setLed(const uf1m::Led& led, bool on)
 
 // SEL LED: always shows the selected track's colour, dimmed; bright while the channel editor is open
 // (SEL is bound to the editor). Level 0x11 alone did not dim visibly, so the colour itself is scaled down.
+bool g_emptySelection = false;   // the last selected-track name was empty (see onSysex)
 constexpr uint32_t kSelDimPct = 35;   // dim SEL colour, % of full (20 was invisible, 45 too bright)
 uint32_t g_selRgb = 0xFFFFFF;
 bool g_selOn = false;
@@ -247,10 +248,16 @@ void onSysex(const std::vector<unsigned char>& m)
     if (auto n = parseName(m)) {
         if (n->strip != 0) return;
         std::string t(n->text.begin(), n->text.end());
+        // An empty name means the selection landed on something without a mixer channel (a folder, a
+        // marker track, or nothing). Keep showing the last track rather than blanking the display; the
+        // colour that follows (all zero) is skipped too.
+        g_emptySelection = t.empty();
+        if (t.empty()) return;
         if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
         screenText(::uf1::scr::kTrackName, t);
     } else if (auto c = parseColour(m)) {
         if (c->strip != 0) return;
+        if (g_emptySelection && c->r == 0 && c->g == 0 && c->b == 0) return;   // see the empty name above
         const uint8_t idx = colourToPalette(c->r, c->g, c->b);
         const uint8_t active = 0x01;
         g_dev.send(::uf1::buildScreen(::uf1::scr::kChActive, std::span<const uint8_t>(&active, 1)));
