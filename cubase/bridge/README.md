@@ -11,8 +11,8 @@ SSL 360° must not be running: it claims the controllers' USB interfaces exclusi
 
 | Surface | Working |
 |---------|---------|
-| UF8 | Faders (motor, touch, echo suppression), SEL / SOLO / CUT with LEDs, top soft keys = record-enable (red; dark and ignored on strips that cannot record), V-pots (pan) with the pan value and bar on the display, V-pot push, banking, starts on the bank with the selected track, automation Read / Write with LEDs, scribble-strip names and colours. Foot switches are implemented but untested. |
-| UF1 | Fader (motor, touch), SOLO / CUT / SEL, transport keys with LEDs, pan knob above the fader, V-pots 1–4 = sends 1–4 (turn = level, push = on / off), channel encoder selects the previous / next track, jog wheel nudges the cursor. Display: track name, level, colour, and a value line with bar (pan; a send for 3 seconds after it is turned). |
+| UF8 | Faders (motor, touch, echo suppression), SEL / SOLO / CUT with LEDs, top soft keys = record-enable (red; dark and ignored on strips that cannot record), V-pots (pan) with the pan value and bar on the display, V-pot push, banking, Page left / right (shift the bank by one channel), starts on the bank with the selected track, automation Read / Write with LEDs, automation mode keys (Off = Cross-Over, Trim, Latch, Touch), zoom pad (left / right = zoom, up / down = vertical zoom, centre = open / close editor), scribble-strip names and colours. Foot switches are implemented but untested. |
+| UF1 | Fader (motor, touch), SOLO / CUT / SEL (SEL LED in the track colour), transport keys with LEDs, ARROW = previous / next track, BANK = banks the UF8 (8 tracks without a UF8), NAV cross = zoom (centre = open / close editor), pan knob above the fader, V-pots 1–4 = sends 1–4 (turn = level, push = on / off), channel encoder selects the previous / next track, jog wheel nudges the cursor. Display: track name, level, colour, and a value line with bar (pan; a send for 3 seconds after it is turned). |
 | UC1 | Not started. |
 
 ## Building
@@ -59,6 +59,8 @@ Options:
 - **Start-up bank.** When the UF8 script starts, it steps bank by bank (the bridge sends the bank-right presses) until the selected track is on one of the eight strips. Cubase ignores bank presses during its first seconds, so the bridge holds them until 3 seconds after Cubase first sends anything: expect a short pause before the UF8 moves. Pressing a bank key ends the search. With no track selected, nothing happens until you select one.
 - **Record-enable keys.** Dim red = can arm, bright red = armed, dark = this strip cannot record (group, FX, VCA, bus, empty strip); a dark key ignores presses. The script decides which strips can record (see the MIDI Remote README). An audio track with no input bus still shows dim red but Cubase will not arm it.
 - **Encoder speed (UF1).** The channel encoder and the jog wheel send one step per 4 detents (`kDetentsPerPulse` in `Uf1Bridge.cpp`).
+- **UF1 SEL LED.** Shows the selected track's colour at 35 % (`kSelDimPct`; the UF1's own dim level did not dim visibly), full brightness while the channel editor is open.
+- **UF1 BANK and ARROW.** BANK presses the UF8's bank key when a UF8 is running; without one it steps the selection 8 tracks (40 ms apart, back-to-back steps were merged by Cubase). ARROW is one channel-encoder step.
 - **UF1 value line.** Pan is the line's normal content. Turning a send V-pot shows that send for 3 seconds after the last change (`kTemporaryMs`); selecting another track shows its pan straight away.
 - **LEDs.** The UF1 buttons are lit by colour (an LED with colour black is off), as in Rea-Sixty. LED brightness is set to full when the UF1 opens.
 
@@ -83,8 +85,8 @@ tests/              test_mapping
 
 ## Later
 
-- **UF1:** SEL LED and track colour, bank / arrow / navigation buttons.
-- **UF8:** zoom keys, Page left / right, other automation modes, meters.
+- **UF1:** MODE, 5–8, 360°, SCRUB, FLIP, MASTER and the transport soft keys; keep the display when the selection lands on something without a mixer channel.
+- **UF8:** meters; LEDs for the automation mode keys (Cubase does not report the mode to scripts).
 - **UC1 and plug-in focus.** Depends on how much of the insert and strip-effect parameters the MIDI Remote API exposes; prototype early.
 - **SSL plug-in stream and meters.** Rea-Sixty gets the SSL plug-ins' meters by standing in for SSL 360° Core. Tying each plug-in instance to a Cubase track is the open question.
 - **Extras:** layers, a second UF8, settings UI, packaging.

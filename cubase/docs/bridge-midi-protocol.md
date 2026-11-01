@@ -32,10 +32,13 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Top soft key      | Note 48 + strip−1                | both         | Toggles record-enable; Cubase → bridge sets the LED (red). |
 | Cannot record     | Note 64 + strip−1, vel 127 / 0   | Cubase → bridge | From the script: 127 = this strip cannot be armed (key dark, presses ignored), 0 = it can. |
 | Bank left / right | Note 46 / 47                     | bridge → Cubase | |
+| Page left / right | Note 44 / 45                     | bridge → Cubase | Shift the bank by one channel. |
+| Zoom pad          | Notes 72–76                      | bridge → Cubase | Up, left, centre, right, down: vertical zoom in, zoom out, open / close editor, zoom in, vertical zoom out. |
 | Play / Stop / Rec | Note 94 / 93 / 95                | both         | Cubase → bridge sets the LED. |
 | Cycle / Click     | Note 86 / 87                     | both         | UF1 only so far. |
 | Rewind / Forward  | Note 91 / 92                     | both         | UF1 only so far. |
 | Automation Read / Write | Note 56 / 57               | both         | Act on the selected track; Cubase → bridge sets the LED. |
+| Automation modes  | Notes 58 / 59 / 60 / 61          | bridge → Cubase | Off (= Cross-Over), Trim (toggle), Latch, Touch: Cubase's global automation mode. No LED feedback. |
 | Foot switch 1 / 2 | Note 62 / 63                     | bridge → Cubase | Play / record. Ignored for 4 s after start-up (phantom press). |
 
 LED state arrives as note on / off, or as polyphonic aftertouch with value 127 for "on"; the bridge accepts both.
@@ -50,14 +53,16 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 |---------|---------|-----------|-------|
 | Fader position | Pitch bend, channel 1 | both | 14-bit. |
 | Fader touch | Note 104 | bridge → Cubase | |
-| SOLO / CUT / SEL | Notes 8 / 16 / 24 | both | Cubase → bridge sets the LED. |
+| SOLO / CUT / SEL | Notes 8 / 16 / 24 | both | Cubase → bridge sets the LED. The SEL LED shows the track colour (from SysEx 02), dim, and bright while the editor is open. |
 | Pan knob | CC 16, relative signed-bit | bridge → Cubase | The knob above the fader (encoder id 0). Pan of the selected track. |
 | V-pots 1–4 | CC 17–20, relative signed-bit | bridge → Cubase | Sends 1–4 of the selected track (level). |
 | V-pot pushes | Notes 33–36 | bridge → Cubase | Send 1–4 on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
 | Channel encoder | Note 40 (left) / 41 (right) | bridge → Cubase | One note pulse per 4 detents. Select previous / next track. |
 | Jog wheel | Note 42 (left) / 43 (right) | bridge → Cubase | One note pulse per 4 detents. Nudge cursor left / right. |
 | Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |
-| Bank | Notes 46 / 47 | bridge → Cubase | |
+| ARROW ◀ / ▶ | Note 40 / 41 | bridge → Cubase | One channel-encoder step: previous / next track. |
+| BANK ◀ / ▶ | UF8 note 46 / 47 | bridge → Cubase (UF8 port) | Banks the UF8. Without a UF8: eight steps of note 40 / 41, 40 ms apart. |
+| NAV cross | Notes 48–52 | bridge → Cubase | Up, left, centre, right, down: vertical zoom in, zoom out, open / close editor, zoom in, vertical zoom out. |
 
 ## SysEx: names, colours and display
 
@@ -83,5 +88,5 @@ Names and colours are sent whenever the bank changes or the track's name or colo
 
 - Meters.
 - UC1 mappings.
-- UF1 SEL LED, bank and navigation keys.
+- The remaining UF1 keys (MODE, 5–8, 360°, SCRUB, FLIP, MASTER, transport soft keys).
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.

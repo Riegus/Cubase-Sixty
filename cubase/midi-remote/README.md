@@ -4,8 +4,8 @@ The Cubase side of Cubase-Sixty: one MIDI Remote script per surface. They speak 
 
 | Folder | Script | Surface | What it does |
 |--------|--------|---------|--------------|
-| `UF8/` | `CubaseSixty_UF8.js` | SSL UF8 | Eight faders with touch (Touch automation works), pan on the V-pots (value and bar on each strip's display), SEL / SOLO / CUT with LEDs, top soft keys toggle record-enable (dark on strips that cannot record), V-pot push opens the channel editor, bank left / right, starts on the bank with the selected track, automation Read / Write on the selected track, foot switches (play / record), track names and colours on the scribble strips. |
-| `UF1/` | `CubaseSixty_UF1.js` | SSL UF1 | One strip that controls the **selected track**: fader with touch, SOLO / CUT / SEL, pan on the knob above the fader, V-pots 1–4 = sends 1–4 (turn = level, push = on / off), channel encoder = previous / next track, jog wheel = nudge cursor, transport keys (rwd, ffw, stop, play, record, cycle, click) with LEDs. The display shows the track name, level, colour, and a value line with pan, or a send for 3 seconds after it is turned. |
+| `UF8/` | `CubaseSixty_UF8.js` | SSL UF8 | Eight faders with touch (Touch automation works), pan on the V-pots (value and bar on each strip's display), SEL / SOLO / CUT with LEDs, top soft keys toggle record-enable (dark on strips that cannot record), V-pot push opens the channel editor, bank left / right, Page left / right (one channel), starts on the bank with the selected track, automation Read / Write on the selected track, automation mode keys (Off = Cross-Over, Trim, Latch, Touch), zoom pad (zoom, vertical zoom, centre = open / close editor), foot switches (play / record), track names and colours on the scribble strips. |
+| `UF1/` | `CubaseSixty_UF1.js` | SSL UF1 | One strip that controls the **selected track**: fader with touch, SOLO / CUT / SEL, pan on the knob above the fader, V-pots 1–4 = sends 1–4 (turn = level, push = on / off), channel encoder and ARROW = previous / next track, BANK = banks the UF8, jog wheel = nudge cursor, NAV cross = zoom (centre = open / close editor), transport keys (rwd, ffw, stop, play, record, cycle, click) with LEDs. The display shows the track name, level, colour, and a value line with pan, or a send for 3 seconds after it is turned. |
 
 Tested with Cubase 15 Pro on Windows. The folder names, the file names and the device names in the scripts must match (`CubaseSixty` / `UF8` / `UF1`), or Cubase will not list the script.
 
@@ -47,8 +47,13 @@ Set `DEBUG = true` near the top of the UF8 script to log every fader, solo, mute
 - **Which UF8 strips can record.** The MIDI Remote API does not say what kind of channel a strip is, and Cubase even reports record-enable as "on" for a group after a press. So the UF8 script keeps a second, hidden bank with only the channel types that can record (groups, FX, VCA, inputs and outputs excluded, up to 128 channels) and collects their names. A strip whose name is not on that list gets a dark, inactive top soft key. Two tracks with the same name, or more than 128 recordable tracks, can confuse it.
 - **Cubase re-sends values.** When one bound value changes, Cubase often reports the others again unchanged, and it re-sends all strip names after a bank key. The scripts only act on values that really changed.
 - **Start-up bank (UF8).** The script asks the bridge to press bank-right until the selected track shows, and counts a bank as arrived only when every strip's name has changed. Pressing a bank key ends the search.
-- **Command bindings (UF1).** The channel encoder and jog use `makeCommandBinding` with the internal category and name: `Project` / `Select Track: Prev` and `Select Track: Next`, `Transport` / `Nudge Cursor Left` and `Nudge Cursor Right`.
+- **Command bindings.** `makeCommandBinding` needs the internal category and command name (find them in the `.xml` files under `Cubase 15\Presets\KeyCommands`: a category is the `Name` line just before its group of commands). In use:
+  - `Project` / `Select Track: Prev`, `Select Track: Next` (UF1 channel encoder, ARROW, BANK without a UF8)
+  - `Transport` / `Nudge Cursor Left`, `Nudge Cursor Right` (UF1 jog)
+  - `Zoom` / `Zoom In`, `Zoom Out`, `Zoom In Vertically`, `Zoom Out Vertically` (UF1 NAV cross, UF8 zoom pad)
+  - `Editors` / `Open/Close Editor` (NAV / zoom pad centre; acts on the selected part or event, like a double-click)
+  - `Automation` / `Automation Mode - Cross-Over`, `Automation Mode - Trim` (a toggle), `Automation Mode - Auto-Latch`, `Automation Mode - Touch` (UF8 automation keys)
 
 ## Not yet done
 
-Meters, the UC1, UF1 SEL LED and navigation keys, zoom keys, Page left / right, other automation modes, and "show only record-enabled tracks" on the UF8.
+Meters, the UC1, the remaining UF1 keys (MODE, 5–8, 360°, SCRUB, FLIP, MASTER, transport soft keys), LEDs for the automation mode keys, and "show only record-enabled tracks" on the UF8.
