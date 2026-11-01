@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.9.0-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.9.1-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -340,17 +340,24 @@ for (var am = 0; am < uf1AutoModes.length; ++am) {
 // Meter: the strip's VU level (selected track, or the main output while MASTER is on) as CC 80 (0..127).
 // ---------------------------------------------------------------------------
 
-try {
-	var uf1Meter = surface.makeCustomValueVariable('meter')
-	page.makeValueBinding(uf1Meter, track.mVUMeter).setSubPage(stripSelected)
-	if (mainOut) page.makeValueBinding(uf1Meter, mainOut.mValue.mVUMeter).setSubPage(stripMaster)
-	var lastMeter = -1
-	uf1Meter.mOnProcessValueChange = function (activeDevice, value) {
+function uf1MeterSide(name, cc, selectedValue, mainValue) {
+	var meter = surface.makeCustomValueVariable(name)
+	page.makeValueBinding(meter, selectedValue).setSubPage(stripSelected)
+	if (mainValue) page.makeValueBinding(meter, mainValue).setSubPage(stripMaster)
+	var last = -1
+	meter.mOnProcessValueChange = function (activeDevice, value) {
 		var v = Math.max(0, Math.min(127, Math.round(value * 127)))
-		if (v === lastMeter) return
-		lastMeter = v
-		midiOutput.sendMidi(activeDevice, [0xB0, 80, v])
+		if (v === last) return
+		last = v
+		midiOutput.sendMidi(activeDevice, [0xB0, cc, v])
 	}
+}
+// Left = CC 80, right = CC 81 (a mono channel only reports the left side; the bridge then mirrors it).
+try {
+	var selectedValues = selectedChannel.mValue
+	uf1MeterSide('meterL', 80, selectedValues.getVUChannelMeterByChannelIndex(0), mainOut ? mainOut.mValue.getVUChannelMeterByChannelIndex(0) : null)
+	uf1MeterSide('meterR', 81, selectedValues.getVUChannelMeterByChannelIndex(1), mainOut ? mainOut.mValue.getVUChannelMeterByChannelIndex(1) : null)
 } catch (e) {
-	console.log('[CubaseSixty UF1] meter not available: ' + e)
+	console.log('[CubaseSixty UF1] stereo meter not available (' + e + '), using one meter')
+	try { uf1MeterSide('meter', 80, track.mVUMeter, mainOut ? mainOut.mValue.mVUMeter : null) } catch (e2) { console.log('[CubaseSixty UF1] meter not available: ' + e2) }
 }

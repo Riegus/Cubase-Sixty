@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.5.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.5.2-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -130,20 +130,26 @@ for (var i = 0; i < STRIPS; ++i) {
 	// Top soft key = record-enable for the track (its LED shows the state).
 	page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
 		.setTypeToggle()
-	// Meter: the channel's VU level goes to the bridge as CC 80 + strip (0..127).
+	// Meters: left and right VU level to the bridge as CC 80 + strip (left) and CC 88 + strip (right),
+	// 0..127. A mono channel only reports the left side; the bridge then shows it on both.
 	;(function (index, ch) {
-		try {
-			var meter = surface.makeCustomValueVariable('meter' + index)
-			page.makeValueBinding(meter, ch.mValue.mVUMeter)
+		function meterSide(name, hostValue, cc) {
+			var meter = surface.makeCustomValueVariable(name + index)
+			page.makeValueBinding(meter, hostValue)
 			var last = -1
 			meter.mOnProcessValueChange = function (activeDevice, value) {
 				var v = Math.max(0, Math.min(127, Math.round(value * 127)))
 				if (v === last) return
 				last = v
-				midiOutput.sendMidi(activeDevice, [0xB0, 80 + index, v])
+				midiOutput.sendMidi(activeDevice, [0xB0, cc, v])
 			}
+		}
+		try {
+			meterSide('meterL', ch.mValue.getVUChannelMeterByChannelIndex(0), 80 + index)
+			meterSide('meterR', ch.mValue.getVUChannelMeterByChannelIndex(1), 88 + index)
 		} catch (e) {
-			if (index === 0) console.log('[CubaseSixty] meters not available: ' + e)
+			if (index === 0) console.log('[CubaseSixty] stereo meters not available (' + e + '), using one meter per strip')
+			try { meterSide('meter', ch.mValue.mVUMeter, 80 + index) } catch (e2) { if (index === 0) console.log('[CubaseSixty] meters not available: ' + e2) }
 		}
 	})(i, channel)
 	// V-pot push = open the channel editor for the track.

@@ -180,6 +180,7 @@ void setLed(const uf1m::Led& led, bool on)
 
 // SEL LED: always shows the selected track's colour, dimmed; bright while the channel editor is open
 // (SEL is bound to the editor). Level 0x11 alone did not dim visibly, so the colour itself is scaled down.
+bool g_uf1RightSeen = false;     // a right-side meter value arrived for the current track
 bool g_emptySelection = false;   // the last selected-track name was empty (see onSysex)
 constexpr uint32_t kSelDimPct = 35;   // dim SEL colour, % of full (20 was invisible, 45 too bright)
 uint32_t g_selRgb = 0xFFFFFF;
@@ -289,6 +290,7 @@ void onSysex(const std::vector<unsigned char>& m)
         // marker track, or nothing). Keep showing the last track rather than blanking the display; the
         // colour that follows (all zero) is skipped too.
         g_emptySelection = t.empty();
+        g_uf1RightSeen = false;   // another track: mono until it sends a right side
         if (t.empty()) return;
         if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
         screenText(::uf1::scr::kTrackName, t);
@@ -335,13 +337,16 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (!m.empty() && m[0] == 0xF0) { onSysex(m); return; }
     if (m.size() < 3) return;
     const uint8_t status = m[0] & 0xF0;
-    if (status == 0xB0 && m.size() >= 3 && m[1] == kCcMeter) {
-        // Meter from the script (CC 80, 0..127) -> the level meter on the small display, 0..31 (L = R).
-        static uint8_t shown = 0xFF;
+    if (status == 0xB0 && m.size() >= 3 && (m[1] == kCcMeter || m[1] == kCcMeter + 1)) {
+        // Meter from the script: CC 80 left, CC 81 right (0..127) -> the level meter on the small display,
+        // 0..31. A mono track sends only the left side, which is then shown on both.
+        static uint8_t shownL = 0xFF, shownR = 0xFF, lvL = 0, lvR = 0;
         const uint8_t lv = uint8_t((m[2] * 31 + 63) / 127);
-        if (lv == shown) return;
-        shown = lv;
-        const uint8_t cell[4] = { lv, lv, 0x00, 0x00 };
+        if (m[1] == kCcMeter + 1) { g_uf1RightSeen = true; lvR = lv; }
+        else { lvL = lv; if (!g_uf1RightSeen) lvR = lv; }
+        if (lvL == shownL && lvR == shownR) return;
+        shownL = lvL; shownR = lvR;
+        const uint8_t cell[4] = { lvL, lvR, 0x00, 0x00 };
         g_dev.send(::uf1::buildScreen(0x0009, cell));
         return;
     }

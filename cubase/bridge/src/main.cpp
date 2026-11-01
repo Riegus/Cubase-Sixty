@@ -61,6 +61,7 @@ void setLed(int strip, int cls, bool on);
 std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
 std::array<uint8_t, 16> g_meterLevels{}, g_meterShown{};   // UF8 VU bytes, [s0 in, s0 out, s1 in, ...]
 auto g_meterLastPush = std::chrono::steady_clock::now();
+bool g_rightSeen[8] = {};              // a right-side meter value arrived for the strip's current track
 bool g_stripEmpty[8] = {};             // strip shows no track (empty name): meter and dB stay blank
 std::string g_dbText[8];               // last fader-level text per strip, shown again when a track returns
    // the UF8 and its ports are open
@@ -195,6 +196,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             std::string t(n->text.begin(), n->text.end());
             if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
             g_dev.send(uf8::buildStripTextUpper(uint8_t(n->strip), t));
+            g_rightSeen[n->strip] = false;   // another track: mono until it sends a right side
             if (!t.empty() && g_stripEmpty[n->strip]) {
                 // A track is back on this strip. Cubase only sends the level when it differs from what the
                 // strip showed before it went empty, so show the last level we had.
@@ -251,15 +253,22 @@ void onMidiIn(std::vector<unsigned char>& msg)
         }
         return;
     }
-    if (status == 0xB0 && m.size() >= 3 && m[1] >= kCcMeter && m[1] < kCcMeter + kStrips) {
+    if (status == 0xB0 && m.size() >= 3 && m[1] >= kCcMeter && m[1] < kCcMeter + 2 * kStrips) {
         // Meter from the script: CC 80 + strip, 0..127 -> the UF8's 0..31 VU byte (left and right the same).
         // Cubase sends a new value every few ms during playback; push a frame only when a byte moved by 2 or
         // more, or 50 ms passed, or a meter fell to zero (so a decay never sticks on one LED).
         auto& levels = g_meterLevels; auto& shown = g_meterShown; auto& lastPush = g_meterLastPush;
-        const int s = m[1] - kCcMeter;
+        // CC 80 + strip = left, CC 88 + strip = right. A mono channel sends only the left side, so until a
+        // right value has arrived for the track on this strip, the left one is shown on both.
+        const bool right = m[1] >= kCcMeter + kStrips;
+        const int s = m[1] - kCcMeter - (right ? kStrips : 0);
         if (g_stripEmpty[s]) return;   // late value for a strip that is now empty
         const uint8_t b = uint8_t((m[2] * 31 + 63) / 127);
-        levels[size_t(s * 2)] = levels[size_t(s * 2 + 1)] = b;
+        if (right) { g_rightSeen[s] = true; levels[size_t(s * 2 + 1)] = b; }
+        else {
+            levels[size_t(s * 2)] = b;
+            if (!g_rightSeen[s]) levels[size_t(s * 2 + 1)] = b;
+        }
         const auto now = std::chrono::steady_clock::now();
         int maxDelta = 0;
         for (size_t i = 0; i < levels.size(); ++i) maxDelta = std::max(maxDelta, std::abs(int(levels[i]) - int(shown[i])));
