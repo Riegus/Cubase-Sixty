@@ -38,7 +38,8 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Cycle / Click     | Note 86 / 87                     | both         | UF1 only so far. |
 | Rewind / Forward  | Note 91 / 92                     | both         | UF1 only so far. |
 | Automation Read / Write | Note 56 / 57               | both         | Act on the selected track; Cubase → bridge sets the LED. |
-| Automation modes  | Notes 58 / 59 / 60 / 61          | bridge → Cubase | Off (= Cross-Over), Trim (toggle), Latch, Touch: Cubase's global automation mode. No LED feedback. |
+| Automation modes  | Notes 58 / 59 / 60 / 61          | bridge → Cubase | Off (= Cross-Over), Trim (toggle), Latch, Touch: Cubase's global automation mode. Cubase gives no feedback; the bridge lights the LEDs from the last key pressed. |
+| Meters            | CC 80 + strip−1 (left), CC 88 + strip−1 (right), 0–127 | Cubase → bridge | From the script. A strip with no right value is shown mono. |
 | Foot switch 1 / 2 | Note 62 / 63                     | bridge → Cubase | Play / record. Ignored for 4 s after start-up (phantom press). |
 
 LED state arrives as note on / off, or as polyphonic aftertouch with value 127 for "on"; the bridge accepts both.
@@ -56,7 +57,11 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | SOLO / CUT / SEL | Notes 8 / 16 / 24 | both | Cubase → bridge sets the LED. The SEL LED shows the track colour (from SysEx 02), dim, and bright while the editor is open. |
 | Pan knob | CC 16, relative signed-bit | bridge → Cubase | The knob above the fader (encoder id 0). Pan of the selected track. |
 | V-pots 1–4 | CC 17–20, relative signed-bit | bridge → Cubase | Sends 1–4 of the selected track (level). |
-| V-pot pushes | Notes 33–36 | bridge → Cubase | Send 1–4 on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
+| V-pot pushes | Notes 33–36 | bridge → Cubase | Send on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
+| 5–8 | Note 53 (sends 1–4) / 54 (sends 5–8) | bridge → Cubase | The bridge toggles on each press and lights the 5–8 LED for 5–8. |
+| MASTER | Note 44 (selected track) / 45 (main output) | bridge → Cubase | The bridge toggles on each press and lights the MASTER LED. |
+| SHIFT + keys | Notes 56–61 | bridge → Cubase | SHIFT held in the bridge. ◀ = 56 Read, ▶ = 57 Write (selected track), Cycle = 58 Cross-Over, Click = 59 Trim, 1 = 60 Latch, 2 = 61 Touch. |
+| Meter | CC 80 (left), CC 81 (right), 0–127 | Cubase → bridge | From the script; the level meter on the small display. |
 | Channel encoder | Note 40 (left) / 41 (right) | bridge → Cubase | One note pulse per 4 detents. Select previous / next track. |
 | Jog wheel | Note 42 (left) / 43 (right) | bridge → Cubase | One note pulse per 4 detents. Nudge cursor left / right. |
 | Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |
@@ -81,12 +86,12 @@ The scripts send display data to the bridge as SysEx on the surface's output por
 | UF1 bar, home | `F0 7D 52 36 09 <pos> [<style>] F7` | Cubase → bridge | As 05, for the home view. |
 | UF1 track selected | `F0 7D 52 36 0A F7` | Cubase → bridge | Show the home view now and ignore temporary values for 0.5 s (the new track's sends arrive in a burst). |
 | UF8 bank-right request | `F0 7D 52 36 0B F7` | Cubase → bridge | The bridge answers with a bank-right press (note 47), held until 3 s after Cubase first spoke. Used by the start-up search for the selected track. |
+| UF8 fader level text | `F0 7D 52 36 0C <strip> <text…> F7` | Cubase → bridge | The strip's dB readout (6 characters + `dB`). |
 
 Names and colours are sent whenever the bank changes or the track's name or colour changes. An empty name clears the strip. For the UF1, strip is always 0.
 
 ## Not yet covered
 
-- Meters.
 - UC1 mappings.
-- The remaining UF1 keys (MODE, 5–8, 360°, SCRUB, FLIP, MASTER, transport soft keys).
+- The remaining UF1 keys (MODE, 360°, SCRUB, FLIP).
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.
