@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.5.2-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.5.3-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -138,7 +138,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			page.makeValueBinding(meter, hostValue)
 			var last = -1
 			meter.mOnProcessValueChange = function (activeDevice, value) {
-				var v = Math.max(0, Math.min(127, Math.round(value * 127)))
+				var v = meterToMidi(value)
 				if (v === last) return
 				last = v
 				midiOutput.sendMidi(activeDevice, [0xB0, cc, v])
@@ -436,4 +436,16 @@ for (var a = 0; a < autoModes.length; ++a) {
 	var modeButton = surface.makeButton(28 + a, 15, 1, 1)
 	modeButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, autoModes[a].note)
 	page.makeCommandBinding(modeButton.mSurfaceValue, 'Automation', autoModes[a].command)
+}
+
+// Meter scale: Cubase reports the meter as linear amplitude (0..1), which read far too low when sent
+// straight to the LEDs. Convert to dB and map -55..0 dBFS onto 0..127 (the bridge then uses the UF8's own
+// -55..0 dB scale, as in Rea-Sixty). METER_FLOOR_DB sets the bottom of the scale.
+var METER_FLOOR_DB = -55
+function meterToMidi(value) {
+	if (!(value > 0)) return 0
+	var db = 20 * Math.log(value) / Math.LN10
+	if (db >= 0) return 127
+	if (db <= METER_FLOOR_DB) return 0
+	return Math.round((db - METER_FLOOR_DB) / -METER_FLOOR_DB * 127)
 }

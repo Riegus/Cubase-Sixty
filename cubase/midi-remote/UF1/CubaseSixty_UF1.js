@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.9.1-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.9.2-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -346,7 +346,7 @@ function uf1MeterSide(name, cc, selectedValue, mainValue) {
 	if (mainValue) page.makeValueBinding(meter, mainValue).setSubPage(stripMaster)
 	var last = -1
 	meter.mOnProcessValueChange = function (activeDevice, value) {
-		var v = Math.max(0, Math.min(127, Math.round(value * 127)))
+		var v = meterToMidi(value)
 		if (v === last) return
 		last = v
 		midiOutput.sendMidi(activeDevice, [0xB0, cc, v])
@@ -360,4 +360,16 @@ try {
 } catch (e) {
 	console.log('[CubaseSixty UF1] stereo meter not available (' + e + '), using one meter')
 	try { uf1MeterSide('meter', 80, track.mVUMeter, mainOut ? mainOut.mValue.mVUMeter : null) } catch (e2) { console.log('[CubaseSixty UF1] meter not available: ' + e2) }
+}
+
+// Meter scale: Cubase reports the meter as linear amplitude (0..1), which read far too low when sent
+// straight to the LEDs. Convert to dB and map -55..0 dBFS onto 0..127 (the bridge then uses the UF8's own
+// -55..0 dB scale, as in Rea-Sixty). METER_FLOOR_DB sets the bottom of the scale.
+var METER_FLOOR_DB = -55
+function meterToMidi(value) {
+	if (!(value > 0)) return 0
+	var db = 20 * Math.log(value) / Math.LN10
+	if (db >= 0) return 127
+	if (db <= METER_FLOOR_DB) return 0
+	return Math.round((db - METER_FLOOR_DB) / -METER_FLOOR_DB * 127)
 }
