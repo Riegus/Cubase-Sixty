@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.2.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.3.3-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -145,6 +145,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			sendStripName(activeDevice, index, title)
 			stripTitles[index] = title
 			updateArmable(activeDevice, index)
+			seekOnTitle(activeDevice)
 		}
 		// Known Cubase limit: this only fires when a track is selected or banked in, not the
 		// moment its colour is changed (tested on Cubase 15 with several other colour hooks).
@@ -297,3 +298,64 @@ for (var k = 0; k < REC_CHANNELS; ++k) {
 		}
 	})(k)
 }
+
+// ---------------------------------------------------------------------------
+// Start banked at the selected track: when the script starts, step bank by bank (a hidden control bound
+// to "next bank") until the selected track's name shows on one of the eight strips. Only at start-up;
+// after that the bank stays where you put it.
+// ---------------------------------------------------------------------------
+
+var SEEK_MAX_STEPS = 32
+var seek = { active: true, steps: 0, titlesSinceStep: 0, selectedTitle: '', ownPresses: 0 }
+
+
+function selectedIsVisible() {
+	if (!seek.selectedTitle) return false
+	for (var i = 0; i < STRIPS; ++i) if (stripTitles[i] === seek.selectedTitle) return true
+	return false
+}
+
+function seekCheck(activeDevice) {
+	if (!seek.active || !seek.selectedTitle) return
+	if (selectedIsVisible()) { seek.active = false; console.log('[CubaseSixty] banked to the selected track (' + seek.selectedTitle + ')'); return }
+	// Wait until the current bank has reported all its names before stepping again, or the bank that
+	// holds the selected track could be skipped.
+	// Cubase answers a bank key first by re-sending the SAME eight names, and only then with the new
+	// bank. So a bank counts as arrived only when every strip shows a different name than before the
+	// step (counting re-sent names stepped too early, and the queued steps then overshot).
+	if (seek.steps === 0) {
+		if (seek.titlesSinceStep < STRIPS) return
+	} else {
+		for (var c = 0; c < STRIPS; ++c) if (stripTitles[c] === seek.snapshot[c]) return
+	}
+	if (seek.steps >= SEEK_MAX_STEPS) { seek.active = false; console.log('[CubaseSixty] selected track not found within ' + SEEK_MAX_STEPS + ' banks'); return }
+	seek.steps++
+	seek.titlesSinceStep = 0
+	seek.snapshot = stripTitles.slice()
+	console.log('[CubaseSixty] seeking the selected track (' + seek.selectedTitle + '): next bank, step ' + seek.steps)
+	// Setting a hidden control from the script did not move the bank, so ask the bridge to send a
+	// bank-right key press (SysEx 0B), exactly as if the key had been pressed.
+	seek.ownPresses++
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0B, 0xF7]))
+}
+
+function seekOnTitle(activeDevice) {
+	if (!seek.active) return
+	seek.titlesSinceStep++
+	seekCheck(activeDevice)
+}
+
+page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
+	seek.selectedTitle = title
+	seekCheck(activeDevice)
+}
+
+// Any bank key pressed by hand ends the search for good.
+function stopSeekOnPress(button) {
+	button.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		if (value > 0 && seek.ownPresses > 0) { seek.ownPresses--; return }   // our own step, sent by the bridge
+		if (seek.active && value > 0) { seek.active = false; console.log('[CubaseSixty] bank key pressed: start-up search stopped') }
+	}
+}
+stopSeekOnPress(bankLeft)
+stopSeekOnPress(bankRight)

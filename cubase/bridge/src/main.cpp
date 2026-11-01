@@ -56,6 +56,7 @@ bool g_trace8 = false;
 std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (group, folder, FX): dark and ignored
 std::atomic<bool> g_recOn[8] = {};
 void setLed(int strip, int cls, bool on);
+std::atomic<long long> g_cubaseFirstMs{0};   // when Cubase first sent anything (steady clock, ms)
 std::atomic<bool> g_cubaseSpoke{false};   // set once Cubase has sent us a name or colour
 
 void sendMidi(std::vector<unsigned char> m)
@@ -180,10 +181,22 @@ void onMidiIn(std::vector<unsigned char>& msg)
 
     if (m[0] == 0xF0) {   // SysEx: names and colours
         g_cubaseSpoke = true;
+        if (!g_cubaseFirstMs) g_cubaseFirstMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         if (auto n = parseName(m)) {
             std::string t(n->text.begin(), n->text.end());
             if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
             g_dev.send(uf8::buildStripTextUpper(uint8_t(n->strip), t));
+        } else if (m.size() >= 6 && m[4] == 0x0B) {
+            // The script asks for one bank step to the right (start-up search for the selected track).
+            // Cubase ignores bank keys during its first seconds, so hold the press until 3 s after Cubase
+            // first spoke to us.
+            const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            const long long wait = g_cubaseFirstMs + 3000 - now;
+            std::thread([wait] {
+                if (wait > 0) std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+                note(kNoteBankRight, true);
+                note(kNoteBankRight, false);
+            }).detach();
         } else if (m.size() >= 8 && m[4] == 0x06 && m[5] < kStrips) {
             // Pan position 0..127 -> the readout bar under the strip (a single line, like SSL's pan).
             static std::array<uint16_t, kStrips> pos{};
