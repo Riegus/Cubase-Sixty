@@ -61,6 +61,7 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 bool g_shift = false, g_sends58 = false, g_master = false;   // UF1 key states (touched on the USB thread)
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
+void showStripNumber();
 
 void onUf1Event(const ::uf1::InputEvent& ev)
 {
@@ -137,6 +138,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             note(g_master ? 45 : 44, true);
             note(g_master ? 45 : 44, false);
             setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
+            showStripNumber();
             break;
         }
         // BANK banks the UF8; ARROW selects the previous / next track (a channel-encoder step, notes 40 / 41).
@@ -279,6 +281,16 @@ void revertLoop() {
     }
 }
 
+// Channel-number box: the UF8 strip holding the selected track (blank while MASTER is on, or when the
+// track is not on the UF8's current bank).
+std::atomic<int> g_stripNo{0};
+void showStripNumber()
+{
+    if (!g_open) return;
+    const int n = g_stripNo;
+    screenText(::uf1::scr::kChNumber, (g_master || n == 0) ? std::string() : std::to_string(n));
+}
+
 // Sysex from the Cubase script: 01 name, 02 colour (strip 0), 03 level text.
 void onSysex(const std::vector<unsigned char>& m)
 {
@@ -402,6 +414,20 @@ bool uf1Start()
         g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow,
             std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(banner), 12)));
         g_dev.send(::uf1::buildMotorEnable(false));
+        // Cells inside the colour bar that the UF1's start-up state leaves filled: the text cell (Rea-Sixty
+        // writes 12 spaces for "nothing" - never empty, that drops the layer) and the channel number.
+        screenText(::uf1::scr::kCsType, std::string(12, ' '));
+        screenText(::uf1::scr::kChNumber, "");
+        screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
+        // The meter's neighbours, as Rea-Sixty writes them: peak indicator (0x000a) and the compressor / gate
+        // gain-reduction LEDs (0x0015 / 0x0016), all at rest.
+        {
+            const uint8_t z4[4] = {0, 0, 0, 0};
+            const uint8_t z1 = 0;
+            g_dev.send(::uf1::buildScreen(0x000a, z4));
+            g_dev.send(::uf1::buildScreen(0x0015, std::span<const uint8_t>(&z1, 1)));
+            g_dev.send(::uf1::buildScreen(0x0016, std::span<const uint8_t>(&z1, 1)));
+        }
         screenText(::uf1::scr::kValueLine, "READY");   // start-up check: does the value line show anything at all?
         const uint8_t halfBar[2] = {50, 0x00};
         g_dev.send(::uf1::buildScreen(::uf1::scr::kVPotReadoutBar, halfBar));
@@ -429,6 +455,11 @@ void uf1Stop()
 }
 
 void uf1SetTrace(bool on) { g_trace = on; }
+
+void uf1SetStripNumber(int n)
+{
+    if (g_stripNo.exchange(n) != n) showStripNumber();
+}
 
 bool uf1NeedsReopen() { return g_open && g_dev.needsReopen(); }
 

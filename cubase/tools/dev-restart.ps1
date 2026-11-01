@@ -47,10 +47,12 @@ if ($cubase) {
     $started = Get-Date
     $deadline = $started.AddSeconds(60)
     while ((Get-Date) -lt $deadline -and (Get-CubaseProcesses)) {
+        if (((Get-Date) - $started).TotalSeconds -gt 15 -and -not (Get-CubaseProcesses | Where-Object { $_.MainWindowHandle -ne 0 })) { break }
         # Resend Quit every 8 seconds from the 6th on (the first one can land while Cubase is busy or not focused).
         if (((Get-Date) - $started).TotalSeconds -gt 6 -and (-not $lastQuit -or ((Get-Date) - $lastQuit).TotalSeconds -gt 8)) {
             $lastQuit = Get-Date
-            $p = Get-CubaseProcesses | Select-Object -First 1
+            # Only a process with a window can be activated (Cubase can leave a window-less process behind).
+            $p = Get-CubaseProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
             if ($p) {
                 Add-Type -AssemblyName Microsoft.VisualBasic
                 Add-Type -AssemblyName System.Windows.Forms
@@ -64,6 +66,15 @@ if ($cubase) {
         Start-Sleep -Milliseconds 500
     }
     $left = Get-CubaseProcesses
+    # A Cubase process without any window cannot be showing a "save changes?" dialog: it is left over from
+    # a shutdown that did not finish, so it is safe to end it.
+    $windowless = @($left | Where-Object { $_.MainWindowHandle -eq 0 })
+    if ($left -and $windowless.Count -eq @($left).Count) {
+        Write-Warning ('Cubase is still running without a window (' + (($left | ForEach-Object { $_.ProcessName + ' ' + $_.Id }) -join ', ') + '); ending it.')
+        $left | Stop-Process -Force
+        Start-Sleep -Seconds 2
+        $left = Get-CubaseProcesses
+    }
     if ($left) {
         if ($Force) { Write-Warning 'Cubase did not close; killing it.'; $left | Stop-Process -Force; Start-Sleep -Seconds 2 }
         else { throw 'Cubase is still running (a dialog may be waiting). Close it, or run again with -Force.' }

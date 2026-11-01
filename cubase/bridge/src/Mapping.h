@@ -143,6 +143,7 @@ constexpr uint8_t kCcEncoder = 16;   // 16 + encoder id (0 above-fader, 1..4 V-p
 inline std::optional<uint8_t> buttonToNote(uint8_t id)
 {
     switch (id) {
+        case 0x18: return 62;          // channel soft key above the display: insert bypass
         case 0x1D: return kNoteSolo;
         case 0x1E: return kNoteCut;
         case 0x1F: return kNoteSel;
@@ -171,6 +172,7 @@ struct Led { uint8_t id; uint32_t rgb; };
 inline std::optional<Led> noteToLed(uint8_t note)
 {
     switch (note) {
+        case 62:         return Led{0x00, 0xFF8000};   // channel soft key: inserts bypassed (orange)
         case kNoteSolo:  return Led{0x05, 0xFFFF00};
         case kNoteCut:   return Led{0x06, 0xFF0000};
         case kNoteRwd:   return Led{0x22, 0xFFFFFF};

@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.9.2-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.10.1-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -361,6 +361,16 @@ try {
 	console.log('[CubaseSixty UF1] stereo meter not available (' + e + '), using one meter')
 	try { uf1MeterSide('meter', 80, track.mVUMeter, mainOut ? mainOut.mValue.mVUMeter : null) } catch (e2) { console.log('[CubaseSixty UF1] meter not available: ' + e2) }
 }
+
+// ---------------------------------------------------------------------------
+// The key above the display (note 62): bypass the selected track's inserts. The API has no insert-bypass
+// value, so this is the Mixer command "Bypass: Inserts" (acts on the selected channel). Commands report
+// no state, so the key's LED stays off.
+// ---------------------------------------------------------------------------
+
+var bypassKey = surface.makeButton(6, 1, 1, 1)
+bypassKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 62)
+page.makeCommandBinding(bypassKey.mSurfaceValue, 'Mixer', 'Bypass: Inserts')
 
 // Meter scale: Cubase reports the meter as linear amplitude (0..1), which read far too low when sent
 // straight to the LEDs. Convert to dB and map -55..0 dBFS onto 0..127 (the bridge then uses the UF8's own

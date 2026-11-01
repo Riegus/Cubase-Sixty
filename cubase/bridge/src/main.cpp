@@ -157,6 +157,14 @@ void setLed(int strip, int cls, bool on)
     switch (cls) {
     case 0: case 1: case 2:
         sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on));
+        if (cls == 2 && strip >= 0 && strip < 8) {
+            // SEL: tell the UF1 which UF8 strip holds the selected track (its channel-number box shows it).
+            static bool selOn[8] = {};
+            selOn[strip] = on;
+            int n = 0;
+            for (int i = 0; i < 8; ++i) if (selOn[i]) { n = i + 1; break; }
+            cs::uf1SetStripNumber(n);
+        }
         break;
     case 3:
         if (strip >= 0 && strip < 8) {

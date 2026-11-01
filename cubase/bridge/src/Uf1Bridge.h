@@ -15,4 +15,7 @@ bool uf1NeedsReopen();
 bool uf8BankPress(bool right);
 // Defined in main.cpp: an automation mode key was pressed (note 58-61); updates the UF8's mode LEDs.
 void autoModePressed(uint8_t note);
+// The UF8 strip (1-8) that holds the selected track, 0 = not on the UF8's current bank. Shown in the UF1's
+// channel-number box.
+void uf1SetStripNumber(int n);
 }
