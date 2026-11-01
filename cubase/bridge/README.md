@@ -12,7 +12,7 @@ SSL 360° must not be running: it claims the controllers' USB interfaces exclusi
 | Surface | Working |
 |---------|---------|
 | UF8 | Faders (motor, touch, echo suppression), SEL / SOLO / CUT with LEDs, top soft keys = record-enable (red; dark and ignored on strips that cannot record), V-pots (pan) with the pan value and bar on the display, V-pot push, banking, Page left / right (shift the bank by one channel), starts on the bank with the selected track, automation Read / Write with LEDs, automation mode keys (Off = Cross-Over, Trim, Latch, Touch), zoom pad (left / right = zoom, up / down = vertical zoom, centre = open / close editor), scribble-strip names and colours, fader level in dB on each strip, stereo meters. Foot switches are implemented but untested. |
-| UF1 | Fader (motor, touch), SOLO / CUT / SEL (SEL LED in the track colour), transport keys with LEDs, ARROW = previous / next track, BANK = banks the UF8 (8 tracks without a UF8), NAV cross = zoom (centre = open / close editor), pan knob above the fader, V-pots 1–4 = sends 1–4, or 5–8 after the 5–8 key (turn = level, push = on / off), MASTER puts fader, pan, SOLO and CUT on the main output, SHIFT + the transport soft keys / Cycle / Click = automation (◀ Read, ▶ Write, Cycle Cross-Over, Click Trim, 1 Latch, 2 Touch), channel encoder selects the previous / next track, jog wheel nudges the cursor. Display: track name, level, colour, and a value line with bar (pan; a send for 3 seconds after it is turned), stereo meter. |
+| UF1 | Fader (motor, touch), SOLO / CUT / SEL (SEL LED in the track colour), transport keys with LEDs, ARROW = previous / next track, BANK = banks the UF8 (8 tracks without a UF8), NAV cross = zoom (centre = open / close editor), pan knob above the fader, V-pots 1–4 = sends 1–4, or 5–8 after the 5–8 key (turn = level, push = on / off), MASTER puts fader, pan, SOLO and CUT on the main output, SHIFT + the transport soft keys / Cycle / Click = automation (◀ Read, ▶ Write, Cycle Cross-Over, Click Trim, 1 Latch, 2 Touch), channel encoder selects the previous / next track, jog wheel nudges the cursor. Display: track name, level, colour, and a value line with bar (pan; a send for 3 seconds after it is turned), stereo meter, and the UF8 strip that holds the selected track in the channel-number box. The key above the display is labelled BYPASS but does nothing yet (see Later). |
 | UC1 | Not started. |
 
 ## Building
@@ -63,13 +63,15 @@ Options:
 - **UF1 BANK and ARROW.** BANK presses the UF8's bank key when a UF8 is running; without one it steps the selection 8 tracks (40 ms apart, back-to-back steps were merged by Cubase). ARROW is one channel-encoder step.
 - **UF1 value line.** Pan is the line's normal content. Turning a send V-pot shows that send for 3 seconds after the last change (`kTemporaryMs`); selecting another track shows its pan straight away.
 - **Automation mode LEDs (UF8).** Cubase does not tell scripts which global automation mode is active, so the bridge lights Off / Latch / Touch from the last one pressed (on the UF8, or SHIFT + key on the UF1) and Trim as a toggle. All off at start-up; a mode changed with the mouse is not seen. The Off key's LED stays dark (its LED address is not found yet).
-- **Meters.** Left and right per channel; a mono channel (only a left value) is shown on both sides. The UF8 meter frames are throttled like Rea-Sixty's (a byte moved by 2, or 50 ms passed) so faders and LEDs do not lag during playback. Empty strips are cleared and ignore late values.
+- **Meters.** Cubase reports the meter as linear amplitude (0–1); the scripts convert it to dB and map −55…0 dBFS onto 0–127 (`METER_FLOOR_DB` near the end of each script), the same scale Rea-Sixty uses on the UF8. Left and right per channel; a mono channel (only a left value) is shown on both sides. The UF8 meter frames are throttled like Rea-Sixty's (a byte moved by 2, or 50 ms passed) so faders and LEDs do not lag during playback. Empty strips are cleared and ignore late values.
 - **dB readout (UF8).** Each strip shows its fader level. Cubase does not resend a level that equals what the strip showed before it went empty, so the bridge keeps the last text per strip and shows it again when a track returns.
+- **UF1 colour bar.** At start-up the bridge writes 12 spaces to the text cell inside the colour bar (Rea-Sixty's "nothing"; an empty text drops the layer), clears the channel number, and sets the peak indicator and the compressor / gate gain-reduction cells to rest. The dimmed block at the left of the colour bar is the channel-number box, which the firmware always draws; it shows the UF8 strip (1–8) of the selected track, blank when that track is not on the UF8's current bank or MASTER is on.
+- **UF1 display cell 0x0000.** Never write it: Rea-Sixty found that it belongs to the display's plane setup and writing it tore the layout down. The key above the display has its own LED (id 0x00).
 - **LEDs.** The UF1 buttons are lit by colour (an LED with colour black is off), as in Rea-Sixty. LED brightness is set to full when the UF1 opens.
 
 ## Development
 
-`cubase\tools\dev-restart.ps1` restarts the whole chain in the right order: closes Cubase (resending Quit until it exits), stops the bridge and waits 3 seconds for Windows to release the devices and ports, optionally rebuilds it, installs the scripts, starts the bridge in a window titled *Cubase-Sixty Bridge* that stays open if it exits (so the reason is readable), then opens your test project. If the bridge is not running after 4 seconds, Cubase is not started.
+`cubase\tools\dev-restart.ps1` restarts the whole chain in the right order: closes Cubase (resending Quit until it exits), ends Cubase processes that are left without a window after 15 seconds (an unfinished shutdown; they cannot be showing a dialog), stops the bridge and waits 3 seconds for Windows to release the devices and ports, optionally rebuilds it, installs the scripts, starts the bridge in a window titled *Cubase-Sixty Bridge* that stays open if it exits (so the reason is readable), then opens your test project. If the bridge is not running after 4 seconds, Cubase is not started.
 
 ```
 powershell -ExecutionPolicy Bypass -File cubase\tools\dev-restart.ps1 -Build
@@ -89,7 +91,8 @@ tests/              test_mapping
 ## Later
 
 - **UF1:** MODE, 5–8, 360°, SCRUB, FLIP, MASTER and the transport soft keys; keep the display when the selection lands on something without a mixer channel.
-- **UF8:** the Off key's LED; meter scale tuning.
+- **UF8:** the Off key's LED.
+- **UF1 BYPASS key:** should bypass the selected track's inserts, but the API has no insert-bypass value and Cubase refuses `Mixer` / `Bypass: Inserts` from a script (the bridge sends note 62, Cubase does nothing).
 - **Considered later:** UF1 FLIP (fader on pan); 360°, SCRUB, MODE (need a time display, jog modes and more UF1 views); "show only record-enabled tracks" on the UF8.
 - **UC1 and plug-in focus.** Depends on how much of the insert and strip-effect parameters the MIDI Remote API exposes; prototype early.
 - **SSL plug-in stream and meters.** Rea-Sixty gets the SSL plug-ins' meters by standing in for SSL 360° Core. Tying each plug-in instance to a Cubase track is the open question.

@@ -39,7 +39,7 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Rewind / Forward  | Note 91 / 92                     | both         | UF1 only so far. |
 | Automation Read / Write | Note 56 / 57               | both         | Act on the selected track; Cubase → bridge sets the LED. |
 | Automation modes  | Notes 58 / 59 / 60 / 61          | bridge → Cubase | Off (= Cross-Over), Trim (toggle), Latch, Touch: Cubase's global automation mode. Cubase gives no feedback; the bridge lights the LEDs from the last key pressed. |
-| Meters            | CC 80 + strip−1 (left), CC 88 + strip−1 (right), 0–127 | Cubase → bridge | From the script. A strip with no right value is shown mono. |
+| Meters            | CC 80 + strip−1 (left), CC 88 + strip−1 (right), 0–127 | Cubase → bridge | From the script, already in dB (−55…0 dBFS onto 0–127). A strip with no right value is shown mono. |
 | Foot switch 1 / 2 | Note 62 / 63                     | bridge → Cubase | Play / record. Ignored for 4 s after start-up (phantom press). |
 
 LED state arrives as note on / off, or as polyphonic aftertouch with value 127 for "on"; the bridge accepts both.
@@ -61,7 +61,8 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | 5–8 | Note 53 (sends 1–4) / 54 (sends 5–8) | bridge → Cubase | The bridge toggles on each press and lights the 5–8 LED for 5–8. |
 | MASTER | Note 44 (selected track) / 45 (main output) | bridge → Cubase | The bridge toggles on each press and lights the MASTER LED. |
 | SHIFT + keys | Notes 56–61 | bridge → Cubase | SHIFT held in the bridge. ◀ = 56 Read, ▶ = 57 Write (selected track), Cycle = 58 Cross-Over, Click = 59 Trim, 1 = 60 Latch, 2 = 61 Touch. |
-| Meter | CC 80 (left), CC 81 (right), 0–127 | Cubase → bridge | From the script; the level meter on the small display. |
+| Meter | CC 80 (left), CC 81 (right), 0–127 | Cubase → bridge | From the script (already in dB, −55…0 dBFS); the level meter on the small display. |
+| BYPASS key | Note 62 | bridge → Cubase | The key above the display. Bound to `Mixer` / `Bypass: Inserts`, which Cubase does not run from a script yet. LED id 0x00 (orange) if a feedback note 62 ever arrives. |
 | Channel encoder | Note 40 (left) / 41 (right) | bridge → Cubase | One note pulse per 4 detents. Select previous / next track. |
 | Jog wheel | Note 42 (left) / 43 (right) | bridge → Cubase | One note pulse per 4 detents. Nudge cursor left / right. |
 | Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |

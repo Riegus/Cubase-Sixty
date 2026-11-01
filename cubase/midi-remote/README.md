@@ -48,14 +48,25 @@ Set `DEBUG = true` near the top of the UF8 script to log every fader, solo, mute
 - **Cubase re-sends values.** When one bound value changes, Cubase often reports the others again unchanged, and it re-sends all strip names after a bank key. The scripts only act on values that really changed.
 - **Start-up bank (UF8).** The script asks the bridge to press bank-right until the selected track shows, and counts a bank as arrived only when every strip's name has changed. Pressing a bank key ends the search.
 - **Sub-pages (UF1).** The UF1 page has two sub-page areas: *Strip* (selected track / main output, switched by MASTER) and *Sends* (sends 1–4 / 5–8, switched by 5–8). The bridge activates them with notes 44 / 45 and 53 / 54 and keeps the key state and LEDs itself. The main output is the first channel of a one-channel bank that excludes every other channel type.
-- **Meters.** Each channel's left and right meter is bound with `mValue.getVUChannelMeterByChannelIndex(0 / 1)` to a custom value variable and sent as CC (UF8: 80 + strip left, 88 + strip right; UF1: 80 / 81). If that call is missing, the scripts fall back to `mVUMeter` (one value) and log it.
-- **Command bindings.** `makeCommandBinding` needs the internal category and command name (find them in the `.xml` files under `Cubase 15\Presets\KeyCommands`: a category is the `Name` line just before its group of commands). In use:
+- **Meters.** Cubase gives the meter as linear amplitude, so the scripts convert it to dB (`meterToMidi`, floor `METER_FLOOR_DB = -55`) before sending. Each channel's left and right meter is bound with `mValue.getVUChannelMeterByChannelIndex(0 / 1)` to a custom value variable and sent as CC (UF8: 80 + strip left, 88 + strip right; UF1: 80 / 81). If that call is missing, the scripts fall back to `mVUMeter` (one value) and log it.
+- **Command bindings.** `makeCommandBinding` needs the internal category and command name. They are in the `.xml` files under `Cubase 15\Presets\KeyCommands`; this prints the category of a command:
+  ```powershell
+  Get-ChildItem "C:\Program Files\Steinberg\Cubase 15\Presets\KeyCommands\*.xml" | ForEach-Object {
+    [xml]$x = Get-Content $_.FullName
+    $x.SelectNodes("//item[list[@name='Commands']]") | ForEach-Object {
+      $cat = $_.SelectSingleNode("string[@name='Name']").value
+      $_.SelectNodes("list[@name='Commands']/item/string[@name='Name']") | Where-Object { $_.value -like '*Bypass: Inserts*' } |
+        ForEach-Object { "Category: $cat  ->  $($_.value)" }
+    }
+  } | Sort-Object -Unique
+  ``` In use:
   - `Project` / `Select Track: Prev`, `Select Track: Next` (UF1 channel encoder, ARROW, BANK without a UF8)
   - `Transport` / `Nudge Cursor Left`, `Nudge Cursor Right` (UF1 jog)
   - `Zoom` / `Zoom In`, `Zoom Out`, `Zoom In Vertically`, `Zoom Out Vertically` (UF1 NAV cross, UF8 zoom pad)
   - `Editors` / `Open/Close Editor` (NAV / zoom pad centre; acts on the selected part or event, like a double-click)
+  - `Mixer` / `Bypass: Inserts` (UF1 BYPASS key) — the name is right, but Cubase does not run it from a script; not every command can be bound
   - `Automation` / `Automation Mode - Cross-Over`, `Automation Mode - Trim` (a toggle), `Automation Mode - Auto-Latch`, `Automation Mode - Touch` (UF8 automation keys)
 
 ## Not yet done
 
-The UC1, the remaining UF1 keys (MODE, 360°, SCRUB, FLIP), the UF8 Off key's LED, and "show only record-enabled tracks" on the UF8.
+The UC1, the remaining UF1 keys (MODE, 360°, SCRUB, FLIP), a working UF1 BYPASS key, the UF8 Off key's LED, and "show only record-enabled tracks" on the UF8.
