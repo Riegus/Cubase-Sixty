@@ -119,6 +119,27 @@ void setLed(const uf1m::Led& led, bool on)
     g_dev.send(::uf1::buildLedLevel(led.id, on ? 0x00 : 0x11));
 }
 
+// SEL LED: always shows the selected track's colour, dimmed; bright while the channel editor is open
+// (SEL is bound to the editor). Level 0x11 alone did not dim visibly, so the colour itself is scaled down.
+constexpr uint32_t kSelDimPct = 35;   // dim SEL colour, % of full (20 was invisible, 45 too bright)
+uint32_t g_selRgb = 0xFFFFFF;
+bool g_selOn = false;
+void showSelLed()
+{
+    const uf1m::Led sel{0x07, 0};
+    {
+        std::lock_guard<std::mutex> lk(g_ledMx);
+        if (g_ledEnabled.insert(sel.id).second) g_dev.send(::uf1::buildLed(sel.id, true));
+    }
+    uint32_t rgb = g_selRgb;
+    if (!g_selOn) {
+        const uint32_t r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, bl = rgb & 0xFF;
+        rgb = ((r * kSelDimPct / 100) << 16) | ((g * kSelDimPct / 100) << 8) | (bl * kSelDimPct / 100);
+    }
+    g_dev.send(::uf1::buildColourRgb(sel.id, rgb));
+    g_dev.send(::uf1::buildLedLevel(sel.id, 0x00));
+}
+
 // Screen text zone: 0x00, then the text (the UF1 reads one byte per glyph, so ASCII only here).
 void screenText(uint16_t addr, const std::string& text)
 {
@@ -212,6 +233,9 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t active = 0x01;
         g_dev.send(::uf1::buildScreen(::uf1::scr::kChActive, std::span<const uint8_t>(&active, 1)));
         g_dev.send(::uf1::buildScreen(::uf1::scr::kColourBar, std::span<const uint8_t>(&idx, 1)));
+        g_selRgb = (uint32_t(c->r * 2 + (c->r >> 6)) << 16) | (uint32_t(c->g * 2 + (c->g >> 6)) << 8) | uint32_t(c->b * 2 + (c->b >> 6));
+        if (!g_selRgb) g_selRgb = 0xFFFFFF;   // no colour: white
+        showSelLed();
     } else if (m[4] == 0x04 || m[4] == 0x08) {
         // Value line text. 04 = temporary (a send V-pot), 08 = home (pan).
         std::string t;
@@ -259,6 +283,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         return;
     }
     if ((status == 0x90 || status == 0x80 || status == 0xA0)) {
+        if (m[1] == kNoteSel) { g_selOn = status != 0x80 && m[2] > 0; showSelLed(); return; }
         if (auto led = uf1m::noteToLed(m[1])) setLed(*led, status != 0x80 && m[2] > 0);
     }
 }
