@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.7.2-dev (display, sends with screen feedback, channel encoder, jog)')
+console.log('[CubaseSixty UF1] script loaded, version 0.9.0-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -68,18 +68,50 @@ var page = deviceDriver.mMapping.makePage('Selected track')
 var track = page.mHostAccess.mTrackSelection.mMixerChannel.mValue
 var transport = page.mHostAccess.mTransport.mValue
 
-page.makeValueBinding(fader.mSurfaceValue, track.mVolume).setValueTakeOverModeJump()
-page.makeValueBinding(solo.mSurfaceValue, track.mSolo).setTypeToggle()
-page.makeValueBinding(cut.mSurfaceValue, track.mMute).setTypeToggle()
+// The strip (fader, pan, SOLO, CUT) follows the selected track, or the main output while MASTER is on.
+// Two sub-pages; the bridge activates them with notes 44 (selected track) / 45 (main output).
+var stripArea = page.makeSubPageArea('Strip')
+var stripSelected = stripArea.makeSubPage('Selected track')
+var stripMaster = stripArea.makeSubPage('Main output')
+
+page.makeValueBinding(fader.mSurfaceValue, track.mVolume).setValueTakeOverModeJump().setSubPage(stripSelected)
+page.makeValueBinding(solo.mSurfaceValue, track.mSolo).setTypeToggle().setSubPage(stripSelected)
+page.makeValueBinding(cut.mSurfaceValue, track.mMute).setTypeToggle().setSubPage(stripSelected)
+page.makeValueBinding(vpot.mSurfaceValue, track.mPan).setSubPage(stripSelected)
 page.makeValueBinding(sel.mSurfaceValue, track.mEditorOpen).setTypeToggle()
-page.makeValueBinding(vpot.mSurfaceValue, track.mPan)
+
+// The main output: a one-channel bank with only output channels.
+var mainOut = null
+try {
+	var outZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Main output')
+	var outFilters = ['excludeInputChannels', 'excludeAudioChannels', 'excludeInstrumentChannels', 'excludeSamplerChannels',
+		'excludeMIDIChannels', 'excludeFXChannels', 'excludeGroupChannels', 'excludeVCAChannels']
+	for (var of = 0; of < outFilters.length; ++of) {
+		try { outZone[outFilters[of]]() } catch (e) { console.log('[CubaseSixty UF1] main output bank: ' + outFilters[of] + ' not available') }
+	}
+	mainOut = outZone.makeMixerBankChannel()
+	page.makeValueBinding(fader.mSurfaceValue, mainOut.mValue.mVolume).setValueTakeOverModeJump().setSubPage(stripMaster)
+	page.makeValueBinding(solo.mSurfaceValue, mainOut.mValue.mSolo).setTypeToggle().setSubPage(stripMaster)
+	page.makeValueBinding(cut.mSurfaceValue, mainOut.mValue.mMute).setTypeToggle().setSubPage(stripMaster)
+	page.makeValueBinding(vpot.mSurfaceValue, mainOut.mValue.mPan).setSubPage(stripMaster)
+} catch (e) {
+	console.log('[CubaseSixty UF1] main output could not be bound: ' + e)
+}
+
+function activatorButton(x, note, subPage) {
+	var button = surface.makeButton(x, 7, 1, 1)
+	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
+	page.makeActionBinding(button.mSurfaceValue, subPage.mAction.mActivate)
+}
+activatorButton(0, 44, stripSelected)
+activatorButton(1, 45, stripMaster)
 
 // V-pots 1-4 (CC 17-20, pushes notes 33-36): sends 1-4 of the selected track.
 // Turn = send level, push = send on / off. The knob above the fader (CC 16) is pan, bound above.
 
 // Screen feedback for a send V-pot: the value line shows "S1 -6.0dB", the bar under it the level.
 function attachSendFeedback(surfaceValue, number) {
-	attachFeedback(surfaceValue, 'S' + number + ' ', 0x02, false)
+	attachFeedback(surfaceValue, function () { return 'S' + (number + sendOffset) + ' ' }, 0x02, false)
 }
 
 // Value line + readout bar for one control. Cubase re-sends every bound value whenever one changes, so
@@ -89,7 +121,7 @@ function attachFeedback(surfaceValue, prefix, barStyle, home) {
 	var lastText = null
 	var lastPos = null
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-		var text = prefix + value + (units ? units : (barStyle === 0x02 && /^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
+		var text = (typeof prefix === 'function' ? prefix() : prefix) + value + (units ? units : (barStyle === 0x02 && /^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
 		if (text === lastText) return
 		lastText = text
 		sendValueLine(activeDevice, text, home)
@@ -103,6 +135,16 @@ function attachFeedback(surfaceValue, prefix, barStyle, home) {
 
 attachFeedback(vpot.mSurfaceValue, 'Pan ', 0x01, true)   // pan is the home view; sends show for a few seconds
 
+// 5-8 switches the V-pots between sends 1-4 and 5-8 (the bridge sends notes 53 / 54).
+var sendArea = page.makeSubPageArea('Sends')
+var sends14 = sendArea.makeSubPage('Sends 1-4')
+var sends58 = sendArea.makeSubPage('Sends 5-8')
+var sendOffset = 0
+sends14.mOnActivate = function (activeDevice) { sendOffset = 0 }
+sends58.mOnActivate = function (activeDevice) { sendOffset = 4 }
+activatorButton(2, 53, sends14)
+activatorButton(3, 54, sends58)
+
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendKnob = surface.makeKnob(6 + sendIndex * 2, 2, 2, 2)
@@ -112,13 +154,16 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 		.setTypeRelativeSignedBit()
 	var sendPush = surface.makeButton(6 + sendIndex * 2, 4, 2, 1)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
-	try {
-		var send = selectedChannel.mSends.getByIndex(sendIndex)
-		page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel)
-		attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
-		page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle()
-	} catch (e) {
-		console.log('[CubaseSixty UF1] send ' + (sendIndex + 1) + ' could not be bound: ' + e)
+	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
+	var banks = [{ subPage: sends14, index: sendIndex }, { subPage: sends58, index: sendIndex + 4 }]
+	for (var bk = 0; bk < banks.length; ++bk) {
+		try {
+			var send = selectedChannel.mSends.getByIndex(banks[bk].index)
+			page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
+			page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
+		} catch (e) {
+			console.log('[CubaseSixty UF1] send ' + (banks[bk].index + 1) + ' could not be bound: ' + e)
+		}
 	}
 }
 
@@ -191,17 +236,43 @@ fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units
 	sendLevel(activeDevice, value)
 }
 
-// Name and colour of the selected track.
+// Name and colour: the selected track's, or the main output's while MASTER is on.
+var masterActive = false
+var selectedInfo = { title: '', r: 0, g: 0, b: 0 }
+var masterInfo = { title: 'Main Out', r: 0.5, g: 0.5, b: 0.5 }
+
+function showStrip(activeDevice) {
+	var info = masterActive ? masterInfo : selectedInfo
+	sendName(activeDevice, info.title)
+	sendColor(activeDevice, info.r, info.g, info.b)
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new strip: show its pan
+}
+
 var selected = page.mHostAccess.mTrackSelection.mMixerChannel
 selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
 	dbg('selected color: ' + r + ' ' + g + ' ' + b + ' a=' + a)
-	sendColor(activeDevice, r, g, b)
+	selectedInfo.r = r; selectedInfo.g = g; selectedInfo.b = b
+	if (!masterActive) sendColor(activeDevice, r, g, b)
 }
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
+	selectedInfo.title = title
+	if (masterActive) return
 	sendName(activeDevice, title)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
 }
+if (mainOut) {
+	mainOut.mOnTitleChange = function (activeDevice, activeMapping, title) {
+		if (title) masterInfo.title = title
+		if (masterActive) sendName(activeDevice, masterInfo.title)
+	}
+	mainOut.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
+		if (r || g || b) { masterInfo.r = r; masterInfo.g = g; masterInfo.b = b }
+		if (masterActive) sendColor(activeDevice, masterInfo.r, masterInfo.g, masterInfo.b)
+	}
+}
+stripMaster.mOnActivate = function (activeDevice) { masterActive = true; showStrip(activeDevice) }
+stripSelected.mOnActivate = function (activeDevice) { masterActive = false; showStrip(activeDevice) }
 
 // ---------------------------------------------------------------------------
 // Channel encoder (notes 40 / 41 = left / right) and jog wheel (42 / 43): Cubase commands.
@@ -240,4 +311,46 @@ for (var n = 0; n < navKeys.length; ++n) {
 	var navButton = surface.makeButton(4 + n, 6, 1, 1)
 	navButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, navKeys[n].note)
 	page.makeCommandBinding(navButton.mSurfaceValue, navKeys[n].category, navKeys[n].command)
+}
+
+// ---------------------------------------------------------------------------
+// SHIFT + transport soft keys (the bridge sends notes 56-61): the automation keys printed on them.
+// < READ / > WRITE act on the selected track; CYCLE = Cross-Over, CLICK = Trim, 1 = Latch, 2 = Touch set
+// Cubase's global automation mode (the same commands as the UF8's automation keys).
+// ---------------------------------------------------------------------------
+
+function noteButton(x, note) {
+	var button = surface.makeButton(x, 8, 1, 1)
+	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
+	return button
+}
+page.makeValueBinding(noteButton(0, 56).mSurfaceValue, track.mAutomationRead).setTypeToggle()
+page.makeValueBinding(noteButton(1, 57).mSurfaceValue, track.mAutomationWrite).setTypeToggle()
+var uf1AutoModes = [
+	{ note: 58, command: 'Automation Mode - Cross-Over' },
+	{ note: 59, command: 'Automation Mode - Trim' },
+	{ note: 60, command: 'Automation Mode - Auto-Latch' },
+	{ note: 61, command: 'Automation Mode - Touch' }
+]
+for (var am = 0; am < uf1AutoModes.length; ++am) {
+	page.makeCommandBinding(noteButton(2 + am, uf1AutoModes[am].note).mSurfaceValue, 'Automation', uf1AutoModes[am].command)
+}
+
+// ---------------------------------------------------------------------------
+// Meter: the strip's VU level (selected track, or the main output while MASTER is on) as CC 80 (0..127).
+// ---------------------------------------------------------------------------
+
+try {
+	var uf1Meter = surface.makeCustomValueVariable('meter')
+	page.makeValueBinding(uf1Meter, track.mVUMeter).setSubPage(stripSelected)
+	if (mainOut) page.makeValueBinding(uf1Meter, mainOut.mValue.mVUMeter).setSubPage(stripMaster)
+	var lastMeter = -1
+	uf1Meter.mOnProcessValueChange = function (activeDevice, value) {
+		var v = Math.max(0, Math.min(127, Math.round(value * 127)))
+		if (v === lastMeter) return
+		lastMeter = v
+		midiOutput.sendMidi(activeDevice, [0xB0, 80, v])
+	}
+} catch (e) {
+	console.log('[CubaseSixty UF1] meter not available: ' + e)
 }

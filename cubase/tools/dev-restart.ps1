@@ -74,8 +74,14 @@ if ($cubase) {
 Get-Process -Name 'cubase_sixty_bridge' -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Host 'Stopping the bridge...'
     $_ | Stop-Process -Force
+    try { $_ | Wait-Process -Timeout 10 } catch { }
 }
-Start-Sleep -Seconds 1
+# Close the window left over from the previous run (it stays open after the bridge exits).
+Get-Process -Name 'powershell' -ErrorAction SilentlyContinue |
+    Where-Object { $_.MainWindowTitle -eq 'Cubase-Sixty Bridge' } | Stop-Process -Force -ErrorAction SilentlyContinue
+# Give Windows time to release the USB devices and remove the bridge's virtual MIDI ports; starting the
+# next bridge too soon made it fail to open them (and its window closed before the error could be read).
+Start-Sleep -Seconds 3
 
 # --- 3. Rebuild (optional) -----------------------------------------------------------------------------
 if ($Build) {
@@ -92,12 +98,14 @@ if (-not (Test-Path $bridgeExe)) { throw "Bridge not found: $bridgeExe (build it
 $bridgeArgs = @()
 if ($Trace) { $bridgeArgs += '--trace' }
 Write-Host 'Starting the bridge...'
-if ($bridgeArgs.Count -gt 0) {
-    Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe)
-} else {
-    Start-Process -FilePath $bridgeExe -WorkingDirectory (Split-Path $bridgeExe)
-}
+# Run it inside a PowerShell window that stays open, so an error message is still readable if it exits.
+$argText = ($bridgeArgs | ForEach-Object { " $_" }) -join ''
+Start-Process -FilePath 'powershell' -WorkingDirectory (Split-Path $bridgeExe) `
+    -ArgumentList @('-NoExit', '-NoProfile', '-Command', "`$Host.UI.RawUI.WindowTitle = 'Cubase-Sixty Bridge'; & '$bridgeExe'$argText; Write-Host ''; Write-Host ('Bridge exited (code ' + `$LASTEXITCODE + ').')")
 Start-Sleep -Seconds 4     # let it open the surfaces and create the ports before Cubase looks for them
+if (-not (Get-Process -Name 'cubase_sixty_bridge' -ErrorAction SilentlyContinue)) {
+    throw 'The bridge is not running (see its window for the reason). Cubase not started.'
+}
 
 # --- 6. Start Cubase ------------------------------------------------------------------------------------
 if ($NoStartCubase) { Write-Host 'Done (Cubase not started).'; return }

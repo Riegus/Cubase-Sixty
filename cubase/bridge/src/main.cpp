@@ -10,7 +10,9 @@
 // SSL 360 must NOT be running (it claims the USB device exclusively).
 //
 
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -57,6 +59,11 @@ std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (gr
 std::atomic<bool> g_recOn[8] = {};
 void setLed(int strip, int cls, bool on);
 std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
+std::array<uint8_t, 16> g_meterLevels{}, g_meterShown{};   // UF8 VU bytes, [s0 in, s0 out, s1 in, ...]
+auto g_meterLastPush = std::chrono::steady_clock::now();
+bool g_stripEmpty[8] = {};             // strip shows no track (empty name): meter and dB stay blank
+std::string g_dbText[8];               // last fader-level text per strip, shown again when a track returns
+   // the UF8 and its ports are open
 std::atomic<long long> g_cubaseFirstMs{0};   // when Cubase first sent anything (steady clock, ms)
 std::atomic<bool> g_cubaseSpoke{false};   // set once Cubase has sent us a name or colour
 
@@ -112,6 +119,7 @@ void handleFrame(const uf8frames::Frame& fr)
             if (foot && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(4)) break;
             if (*n >= kNoteTopSoft && *n < kNoteTopSoft + kStrips && g_noRec[*n - kNoteTopSoft]) break;   // cannot arm
             note(*n, pressed);
+            if (pressed && *n >= kNoteAutoOff && *n <= kNoteAutoTouch) cs::autoModePressed(*n);
         }
         break;
     }
@@ -138,7 +146,7 @@ void onUsbInput(const uint8_t* data, size_t len)
 void sendLedFrames(const uf8::LedColourFrames& frames)
 {
     g_dev.send(frames.ff38);
-    g_dev.send(frames.ff39);
+    if (!frames.ff39.empty()) g_dev.send(frames.ff39);
     if (!frames.legacy.empty()) g_dev.send(frames.legacy);
 }
 
@@ -187,6 +195,30 @@ void onMidiIn(std::vector<unsigned char>& msg)
             std::string t(n->text.begin(), n->text.end());
             if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
             g_dev.send(uf8::buildStripTextUpper(uint8_t(n->strip), t));
+            if (!t.empty() && g_stripEmpty[n->strip]) {
+                // A track is back on this strip. Cubase only sends the level when it differs from what the
+                // strip showed before it went empty, so show the last level we had.
+                g_stripEmpty[n->strip] = false;
+                const std::string& v = g_dbText[n->strip];
+                g_dev.send(uf8::buildFaderDbReadout(uint8_t(n->strip), v, v.empty() ? "" : "dB"));
+            }
+            if (t.empty()) {
+                // An empty strip (past the last track): Cubase stops sending its meter and level, so clear
+                // the meter and the dB readout here, and ignore late values until a track returns.
+                g_stripEmpty[n->strip] = true;
+                g_meterLevels[size_t(n->strip * 2)] = g_meterLevels[size_t(n->strip * 2 + 1)] = 0;
+                g_meterShown = g_meterLevels;
+                auto frames = uf8::buildVuMeter(g_meterLevels);
+                g_dev.send(std::move(frames[0]));
+                g_dev.send(std::move(frames[1]));
+                g_dev.send(uf8::buildFaderDbReadout(uint8_t(n->strip), "", ""));
+            }
+        } else if (m.size() >= 7 && m[4] == 0x0C && m[5] < kStrips) {
+            // Fader level text -> the strip's dB readout (6 characters + "dB").
+            std::string v(m.begin() + 6, m.end() - 1);
+            if (v.size() > 6) v.resize(6);
+            g_dbText[m[5]] = v;
+            if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
         } else if (m.size() >= 6 && m[4] == 0x0B) {
             // The script asks for one bank step to the right (start-up search for the selected track).
             // Cubase ignores bank keys during its first seconds, so hold the press until 3 s after Cubase
@@ -219,6 +251,27 @@ void onMidiIn(std::vector<unsigned char>& msg)
         }
         return;
     }
+    if (status == 0xB0 && m.size() >= 3 && m[1] >= kCcMeter && m[1] < kCcMeter + kStrips) {
+        // Meter from the script: CC 80 + strip, 0..127 -> the UF8's 0..31 VU byte (left and right the same).
+        // Cubase sends a new value every few ms during playback; push a frame only when a byte moved by 2 or
+        // more, or 50 ms passed, or a meter fell to zero (so a decay never sticks on one LED).
+        auto& levels = g_meterLevels; auto& shown = g_meterShown; auto& lastPush = g_meterLastPush;
+        const int s = m[1] - kCcMeter;
+        if (g_stripEmpty[s]) return;   // late value for a strip that is now empty
+        const uint8_t b = uint8_t((m[2] * 31 + 63) / 127);
+        levels[size_t(s * 2)] = levels[size_t(s * 2 + 1)] = b;
+        const auto now = std::chrono::steady_clock::now();
+        int maxDelta = 0;
+        for (size_t i = 0; i < levels.size(); ++i) maxDelta = std::max(maxDelta, std::abs(int(levels[i]) - int(shown[i])));
+        if (maxDelta == 0) return;
+        if (maxDelta < 2 && b != 0 && now - lastPush < std::chrono::milliseconds(50)) return;
+        lastPush = now;
+        shown = levels;
+        auto frames = uf8::buildVuMeter(levels);
+        g_dev.send(std::move(frames[0]));
+        g_dev.send(std::move(frames[1]));
+        return;
+    }
     if (status == 0xE0 && m.size() >= 3) {   // fader from Cubase
         const int s = m[0] & 0x0F;
         if (s >= kStrips || g_touched[s]) return;   // hand wins
@@ -246,6 +299,28 @@ void onMidiIn(std::vector<unsigned char>& msg)
 }
 
 } // namespace
+
+// Automation mode LEDs (UF8 Off / Trim / Latch / Touch). Cubase does not tell scripts which global mode is
+// active, so the bridge remembers what was pressed on the surfaces: Off (Cross-Over), Latch and Touch are
+// one mode, Trim switches on and off on top. A mode changed in Cubase itself is not seen. Called from the
+// UF8 key handler and from the UF1 (SHIFT + soft keys).
+void cs::autoModePressed(uint8_t n)
+{
+    static std::mutex mx;
+    static uint8_t mode = 0;      // 0 unknown, else kNoteAutoOff / kNoteAutoLatch / kNoteAutoTouch
+    static bool trim = false;
+    std::lock_guard<std::mutex> lk(mx);
+    if (n == kNoteAutoTrim) trim = !trim;
+    else mode = n;
+    if (!g_uf8Running) return;
+    // Off (Cross-Over) in blue: lit white it stayed dark (the white LED encoding did not take on this key).
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoOff,
+        mode == kNoteAutoOff ? uf8::GlobalLedState::Bright : uf8::GlobalLedState::Dim,
+        uf8::ledColourForTrackRgb(0x3070FF)));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoLatch, mode == kNoteAutoLatch));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoTouch, mode == kNoteAutoTouch));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoTrim, trim));
+}
 
 // The UF1's BANK keys bank the UF8 (as if its own bank key had been pressed).
 bool cs::uf8BankPress(bool right)

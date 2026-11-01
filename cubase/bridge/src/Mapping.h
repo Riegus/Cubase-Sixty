@@ -35,6 +35,7 @@ constexpr uint8_t kNoteSolo = 8, kNoteCut = 16, kNoteSel = 24, kNoteVPush = 32;
 constexpr uint8_t kNoteTouch = 104, kNoteBankLeft = 46, kNoteBankRight = 47;
 constexpr uint8_t kNoteTopSoft = 48;   // 48..55: top soft keys 1..8 (channel editor)
 constexpr uint8_t kNoteNoRec = 64;     // 64..71 (from the script): strip 1..8 cannot be record-armed
+constexpr uint8_t kCcMeter = 80;       // CC 80 + strip (from the script): meter level 0..127
 constexpr uint8_t kNotePageLeft = 44, kNotePageRight = 45;
 constexpr uint8_t kNoteZoomPad = 72;   // 72..76: UF8 zoom pad up, left, centre, right, down
 constexpr uint8_t kNoteAutoOff = 58, kNoteAutoTrim = 59, kNoteAutoLatch = 60, kNoteAutoTouch = 61;

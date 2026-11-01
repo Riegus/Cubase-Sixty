@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.4.4-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.5.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -130,6 +130,22 @@ for (var i = 0; i < STRIPS; ++i) {
 	// Top soft key = record-enable for the track (its LED shows the state).
 	page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
 		.setTypeToggle()
+	// Meter: the channel's VU level goes to the bridge as CC 80 + strip (0..127).
+	;(function (index, ch) {
+		try {
+			var meter = surface.makeCustomValueVariable('meter' + index)
+			page.makeValueBinding(meter, ch.mValue.mVUMeter)
+			var last = -1
+			meter.mOnProcessValueChange = function (activeDevice, value) {
+				var v = Math.max(0, Math.min(127, Math.round(value * 127)))
+				if (v === last) return
+				last = v
+				midiOutput.sendMidi(activeDevice, [0xB0, 80 + index, v])
+			}
+		} catch (e) {
+			if (index === 0) console.log('[CubaseSixty] meters not available: ' + e)
+		}
+	})(i, channel)
 	// V-pot push = open the channel editor for the track.
 	page.makeValueBinding(strip.vpush.mSurfaceValue, channel.mValue.mEditorOpen)
 		.setTypeToggle()
@@ -174,6 +190,14 @@ for (var i = 0; i < STRIPS; ++i) {
 	})(i, strip.vpot)
 
 	;(function (index, fader) {
+		// The fader's level as text ("-4.94") for the dB readout on the strip (SysEx 0C <strip> <text>).
+		var lastDb = null
+		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+			var text = String(value)
+			if (text === lastDb) return
+			lastDb = text
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
+		}
 		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value, diff) {
 			dbg('fader ' + (index + 1) + ' value ' + Number(value).toFixed(4))
 		}

@@ -58,6 +58,10 @@ void sendMidi(std::vector<unsigned char> m)
 }
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
+bool g_shift = false, g_sends58 = false, g_master = false;   // UF1 key states (touched on the USB thread)
+std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
+void setLed(const uf1m::Led& led, bool on);
+
 void onUf1Event(const ::uf1::InputEvent& ev)
 {
     using K = ::uf1::InputKind;
@@ -102,6 +106,39 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
         break;
     case K::Button:
+        // SHIFT is a modifier held in the bridge. SHIFT + the transport soft keys and Cycle / Click = the
+        // automation keys printed on them: < READ (56), > WRITE (57), CYCLE = Cross-Over (58), CLICK = TRIM
+        // (59), 1 = LATCH (60), 2 = TOUCH (61). One pulse per press.
+        if (ev.id == 0x36) { g_shift = ev.pressed; break; }
+        if (g_shift && ev.id >= 0x30 && ev.id <= 0x35) {
+            if (ev.pressed) {
+                static const uint8_t autoNote[6] = {56, 57, 58, 59, 60, 61};
+                note(autoNote[ev.id - 0x30], true);
+                note(autoNote[ev.id - 0x30], false);
+                if (autoNote[ev.id - 0x30] >= 58) autoModePressed(autoNote[ev.id - 0x30]);
+                g_shiftUsed.insert(ev.id);
+            }
+            break;
+        }
+        if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
+        // 5-8: the V-pots switch between sends 1-4 (note 53) and 5-8 (note 54). LED on = 5-8.
+        if (ev.id == 0x22) {
+            if (!ev.pressed) break;
+            g_sends58 = !g_sends58;
+            note(g_sends58 ? 54 : 53, true);
+            note(g_sends58 ? 54 : 53, false);
+            setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
+            break;
+        }
+        // MASTER: the strip controls the main output (note 45) or the selected track again (note 44).
+        if (ev.id == 0x39) {
+            if (!ev.pressed) break;
+            g_master = !g_master;
+            note(g_master ? 45 : 44, true);
+            note(g_master ? 45 : 44, false);
+            setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
+            break;
+        }
         // BANK banks the UF8; ARROW selects the previous / next track (a channel-encoder step, notes 40 / 41).
         if (ev.id == 0x21 || ev.id == 0x23) {
             if (!ev.pressed) break;
@@ -298,6 +335,16 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (!m.empty() && m[0] == 0xF0) { onSysex(m); return; }
     if (m.size() < 3) return;
     const uint8_t status = m[0] & 0xF0;
+    if (status == 0xB0 && m.size() >= 3 && m[1] == kCcMeter) {
+        // Meter from the script (CC 80, 0..127) -> the level meter on the small display, 0..31 (L = R).
+        static uint8_t shown = 0xFF;
+        const uint8_t lv = uint8_t((m[2] * 31 + 63) / 127);
+        if (lv == shown) return;
+        shown = lv;
+        const uint8_t cell[4] = { lv, lv, 0x00, 0x00 };
+        g_dev.send(::uf1::buildScreen(0x0009, cell));
+        return;
+    }
     if (status == 0xE0 && (m[0] & 0x0F) == 0) {   // fader from Cubase
         if (g_touched) return;
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
