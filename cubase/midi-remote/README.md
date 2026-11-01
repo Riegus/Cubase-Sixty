@@ -4,8 +4,8 @@ The Cubase side of Cubase-Sixty: one MIDI Remote script per surface. They speak 
 
 | Folder | Script | Surface | What it does |
 |--------|--------|---------|--------------|
-| `UF8/` | `CubaseSixty_UF8.js` | SSL UF8 | Eight faders with touch (Touch automation works), pan on the V-pots, SEL / SOLO / CUT with LEDs, top soft keys toggle record-enable, V-pot push opens the channel editor, bank left / right, transport, automation Read / Write on the selected track, foot switches (play / record), track names and colours on the scribble strips. |
-| `UF1/` | `CubaseSixty_UF1.js` | SSL UF1 | One strip that controls the **selected track**: fader with touch, SOLO / CUT / SEL, V-pot 1 (pan), transport keys (rwd, ffw, stop, play, record, cycle, click) with LEDs. |
+| `UF8/` | `CubaseSixty_UF8.js` | SSL UF8 | Eight faders with touch (Touch automation works), pan on the V-pots (value and bar on each strip's display), SEL / SOLO / CUT with LEDs, top soft keys toggle record-enable (dark on strips that cannot record), V-pot push opens the channel editor, bank left / right, starts on the bank with the selected track, automation Read / Write on the selected track, foot switches (play / record), track names and colours on the scribble strips. |
+| `UF1/` | `CubaseSixty_UF1.js` | SSL UF1 | One strip that controls the **selected track**: fader with touch, SOLO / CUT / SEL, pan on the knob above the fader, V-pots 1–4 = sends 1–4 (turn = level, push = on / off), channel encoder = previous / next track, jog wheel = nudge cursor, transport keys (rwd, ffw, stop, play, record, cycle, click) with LEDs. The display shows the track name, level, colour, and a value line with pan, or a send for 3 seconds after it is turned. |
 
 Tested with Cubase 15 Pro on Windows. The folder names, the file names and the device names in the scripts must match (`CubaseSixty` / `UF8` / `UF1`), or Cubase will not list the script.
 
@@ -44,6 +44,11 @@ Set `DEBUG = true` near the top of the UF8 script to log every fader, solo, mute
 - **Fader touch** uses the MIDI Remote API 1.1 touch state, guarded so the script still loads on older Cubase versions.
 - **Automation Read / Write** act on the selected track, because the UF8 buttons are global.
 
+- **Which UF8 strips can record.** The MIDI Remote API does not say what kind of channel a strip is, and Cubase even reports record-enable as "on" for a group after a press. So the UF8 script keeps a second, hidden bank with only the channel types that can record (groups, FX, VCA, inputs and outputs excluded, up to 128 channels) and collects their names. A strip whose name is not on that list gets a dark, inactive top soft key. Two tracks with the same name, or more than 128 recordable tracks, can confuse it.
+- **Cubase re-sends values.** When one bound value changes, Cubase often reports the others again unchanged, and it re-sends all strip names after a bank key. The scripts only act on values that really changed.
+- **Start-up bank (UF8).** The script asks the bridge to press bank-right until the selected track shows, and counts a bank as arrived only when every strip's name has changed. Pressing a bank key ends the search.
+- **Command bindings (UF1).** The channel encoder and jog use `makeCommandBinding` with the internal category and name: `Project` / `Select Track: Prev` and `Select Track: Next`, `Transport` / `Nudge Cursor Left` and `Nudge Cursor Right`.
+
 ## Not yet done
 
-Meters, the UC1, the UF1 display, V-pots 2 to 4, encoders and jog, zoom keys, other automation modes, and "show only record-enabled tracks" on the UF8.
+Meters, the UC1, UF1 SEL LED and navigation keys, zoom keys, Page left / right, other automation modes, and "show only record-enabled tracks" on the UF8.

@@ -29,7 +29,8 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | SEL               | Note 24 + strip−1                | both         | Cubase → bridge sets the LED. |
 | SOLO              | Note 8 + strip−1                 | both         | Cubase → bridge sets the LED. |
 | CUT (mute)        | Note 16 + strip−1                | both         | Cubase → bridge sets the LED. |
-| Top soft key      | Note 48 + strip−1                | both         | Toggles record-enable; Cubase → bridge sets the LED. |
+| Top soft key      | Note 48 + strip−1                | both         | Toggles record-enable; Cubase → bridge sets the LED (red). |
+| Cannot record     | Note 64 + strip−1, vel 127 / 0   | Cubase → bridge | From the script: 127 = this strip cannot be armed (key dark, presses ignored), 0 = it can. |
 | Bank left / right | Note 46 / 47                     | bridge → Cubase | |
 | Play / Stop / Rec | Note 94 / 93 / 95                | both         | Cubase → bridge sets the LED. |
 | Cycle / Click     | Note 86 / 87                     | both         | UF1 only so far. |
@@ -50,24 +51,37 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | Fader position | Pitch bend, channel 1 | both | 14-bit. |
 | Fader touch | Note 104 | bridge → Cubase | |
 | SOLO / CUT / SEL | Notes 8 / 16 / 24 | both | Cubase → bridge sets the LED. |
-| Encoders | CC 16 + id, relative signed-bit | bridge → Cubase | id 0 above the fader, 1–4 V-pots, 5 channel, 6 jog. Only V-pot 1 (CC 17) is used so far. |
-| V-pot pushes | Notes 32–37 | bridge → Cubase | |
+| Pan knob | CC 16, relative signed-bit | bridge → Cubase | The knob above the fader (encoder id 0). Pan of the selected track. |
+| V-pots 1–4 | CC 17–20, relative signed-bit | bridge → Cubase | Sends 1–4 of the selected track (level). |
+| V-pot pushes | Notes 33–36 | bridge → Cubase | Send 1–4 on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
+| Channel encoder | Note 40 (left) / 41 (right) | bridge → Cubase | One note pulse per 4 detents. Select previous / next track. |
+| Jog wheel | Note 42 (left) / 43 (right) | bridge → Cubase | One note pulse per 4 detents. Nudge cursor left / right. |
 | Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |
 | Bank | Notes 46 / 47 | bridge → Cubase | |
 
-## Scribble strips and track colours (UF8)
+## SysEx: names, colours and display
 
-Cubase pushes a track's name and colour to the bridge as SysEx on the surface's output port. Both messages use the non-commercial manufacturer ID `7D`, followed by the ASCII tag `52 36` ("R6"). The strip byte is 0–7 (strip 1 = 0), the same index as the strip's MIDI channel.
+The scripts send display data to the bridge as SysEx on the surface's output port. All messages use the non-commercial manufacturer ID `7D`, followed by the ASCII tag `52 36` ("R6"). The strip byte is 0–7 (strip 1 = 0), the same index as the strip's MIDI channel.
 
 | Item         | Message                                         | Direction       | Notes |
 |--------------|-------------------------------------------------|-----------------|-------|
 | Track name   | `F0 7D 52 36 01 <strip> <text…> F7`             | Cubase → bridge | ASCII, up to 32 bytes. Non-ASCII characters are sent as `3F` (`?`); the bridge maps the text to what the UF8 display can show. |
 | Track colour | `F0 7D 52 36 02 <strip> <r> <g> <b> F7`         | Cubase → bridge | 0–127 per channel. The bridge quantises to the UF8 palette. |
+| UF1 level text | `F0 7D 52 36 03 <text…> F7` | Cubase → bridge | The selected track's fader level, e.g. `-4.94`. |
+| UF1 value line, temporary | `F0 7D 52 36 04 <text…> F7` | Cubase → bridge | A send, e.g. `S1 -6.0dB`. Shown for 3 s after the last change, then the home text returns. Max 12 characters. |
+| UF1 bar, temporary | `F0 7D 52 36 05 <pos> [<style>] F7` | Cubase → bridge | Position 0–100. Style 0x01 pointer, 0x02 fill (default). |
+| UF8 pan position | `F0 7D 52 36 06 <strip> <pos> F7` | Cubase → bridge | 0–127 (64 = centre). The readout bar under the strip, drawn as a line. |
+| UF8 pan text | `F0 7D 52 36 07 <strip> <text…> F7` | Cubase → bridge | Cubase's pan text (e.g. `L23`, `C`). The value line shows `Pan` left and the text right. |
+| UF1 value line, home | `F0 7D 52 36 08 <text…> F7` | Cubase → bridge | Pan, e.g. `Pan L23`. The line's normal content. |
+| UF1 bar, home | `F0 7D 52 36 09 <pos> [<style>] F7` | Cubase → bridge | As 05, for the home view. |
+| UF1 track selected | `F0 7D 52 36 0A F7` | Cubase → bridge | Show the home view now and ignore temporary values for 0.5 s (the new track's sends arrive in a burst). |
+| UF8 bank-right request | `F0 7D 52 36 0B F7` | Cubase → bridge | The bridge answers with a bank-right press (note 47), held until 3 s after Cubase first spoke. Used by the start-up search for the selected track. |
 
-Both are sent whenever the bank changes or the track's name or colour changes. An empty name clears the strip.
+Names and colours are sent whenever the bank changes or the track's name or colour changes. An empty name clears the strip. For the UF1, strip is always 0.
 
 ## Not yet covered
 
 - Meters.
-- UC1 mappings, and the UF1 display.
+- UC1 mappings.
+- UF1 SEL LED, bank and navigation keys.
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.
