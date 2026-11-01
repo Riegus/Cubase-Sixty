@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.1.0-dev')
+console.log('[CubaseSixty UF1] script loaded, version 0.2.1-dev (display)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -87,3 +87,60 @@ page.makeValueBinding(rec.mSurfaceValue, transport.mRecord).setTypeToggle()
 page.makeValueBinding(cycle.mSurfaceValue, transport.mCycleActive).setTypeToggle()
 page.makeValueBinding(click.mSurfaceValue, transport.mMetronomeActive).setTypeToggle()
 
+
+// ---------------------------------------------------------------------------
+// Display: the selected track's name, level and colour go to the bridge as SysEx
+// (same header and name / colour messages as the UF8; strip 0). Command 03 = level text.
+// ---------------------------------------------------------------------------
+
+var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
+var DEBUG = false
+
+function dbg(text) {
+	if (DEBUG) console.log('[CubaseSixty UF1] ' + text)
+}
+
+function toAscii7(text) {
+	var out = []
+	var str = String(text || '')
+	for (var n = 0; n < str.length && out.length < 32; ++n) {
+		var code = str.charCodeAt(n)
+		out.push(code >= 0x20 && code < 0x80 ? code : 0x3F)
+	}
+	return out
+}
+
+function to7bit(value) {
+	return Math.max(0, Math.min(127, Math.round(value * 127)))
+}
+
+function sendName(activeDevice, text) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x01, 0], toAscii7(text), [0xF7]))
+}
+function sendColor(activeDevice, r, g, b) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x02, 0, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
+}
+function sendLevel(activeDevice, text) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x03], toAscii7(text), [0xF7]))
+}
+
+// The fader is bound to the selected track's volume, so its surface value reports that
+// track's level as text.
+fader.mSurfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
+	dbg('title: object=[' + objectTitle + '] value=[' + valueTitle + ']')
+}
+fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+	dbg('display value: [' + value + '] units=[' + units + ']')
+	sendLevel(activeDevice, value)
+}
+
+// Name and colour of the selected track.
+var selected = page.mHostAccess.mTrackSelection.mMixerChannel
+selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
+	dbg('selected color: ' + r + ' ' + g + ' ' + b + ' a=' + a)
+	sendColor(activeDevice, r, g, b)
+}
+selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
+	dbg('selected title: [' + title + ']')
+	sendName(activeDevice, title)
+}

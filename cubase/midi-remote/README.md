@@ -11,23 +11,19 @@ Tested with Cubase 15 Pro on Windows. The folder names, the file names and the d
 
 ## Setup
 
-1. **Create four virtual MIDI ports** with loopMIDI, with exactly these names, before you start Cubase (it reads its port list at start-up):
-   - `Cubase-Sixty UF8 to Cubase` and `Cubase-Sixty UF8 from Cubase`
-   - `Cubase-Sixty UF1 to Cubase` and `Cubase-Sixty UF1 from Cubase`
-
-   "to Cubase" is where the bridge writes and Cubase reads; "from Cubase" is the other way round. Two ports per surface are needed: a single loopMIDI port returns everything written to it, so Cubase would hear its own output and the faders would fight themselves. You only need the pair for the surface you own.
-2. **Keep the ports out of All MIDI Inputs.** In *Studio > Studio Setup > MIDI > MIDI Port Setup*, untick **In 'All MIDI Inputs'** for all the ports. Otherwise a selected instrument or MIDI track receives the controller messages as played notes.
+1. **Install loopMIDI** (https://www.tobias-erichsen.de/software/loopmidi.html). The bridge uses its driver to create the MIDI ports itself, so you do not create any ports in loopMIDI. The ports are `Cubase-Sixty UF8 to Cubase`, `Cubase-Sixty UF8 from Cubase`, `Cubase-Sixty UF1 to Cubase` and `Cubase-Sixty UF1 from Cubase` ("to Cubase" is where the bridge writes and Cubase reads, "from Cubase" the other way round). They exist only while the bridge runs. If you made ports with these names in loopMIDI earlier, delete them. (Without the driver library, or with `--loopmidi`, the bridge uses ports you create in loopMIDI with exactly these names instead.)
+2. **Keep the ports out of All MIDI Inputs.** Once the bridge is running, open *Studio > Studio Setup > MIDI > MIDI Port Setup* in Cubase and untick **In 'All MIDI Inputs'** for all the ports. Otherwise a selected instrument or MIDI track receives the controller messages as played notes. Cubase may tick it again for a port it sees as new, so check after the first start.
 3. **Install the scripts.** Run
    ```
    powershell -ExecutionPolicy Bypass -File cubase\midi-remote\tools\install-scripts.ps1
    ```
    It copies each script to `<Documents>\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty\<UF8|UF1>\` (it finds your Documents folder even when it is redirected to OneDrive) and removes the old `SSL` folder from earlier versions. If your Cubase driver-script folder is elsewhere, pass it with `-Destination "<path to ...\Driver Scripts\Local>"`. Run it again after each edit.
 4. **Activate.** Restart Cubase, or press **Reload Scripts** in the MIDI Remote Script Console (turn on *Scripting Tools* from the context menu of the MIDI Remote info line). The script console should show `[CubaseSixty] script loaded`. In the MIDI Remote Manager each surface should show as connected. A stale entry named "SSL" from an earlier version can be removed there.
-5. **Start the bridge after Cubase** (see [`../bridge/README.md`](../bridge/README.md)). If a surface does not respond, restart Cubase first, then the bridge.
+5. **Start the bridge before Cubase** (see [`../bridge/README.md`](../bridge/README.md)). Cubase activates the scripts when it sees the ports. If you restart the bridge, restart Cubase too.
 
 ## Testing without the hardware
 
-`tools/test_bridge.py` plays the UF8 bridge: it sends fader, mute, solo, bank and transport messages to `Cubase-Sixty UF8 to Cubase` and prints everything Cubase sends back on `Cubase-Sixty UF8 from Cubase`, including the name and colour SysEx. It needs Python with `mido` and `python-rtmidi` (`python -m pip install mido python-rtmidi`).
+`tools/test_bridge.py` plays the UF8 bridge (it needs the UF8 ports, so create two ports in loopMIDI with the UF8 names while testing, and do not run the real bridge at the same time): it sends fader, mute, solo, bank and transport messages to `Cubase-Sixty UF8 to Cubase` and prints everything Cubase sends back on `Cubase-Sixty UF8 from Cubase`, including the name and colour SysEx. It needs Python with `mido` and `python-rtmidi` (`python -m pip install mido python-rtmidi`).
 
 ```
 python cubase\midi-remote\tools\test_bridge.py

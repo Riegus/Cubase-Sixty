@@ -34,24 +34,28 @@ cubase\bridge\build\Release\test_mapping.exe
 
 ## Running
 
-1. Set up loopMIDI and install the Cubase scripts as described in [`../midi-remote/README.md`](../midi-remote/README.md).
-2. Start Cubase first, then the bridge:
+1. Install loopMIDI (its driver is what lets the bridge create MIDI ports; you do not create any ports in it yourself) and the Cubase scripts, as described in [`../midi-remote/README.md`](../midi-remote/README.md).
+2. Start the bridge **before** Cubase:
    ```
    cubase\bridge\build\Release\cubase_sixty_bridge.exe
    ```
-3. If a surface does not respond, restart Cubase and then the bridge (Cubase sometimes only picks a script up after a restart).
+3. Start Cubase. It sees the ports, activates the scripts and sends the current state (names, colours, faders, LEDs, display) to the running bridge.
+4. If you restart the bridge, restart Cubase too: it does not pick the ports up again when they disappear and come back (neither **Reload Scripts** nor the refresh button in the MIDI Remote Manager helps).
+5. If a surface still does not respond, restart Cubase with the bridge running. If Windows' MIDI layer misbehaves after many port changes in a row (ports with garbled names, data that does not arrive), restarting the PC clears it.
 
 Options:
 
 | Option | What it does |
 |--------|--------------|
 | `--trace` | Prints UF1 events, the MIDI the UF8 and UF1 send to Cubase (not fader positions), and every UF1 LED change. |
+| `--loopmidi` | Use ports made in loopMIDI (the old way) instead of creating them. The bridge does this by itself if loopMIDI's driver library (`teVirtualMIDI64.dll`) is missing or cannot create a port. |
 | `--lamptest` | Lights each UF1 LED in turn about 6 seconds after start-up. |
 
 ## Behaviour to know about
 
 - **Foot switches.** An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts, which used to start the transport. The foot switches are ignored for the first 4 seconds.
 - **Starting the bridge after Cubase.** Cubase sends track names, colours, faders and LED states only when they change, so a bridge that starts later would see nothing. If nothing has arrived 2.5 seconds after start-up, the bridge presses bank-next and then bank-previous, which makes Cubase send everything again. If Cubase is on its last bank, bank-next does nothing and the UF8 ends up one bank back; bank once more.
+- **MIDI ports.** The bridge creates the four ports (`Cubase-Sixty UF8|UF1 to|from Cubase`) with loopMIDI's driver library while it runs; they disappear when it exits. Delete any ports with these names that you made in loopMIDI earlier. Cubase may tick **In 'All MIDI Inputs'** for a port it sees as new; untick it (see the MIDI Remote README). In the `--loopmidi` fallback, Cubase sends state only when it changes, so a bridge that starts after Cubase sees nothing: for the UF8 the bridge presses bank-next and bank-previous 2.5 seconds after start-up to make Cubase resend (if Cubase is on its last bank the UF8 ends up one bank back), and for the UF1 you press **Reload Scripts**.
 - **LEDs.** The UF1 buttons are lit by colour (an LED with colour black is off), as in Rea-Sixty. LED brightness is set to full when the UF1 opens.
 
 ## Layout

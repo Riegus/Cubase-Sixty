@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "RtMidi.h"
+#include "MidiPorts.h"
 
 #include "Mapping.h"
 #include "UF1Device.h"
@@ -30,8 +31,8 @@ constexpr const char* kPortTo   = "Cubase-Sixty UF1 to Cubase";
 constexpr const char* kPortFrom = "Cubase-Sixty UF1 from Cubase";
 
 ::uf1::UF1Device g_dev;
-RtMidiOut g_out;
-RtMidiIn  g_in;
+MidiOutPort g_out;
+MidiInPort  g_in;
 std::mutex g_outMx;
 std::atomic<bool> g_touched{false};
 std::atomic<bool> g_open{false};
@@ -53,7 +54,7 @@ void sendMidi(std::vector<unsigned char> m)
 {
     traceMidi("out", m);
     std::lock_guard<std::mutex> lk(g_outMx);
-    try { g_out.sendMessage(&m); } catch (const RtMidiError& e) { std::fprintf(stderr, "uf1 midi out: %s\n", e.getMessage().c_str()); }
+    try { g_out.send(m); } catch (const RtMidiError& e) { std::fprintf(stderr, "uf1 midi out: %s\n", e.getMessage().c_str()); }
 }
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
@@ -99,10 +100,46 @@ void setLed(const uf1m::Led& led, bool on)
     g_dev.send(::uf1::buildLedLevel(led.id, on ? 0x00 : 0x11));
 }
 
-void onMidiIn(double, std::vector<unsigned char>* msg, void*)
+// Screen text zone: 0x00, then the text (the UF1 reads one byte per glyph, so ASCII only here).
+void screenText(uint16_t addr, const std::string& text)
 {
-    const auto& m = *msg;
+    std::vector<uint8_t> p;
+    p.push_back(0x00);
+    p.insert(p.end(), text.begin(), text.end());
+    g_dev.send(::uf1::buildScreen(addr, p));
+}
+
+// Sysex from the Cubase script: 01 name, 02 colour (strip 0), 03 level text.
+void onSysex(const std::vector<unsigned char>& m)
+{
+    if (!isOurSysex(m)) return;
+    if (auto n = parseName(m)) {
+        if (n->strip != 0) return;
+        std::string t(n->text.begin(), n->text.end());
+        if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
+        screenText(::uf1::scr::kTrackName, t);
+    } else if (auto c = parseColour(m)) {
+        if (c->strip != 0) return;
+        const uint8_t idx = colourToPalette(c->r, c->g, c->b);
+        const uint8_t active = 0x01;
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kChActive, std::span<const uint8_t>(&active, 1)));
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kColourBar, std::span<const uint8_t>(&idx, 1)));
+    } else if (m[4] == 0x03) {
+        std::string v;
+        for (size_t i = 5; i + 1 < m.size(); ++i) v.push_back(char(m[i]));
+        std::vector<uint8_t> p;
+        p.push_back(0x00);
+        for (size_t k = 0; k < 6; ++k) p.push_back(k < v.size() ? uint8_t(v[k]) : 0x00);
+        p.push_back('d'); p.push_back('B');
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kOutputDb, p));
+    }
+}
+
+void onMidiIn(std::vector<unsigned char>& msg)
+{
+    const auto& m = msg;
     traceMidi("in", m);
+    if (!m.empty() && m[0] == 0xF0) { onSysex(m); return; }
     if (m.size() < 3) return;
     const uint8_t status = m[0] & 0xF0;
     if (status == 0xE0 && (m[0] & 0x0F) == 0) {   // fader from Cubase
@@ -121,13 +158,6 @@ void onMidiIn(double, std::vector<unsigned char>* msg, void*)
     if ((status == 0x90 || status == 0x80 || status == 0xA0)) {
         if (auto led = uf1m::noteToLed(m[1])) setLed(*led, status != 0x80 && m[2] > 0);
     }
-}
-
-int findPort(RtMidi& api, const std::string& needle)
-{
-    for (unsigned i = 0; i < api.getPortCount(); ++i)
-        if (api.getPortName(i).find(needle) != std::string::npos) return int(i);
-    return -1;
 }
 
 } // namespace
@@ -151,20 +181,10 @@ void uf1LampTest()
 
 bool uf1Start()
 {
-    const int po = findPort(g_out, kPortTo);
-    const int pi = findPort(g_in, kPortFrom);
-    if (po < 0 || pi < 0) {
-        std::fprintf(stderr, "UF1: loopMIDI ports \"%s\" / \"%s\" not found; skipping the UF1.\n", kPortTo, kPortFrom);
-        return false;
-    }
     if (!g_dev.open()) {
         std::fprintf(stderr, "UF1: could not open the device (%s); skipping the UF1.\n", g_dev.lastError().c_str());
         return false;
     }
-    g_out.openPort(unsigned(po), kPortTo);
-    g_in.ignoreTypes(false, true, true);
-    g_in.setCallback(&onMidiIn);
-    g_in.openPort(unsigned(pi), kPortFrom);
     g_dev.setInputHandler(onUf1Event);
     g_open = true;
     // Same as Rea-Sixty after open(): a header banner, and the motor limp so the fader moves freely.
@@ -175,6 +195,13 @@ bool uf1Start()
         g_dev.send(::uf1::buildMotorEnable(false));
         g_dev.send(::uf1::buildMasterBrightness(0xff));
         g_dev.send(::uf1::buildLedBrightness(0x20));
+    }
+    // Ports last, so Cubase's first burst of state (sent when it sees the ports appear) finds the screen ready.
+    if (!g_out.open(kPortTo) || !g_in.open(kPortFrom, &onMidiIn)) {
+        std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\"; skipping the UF1.\n", kPortTo, kPortFrom);
+        g_dev.close();
+        g_open = false;
+        return false;
     }
     std::printf("UF1 open (serial %s).\n", g_dev.serial().c_str());
     return true;

@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "RtMidi.h"
+#include "MidiPorts.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -39,8 +40,8 @@ std::atomic<bool> g_run{true};
 void onSignal(int) { g_run = false; }
 
 uf8::UF8Device g_dev;
-RtMidiOut      g_out;
-RtMidiIn       g_in;
+MidiOutPort    g_out;
+MidiInPort     g_in;
 std::mutex     g_outMx;
 uf8frames::Assembler g_asm;
 
@@ -61,7 +62,7 @@ void sendMidi(std::vector<unsigned char> m)
         std::printf("\n");
     }
     std::lock_guard<std::mutex> lk(g_outMx);
-    try { g_out.sendMessage(&m); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
+    try { g_out.send(m); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
 }
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
@@ -161,9 +162,9 @@ void pushPalette()
     g_dev.send(uf8::buildColorCommand(idx));
 }
 
-void onMidiIn(double, std::vector<unsigned char>* msg, void*)
+void onMidiIn(std::vector<unsigned char>& msg)
 {
-    const auto& m = *msg;
+    const auto& m = msg;
     if (m.empty()) return;
     const uint8_t status = m[0] & 0xF0;
 
@@ -198,39 +199,28 @@ void onMidiIn(double, std::vector<unsigned char>* msg, void*)
     }
 }
 
-int findPort(RtMidi& api, const std::string& needle)
-{
-    for (unsigned i = 0; i < api.getPortCount(); ++i)
-        if (api.getPortName(i).find(needle) != std::string::npos) return int(i);
-    return -1;
-}
-
 } // namespace
 
 int main(int argc, char** argv)
 {
     for (int i = 1; i < argc; ++i)
-        if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); g_trace8 = true; }
+        if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); g_trace8 = true; cs::midiPortsTrace(true); }
+        else if (std::string(argv[i]) == "--loopmidi") cs::midiPortsPreferLoopMidi(true);
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
 
     // Each surface is optional: it is skipped (with a message) if its ports or device are missing.
     bool uf8Ok = false;
     {
-        const int po = findPort(g_out, kPortToCubase);
-        const int pi = findPort(g_in, kPortFromCubase);
-        if (po < 0 || pi < 0) {
-            std::fprintf(stderr, "UF8: loopMIDI ports \"%s\" / \"%s\" not found; skipping the UF8.\n",
-                         kPortToCubase, kPortFromCubase);
-        } else if (!g_dev.open()) {
+        if (!g_dev.open()) {
             std::fprintf(stderr, "UF8: could not open the device: %s\n"
                                  "Is SSL 360 (or SSL 360 Core) still running? Quit it first.\n",
                          g_dev.lastError().c_str());
+        } else if (!g_out.open(kPortToCubase) || !g_in.open(kPortFromCubase, &onMidiIn)) {
+            std::fprintf(stderr, "UF8: could not open the MIDI ports \"%s\" / \"%s\"; skipping the UF8.\n",
+                         kPortToCubase, kPortFromCubase);
+            g_dev.close();
         } else {
-            g_out.openPort(unsigned(po), kPortToCubase);
-            g_in.ignoreTypes(false, true, true);   // keep SysEx
-            g_in.setCallback(&onMidiIn);
-            g_in.openPort(unsigned(pi), kPortFromCubase);
             g_dev.setRawInputHandler(onUsbInput);
             std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
             uf8Ok = true;
@@ -242,7 +232,7 @@ int main(int argc, char** argv)
         return 1;
     }
     std::printf("Bridging; Ctrl+C to stop.\n");
-    if (uf8Ok) {
+    if (uf8Ok && !cs::midiPortsAreVirtual()) {
         // Cubase sent the track names and colours when it started, before the bridge was listening, and it only
         // sends changes. If nothing has arrived a couple of seconds after start-up, press bank-next and then
         // bank-previous: Cubase then sends everything again (names, colours, faders, LEDs). This assumes Cubase is
