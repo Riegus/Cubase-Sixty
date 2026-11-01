@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.2.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.2.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -153,6 +153,24 @@ for (var i = 0; i < STRIPS; ++i) {
 			sendStripColor(activeDevice, index, r, g, b)
 		}
 	})(i)
+
+	// Pan on the strip's display: value line ("Pan" + Cubase's text) and the readout bar under it.
+	;(function (index, vpot) {
+		var lastText = null
+		var lastPos = null
+		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+			var text = String(value) + (units ? units : '')
+			if (text === lastText) return
+			lastText = text
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
+		}
+		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			var pos = Math.max(0, Math.min(127, Math.round(value * 127)))
+			if (pos === lastPos) return
+			lastPos = pos
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, pos, 0xF7]))
+		}
+	})(i, strip.vpot)
 
 	;(function (index, fader) {
 		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value, diff) {

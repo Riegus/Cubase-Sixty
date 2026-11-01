@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.5.2-dev (display, sends with screen feedback, channel encoder, jog)')
+console.log('[CubaseSixty UF1] script loaded, version 0.6.1-dev (display, sends with screen feedback, channel encoder, jog)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -79,22 +79,29 @@ page.makeValueBinding(vpot.mSurfaceValue, track.mPan)
 
 // Screen feedback for a send V-pot: the value line shows "S1 -6.0dB", the bar under it the level.
 function attachSendFeedback(surfaceValue, number) {
-	// Cubase re-sends all four sends' values whenever one changes. Only a send whose value really changed
-	// may take over the display, otherwise the line jumps back to the last send in the refresh (S4).
+	attachFeedback(surfaceValue, 'S' + number + ' ', 0x02, false)
+}
+
+// Value line + readout bar for one control. Cubase re-sends every bound value whenever one changes, so
+// only a value that really changed may take over the display (otherwise the line jumps to the last one).
+// barStyle: 0x01 pointer (pan), 0x02 fill from the left (levels).
+function attachFeedback(surfaceValue, prefix, barStyle, home) {
 	var lastText = null
 	var lastPos = null
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-		var text = 'S' + number + ' ' + value + (units ? units : (/^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
+		var text = prefix + value + (units ? units : (barStyle === 0x02 && /^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
 		if (text === lastText) return
 		lastText = text
-		sendValueLine(activeDevice, text)
+		sendValueLine(activeDevice, text, home)
 	}
 	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 		if (value === lastPos) return
 		lastPos = value
-		sendBar(activeDevice, value)
+		sendBar(activeDevice, value, barStyle, home)
 	}
 }
+
+attachFeedback(vpot.mSurfaceValue, 'Pan ', 0x01, true)   // pan is the home view; sends show for a few seconds
 
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
@@ -165,12 +172,13 @@ function sendLevel(activeDevice, text) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x03], toAscii7(text), [0xF7]))
 }
 
-function sendValueLine(activeDevice, text) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x04], toAscii7(text), [0xF7]))
+// home = true: pan (the line's normal content, 08/09); false: a send, shown for a few seconds (04/05).
+function sendValueLine(activeDevice, text, home) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([home ? 0x08 : 0x04], toAscii7(text), [0xF7]))
 }
-function sendBar(activeDevice, position01) {
+function sendBar(activeDevice, position01, style, home) {
 	var pos = Math.max(0, Math.min(100, Math.round(position01 * 100)))
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x05, pos, 0xF7]))
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([home ? 0x09 : 0x05, pos, style || 0x02, 0xF7]))
 }
 
 // The fader is bound to the selected track's volume, so its surface value reports that
@@ -192,6 +200,7 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	sendName(activeDevice, title)
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
 }
 
 // ---------------------------------------------------------------------------

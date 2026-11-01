@@ -128,6 +128,75 @@ void screenText(uint16_t addr, const std::string& text)
     g_dev.send(::uf1::buildScreen(addr, p));
 }
 
+// ---------------------------------------------------------------------------
+// Value line + readout bar: a home view (pan) and temporary views (sends). A temporary view shows for
+// kTemporaryMs after the last change, then the home view comes back. Called from the MIDI thread and the
+// revert thread, hence the mutex.
+// ---------------------------------------------------------------------------
+constexpr long long kTemporaryMs = 3000;
+constexpr long long kSelectionQuietMs = 500;
+std::mutex g_lineMx;
+std::string g_homeText;
+uint8_t g_homePos = 50, g_homeStyle = 0x01;
+bool g_homeHasBar = false;
+long long g_tempUntil = 0;        // 0 = showing the home view
+long long g_quietUntil = 0;       // ignore temporary updates until then (after a selection change)
+uint8_t g_barStyleShown = 0x00;
+
+long long nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+void showBarLocked(uint8_t pos, uint8_t style) {
+    if (style != g_barStyleShown) {
+        g_barStyleShown = style;
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&style, 1)));
+    }
+    const uint8_t pb[2] = { pos, 0x00 };
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kVPotReadoutBar, pb));
+}
+void showHomeLocked() {
+    screenText(::uf1::scr::kValueLine, g_homeText);
+    if (g_homeHasBar) showBarLocked(g_homePos, g_homeStyle);
+}
+void valueHome(const std::string& t) {
+    std::lock_guard<std::mutex> lk(g_lineMx);
+    g_homeText = t;
+    if (!g_tempUntil) screenText(::uf1::scr::kValueLine, t);
+}
+void barHome(uint8_t pos, uint8_t style) {
+    std::lock_guard<std::mutex> lk(g_lineMx);
+    g_homePos = pos; g_homeStyle = style; g_homeHasBar = true;
+    if (!g_tempUntil) showBarLocked(pos, style);
+}
+void valueTemporary(const std::string& t) {
+    std::lock_guard<std::mutex> lk(g_lineMx);
+    const long long now = nowMs();
+    if (now < g_quietUntil) return;
+    g_tempUntil = now + kTemporaryMs;
+    screenText(::uf1::scr::kValueLine, t);
+}
+void barTemporary(uint8_t pos, uint8_t style) {
+    std::lock_guard<std::mutex> lk(g_lineMx);
+    const long long now = nowMs();
+    if (now < g_quietUntil) return;
+    g_tempUntil = now + kTemporaryMs;
+    showBarLocked(pos, style);
+}
+void selectionChanged() {
+    std::lock_guard<std::mutex> lk(g_lineMx);
+    g_quietUntil = nowMs() + kSelectionQuietMs;
+    g_tempUntil = 0;
+    showHomeLocked();
+}
+// Runs while the UF1 is open: brings the home view back when a temporary view has timed out.
+void revertLoop() {
+    while (g_open) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::lock_guard<std::mutex> lk(g_lineMx);
+        if (g_tempUntil && nowMs() >= g_tempUntil && g_open) { g_tempUntil = 0; showHomeLocked(); }
+    }
+}
+
 // Sysex from the Cubase script: 01 name, 02 colour (strip 0), 03 level text.
 void onSysex(const std::vector<unsigned char>& m)
 {
@@ -143,17 +212,21 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t active = 0x01;
         g_dev.send(::uf1::buildScreen(::uf1::scr::kChActive, std::span<const uint8_t>(&active, 1)));
         g_dev.send(::uf1::buildScreen(::uf1::scr::kColourBar, std::span<const uint8_t>(&idx, 1)));
-    } else if (m[4] == 0x04) {
-        // Value line (send name + level of the V-pot just touched), 12 characters at most.
+    } else if (m[4] == 0x04 || m[4] == 0x08) {
+        // Value line text. 04 = temporary (a send V-pot), 08 = home (pan).
         std::string t;
         for (size_t i = 5; i + 1 < m.size(); ++i) t.push_back(char(m[i]));
         if (t.size() > 12) t.resize(12);
-        std::printf("UF1 value line: \"%s\"\n", t.c_str());
-        screenText(::uf1::scr::kValueLine, t);
-    } else if (m[4] == 0x05 && m.size() >= 7) {
-        // Readout bar under the value line: position 0..100.
-        const uint8_t pb[2] = { uint8_t(m[5] > 100 ? 100 : m[5]), 0x00 };
-        g_dev.send(::uf1::buildScreen(::uf1::scr::kVPotReadoutBar, pb));
+        if (g_trace) std::printf("UF1 value line (%s): \"%s\"\n", m[4] == 0x08 ? "home" : "temporary", t.c_str());
+        if (m[4] == 0x08) valueHome(t); else valueTemporary(t);
+    } else if ((m[4] == 0x05 || m[4] == 0x09) && m.size() >= 7) {
+        // Readout bar: position 0..100, optional style byte (0x01 pointer, 0x02 fill). 05 temporary, 09 home.
+        const uint8_t pos = uint8_t(m[5] > 100 ? 100 : m[5]);
+        const uint8_t style = (m.size() >= 8 && (m[6] == 0x01 || m[6] == 0x02 || m[6] == 0x08)) ? m[6] : 0x02;
+        if (m[4] == 0x09) barHome(pos, style); else barTemporary(pos, style);
+    } else if (m[4] == 0x0A) {
+        // A new track was selected: show its home view and ignore the burst of send values that follows.
+        selectionChanged();
     } else if (m[4] == 0x03) {
         std::string v;
         for (size_t i = 5; i + 1 < m.size(); ++i) v.push_back(char(m[i]));
@@ -228,6 +301,7 @@ bool uf1Start()
         g_dev.send(::uf1::buildScreen(::uf1::scr::kVPotReadoutBar, halfBar));
         const uint8_t fillStyle = 0x02;   // bar style: fill from the left (the init leaves it off)
         g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&fillStyle, 1)));
+        g_barStyleShown = fillStyle;
         g_dev.send(::uf1::buildMasterBrightness(0xff));
         g_dev.send(::uf1::buildLedBrightness(0x20));
     }
@@ -239,6 +313,7 @@ bool uf1Start()
         return false;
     }
     std::printf("UF1 open (serial %s).\n", g_dev.serial().c_str());
+    std::thread(revertLoop).detach();
     return true;
 }
 

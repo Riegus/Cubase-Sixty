@@ -10,6 +10,7 @@
 // SSL 360 must NOT be running (it claims the USB device exclusively).
 //
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -183,6 +184,21 @@ void onMidiIn(std::vector<unsigned char>& msg)
             std::string t(n->text.begin(), n->text.end());
             if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
             g_dev.send(uf8::buildStripTextUpper(uint8_t(n->strip), t));
+        } else if (m.size() >= 8 && m[4] == 0x06 && m[5] < kStrips) {
+            // Pan position 0..127 -> the readout bar under the strip (a single line, like SSL's pan).
+            static std::array<uint16_t, kStrips> pos{};
+            static bool modeSent = false;
+            pos[m[5]] = uf8::vpotPosPan(m[6] / 127.0 * 2.0 - 1.0);
+            g_dev.send(uf8::buildVPotReadoutBar(pos));
+            if (!modeSent) { modeSent = true; g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); }
+        } else if (m.size() >= 7 && m[4] == 0x07 && m[5] < kStrips) {
+            // Pan text -> value line: "Pan" left, Cubase's value right, 19 characters.
+            std::string v(m.begin() + 6, m.end() - 1);
+            if (v.size() > 15) v.resize(15);
+            std::string line = "Pan";
+            line.append(19 - line.size() - v.size(), ' ');
+            line += v;
+            g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
         } else if (auto c = parseColour(m)) {
             { std::lock_guard<std::mutex> lk(g_paletteMx); g_palette[c->strip] = colourToPalette(c->r, c->g, c->b); }
             pushPalette();
