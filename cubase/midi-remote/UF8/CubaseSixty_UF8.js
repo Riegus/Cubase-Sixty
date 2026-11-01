@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.1.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.2.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -143,6 +143,8 @@ for (var i = 0; i < STRIPS; ++i) {
 		channel.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			dbg('title strip ' + (index + 1) + ': [' + title + ']')
 			sendStripName(activeDevice, index, title)
+			stripTitles[index] = title
+			updateArmable(activeDevice, index)
 		}
 		// Known Cubase limit: this only fires when a track is selected or banked in, not the
 		// moment its colour is changed (tested on Cubase 15 with several other colour hooks).
@@ -230,3 +232,50 @@ function sendStripColor(activeDevice, index, r, g, b) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_COLOR, index, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
 }
 
+// ---------------------------------------------------------------------------
+// Which strips can be record-armed? Cubase does not say, so a second, hidden bank holds only the channel
+// types that can record (audio, instrument, sampler, MIDI) and collects their names. A UF8 strip whose
+// name is not among them (group, FX, VCA, bus, empty) gets a dark top soft key: note 64 + strip, velocity
+// 127 = cannot arm, 0 = can arm. The bridge darkens the key and ignores presses.
+// ---------------------------------------------------------------------------
+
+var REC_CHANNELS = 128
+var stripTitles = []
+var recTitles = []
+var armableSent = []
+
+var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Recordable')
+var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels']
+for (var f = 0; f < recFilters.length; ++f) {
+	try { recZone[recFilters[f]]() } catch (e) { console.log('[CubaseSixty] recordable bank: ' + recFilters[f] + ' not available: ' + e) }
+}
+
+function isRecordable(title) {
+	if (!title) return false
+	for (var k = 0; k < REC_CHANNELS; ++k) if (recTitles[k] === title) return true
+	return false
+}
+
+function updateArmable(activeDevice, index) {
+	var armable = isRecordable(stripTitles[index])
+	if (armableSent[index] === armable) return
+	armableSent[index] = armable
+	midiOutput.sendMidi(activeDevice, [0x90, 64 + index, armable ? 0 : 127])
+}
+
+var recTitleCount = 0
+for (var k = 0; k < REC_CHANNELS; ++k) {
+	var recChannel = recZone.makeMixerBankChannel()
+	var recProbe = surface.makeCustomValueVariable('recProbe' + k)
+	page.makeValueBinding(recProbe, recChannel.mValue.mRecordEnable)
+	;(function (slot) {
+		recChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
+			if (recTitles[slot] === undefined && title) {
+				recTitleCount++
+				if (recTitleCount === 1 || recTitleCount % 16 === 0) console.log('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
+			}
+			recTitles[slot] = title
+			for (var i = 0; i < STRIPS; ++i) updateArmable(activeDevice, i)
+		}
+	})(k)
+}

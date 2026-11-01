@@ -52,6 +52,9 @@ uint8_t           g_palette[kStrips] = {};
 std::mutex        g_paletteMx;
 
 bool g_trace8 = false;
+std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (group, folder, FX): dark and ignored
+std::atomic<bool> g_recOn[8] = {};
+void setLed(int strip, int cls, bool on);
 std::atomic<bool> g_cubaseSpoke{false};   // set once Cubase has sent us a name or colour
 
 void sendMidi(std::vector<unsigned char> m)
@@ -104,6 +107,7 @@ void handleFrame(const uf8frames::Frame& fr)
             static const auto t0 = std::chrono::steady_clock::now();
             const bool foot = (*n == 62 || *n == 63);
             if (foot && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(4)) break;
+            if (*n >= kNoteTopSoft && *n < kNoteTopSoft + kStrips && g_noRec[*n - kNoteTopSoft]) break;   // cannot arm
             note(*n, pressed);
         }
         break;
@@ -143,8 +147,13 @@ void setLed(int strip, int cls, bool on)
         sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on));
         break;
     case 3:
+        if (strip >= 0 && strip < 8) {
+            g_recOn[strip] = on;
+            if (g_trace8) std::printf("UF8 rec strip %d: Cubase says %s\n", strip + 1, on ? "ON" : "OFF");
+        }
         sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(strip),
-            on ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
+            (strip >= 0 && strip < 8 && g_noRec[strip]) ? uf8::TopSoftKeyState::Off
+                : on ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourRed()));   // record-enable = red
         break;
     case 4: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoRead, on)); break;
     case 5: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoWrite, on)); break;
@@ -192,6 +201,13 @@ void onMidiIn(std::vector<unsigned char>& msg)
     // LED feedback: note on / note off, plus polyphonic aftertouch (Cubase sends
     // value 127 for "on" this way, see cubase/docs/bridge-midi-protocol.md).
     if ((status == 0x90 || status == 0x80 || status == 0xA0) && m.size() >= 3) {
+        if (m[1] >= kNoteNoRec && m[1] < kNoteNoRec + kStrips && status != 0xA0) {   // script: strip cannot be armed
+            const int s = m[1] - kNoteNoRec;
+            g_noRec[s] = status == 0x90 && m[2] > 0;
+            if (g_trace8) std::printf("UF8 rec strip %d: %s\n", s + 1, g_noRec[s] ? "cannot be armed" : "can be armed");
+            setLed(s, 3, g_recOn[s]);
+            return;
+        }
         if (auto t = noteToLed(m[1])) {
             const bool on = status != 0x80 && m[2] > 0;
             setLed(t->strip, t->cls, on);

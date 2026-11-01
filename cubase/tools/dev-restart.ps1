@@ -6,7 +6,8 @@
 #        -> start the bridge -> start Cubase with the project.
 #
 # Options:
-#   -Project <file.cpr>   The project to open. Default: the environment variable CUBASE_SIXTY_PROJECT.
+#   -Project <file.cpr>   The project to open. Default: the environment variable CUBASE_SIXTY_PROJECT,
+#                         else the first line of cubase\tools\project.txt.
 #   -CubaseExe <path>     Cubase's executable. Default: the newest Cubase*.exe under Program Files\Steinberg.
 #   -Build                Rebuild the bridge first (cmake --build, Release).
 #   -Trace                Start the bridge with --trace.
@@ -23,6 +24,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Project fallback: a one-line text file next to this script (cubase\tools\project.txt, not committed) holding the .cpr path.
+if (-not $Project) {
+    $projectFile = Join-Path $PSScriptRoot 'project.txt'
+    if (Test-Path $projectFile) { $Project = (Get-Content $projectFile -TotalCount 1).Trim().Trim('"') }
+}
 $repo   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)          # ...\Cubase-Sixty
 $bridgeDir = Join-Path $repo 'cubase\bridge'
 $bridgeExe = Join-Path $bridgeDir 'build\Release\cubase_sixty_bridge.exe'
@@ -36,12 +43,13 @@ if ($cubase) {
     Write-Host 'Closing Cubase... (answer any "save changes?" dialog in Cubase)'
     $cubase | ForEach-Object { [void]$_.CloseMainWindow() }
     # Closing the last project leaves Cubase on the Hub instead of quitting: give it a few seconds, then send Quit (Ctrl+Q).
-    $quitSent = $false
+    $lastQuit = $null
     $started = Get-Date
     $deadline = $started.AddSeconds(60)
     while ((Get-Date) -lt $deadline -and (Get-CubaseProcesses)) {
-        if (-not $quitSent -and ((Get-Date) - $started).TotalSeconds -gt 6) {
-            $quitSent = $true
+        # Resend Quit every 8 seconds from the 6th on (the first one can land while Cubase is busy or not focused).
+        if (((Get-Date) - $started).TotalSeconds -gt 6 -and (-not $lastQuit -or ((Get-Date) - $lastQuit).TotalSeconds -gt 8)) {
+            $lastQuit = Get-Date
             $p = Get-CubaseProcesses | Select-Object -First 1
             if ($p) {
                 Add-Type -AssemblyName Microsoft.VisualBasic
@@ -105,9 +113,10 @@ Write-Host "Starting Cubase: $CubaseExe"
 if ($Project) {
     if (-not (Test-Path $Project)) { throw "Project not found: $Project" }
     # Open the file like a double-click does; that loads the project directly. (Passing the path to Cubase's exe showed the Hub.)
+    Write-Host "Opening project: $Project"
     Start-Process -FilePath $Project
 } else {
-    Write-Warning 'No -Project given (and CUBASE_SIXTY_PROJECT is not set): starting Cubase without a project.'
+    Write-Warning 'No project found (no -Project, no CUBASE_SIXTY_PROJECT, no cubase\tools\project.txt): starting Cubase without a project, so it shows the Hub.'
     Start-Process -FilePath $CubaseExe
 }
 Write-Host 'Done.'

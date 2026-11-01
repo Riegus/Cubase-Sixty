@@ -80,7 +80,26 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         break;
     }
     case K::EncoderRotate:
-        if (ev.delta != 0 && ev.id <= 6) sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
+        if (ev.delta == 0 || ev.id > 6) break;
+        // The channel encoder (5) and the jog wheel (6) are sent as note pulses: one per detent, 40/41 = channel
+        // encoder left/right, 42/43 = jog left/right. The script binds them to Cubase commands.
+        if (ev.id == 5 || ev.id == 6) {
+            // Slow the encoders down: one pulse per kDetentsPerPulse detents (the remainder is kept between events).
+            static int acc[2] = {0, 0};
+            const int kDetentsPerPulse[2] = {4, 4};          // channel encoder, jog wheel: raise to slow down
+            const int k = ev.id - 5;
+            if ((acc[k] > 0) != (ev.delta > 0)) acc[k] = 0;  // direction change restarts the count
+            acc[k] += ev.delta;
+            const uint8_t base = ev.id == 5 ? 40 : 42;
+            while (acc[k] >= kDetentsPerPulse[k] || acc[k] <= -kDetentsPerPulse[k]) {
+                const bool right = acc[k] > 0;
+                acc[k] += right ? -kDetentsPerPulse[k] : kDetentsPerPulse[k];
+                note(uint8_t(base + (right ? 1 : 0)), true);
+                note(uint8_t(base + (right ? 1 : 0)), false);
+            }
+            break;
+        }
+        sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
         break;
     case K::Button:
         if (auto n = uf1m::buttonToNote(ev.id)) note(*n, ev.pressed);
@@ -124,6 +143,17 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t active = 0x01;
         g_dev.send(::uf1::buildScreen(::uf1::scr::kChActive, std::span<const uint8_t>(&active, 1)));
         g_dev.send(::uf1::buildScreen(::uf1::scr::kColourBar, std::span<const uint8_t>(&idx, 1)));
+    } else if (m[4] == 0x04) {
+        // Value line (send name + level of the V-pot just touched), 12 characters at most.
+        std::string t;
+        for (size_t i = 5; i + 1 < m.size(); ++i) t.push_back(char(m[i]));
+        if (t.size() > 12) t.resize(12);
+        std::printf("UF1 value line: \"%s\"\n", t.c_str());
+        screenText(::uf1::scr::kValueLine, t);
+    } else if (m[4] == 0x05 && m.size() >= 7) {
+        // Readout bar under the value line: position 0..100.
+        const uint8_t pb[2] = { uint8_t(m[5] > 100 ? 100 : m[5]), 0x00 };
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kVPotReadoutBar, pb));
     } else if (m[4] == 0x03) {
         std::string v;
         for (size_t i = 5; i + 1 < m.size(); ++i) v.push_back(char(m[i]));
@@ -193,6 +223,11 @@ bool uf1Start()
         g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow,
             std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(banner), 12)));
         g_dev.send(::uf1::buildMotorEnable(false));
+        screenText(::uf1::scr::kValueLine, "READY");   // start-up check: does the value line show anything at all?
+        const uint8_t halfBar[2] = {50, 0x00};
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kVPotReadoutBar, halfBar));
+        const uint8_t fillStyle = 0x02;   // bar style: fill from the left (the init leaves it off)
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&fillStyle, 1)));
         g_dev.send(::uf1::buildMasterBrightness(0xff));
         g_dev.send(::uf1::buildLedBrightness(0x20));
     }

@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.2.1-dev (display)')
+console.log('[CubaseSixty UF1] script loaded, version 0.5.2-dev (display, sends with screen feedback, channel encoder, jog)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -74,6 +74,47 @@ page.makeValueBinding(cut.mSurfaceValue, track.mMute).setTypeToggle()
 page.makeValueBinding(sel.mSurfaceValue, track.mEditorOpen).setTypeToggle()
 page.makeValueBinding(vpot.mSurfaceValue, track.mPan)
 
+// V-pots 1-4 (CC 17-20, pushes notes 33-36): sends 1-4 of the selected track.
+// Turn = send level, push = send on / off. The knob above the fader (CC 16) is pan, bound above.
+
+// Screen feedback for a send V-pot: the value line shows "S1 -6.0dB", the bar under it the level.
+function attachSendFeedback(surfaceValue, number) {
+	// Cubase re-sends all four sends' values whenever one changes. Only a send whose value really changed
+	// may take over the display, otherwise the line jumps back to the last send in the refresh (S4).
+	var lastText = null
+	var lastPos = null
+	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		var text = 'S' + number + ' ' + value + (units ? units : (/^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
+		if (text === lastText) return
+		lastText = text
+		sendValueLine(activeDevice, text)
+	}
+	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		if (value === lastPos) return
+		lastPos = value
+		sendBar(activeDevice, value)
+	}
+}
+
+var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
+for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
+	var sendKnob = surface.makeKnob(6 + sendIndex * 2, 2, 2, 2)
+	sendKnob.mSurfaceValue.mMidiBinding
+		.setInputPort(midiInput)
+		.bindToControlChange(0, 17 + sendIndex)
+		.setTypeRelativeSignedBit()
+	var sendPush = surface.makeButton(6 + sendIndex * 2, 4, 2, 1)
+	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
+	try {
+		var send = selectedChannel.mSends.getByIndex(sendIndex)
+		page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel)
+		attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
+		page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle()
+	} catch (e) {
+		console.log('[CubaseSixty UF1] send ' + (sendIndex + 1) + ' could not be bound: ' + e)
+	}
+}
+
 // Fader touch: lets Cubase treat the fader as touch-sensitive for automation (API 1.1+).
 if (fader.mSurfaceValue.mTouchState) {
 	fader.mSurfaceValue.mTouchState.bindTo(faderTouch)
@@ -124,6 +165,14 @@ function sendLevel(activeDevice, text) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x03], toAscii7(text), [0xF7]))
 }
 
+function sendValueLine(activeDevice, text) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x04], toAscii7(text), [0xF7]))
+}
+function sendBar(activeDevice, position01) {
+	var pos = Math.max(0, Math.min(100, Math.round(position01 * 100)))
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x05, pos, 0xF7]))
+}
+
 // The fader is bound to the selected track's volume, so its surface value reports that
 // track's level as text.
 fader.mSurfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
@@ -144,3 +193,23 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	sendName(activeDevice, title)
 }
+
+// ---------------------------------------------------------------------------
+// Channel encoder (notes 40 / 41 = left / right) and jog wheel (42 / 43): Cubase commands.
+// makeCommandBinding(surfaceValue, category, name) takes the command's internal category and name.
+// ---------------------------------------------------------------------------
+
+function pulseButton(x, note) {
+	var button = surface.makeButton(x, 6, 1, 1)
+	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
+	return button
+}
+var trackPrev = pulseButton(0, 40)
+var trackNext = pulseButton(1, 41)
+var jogLeft = pulseButton(2, 42)
+var jogRight = pulseButton(3, 43)
+
+page.makeCommandBinding(trackPrev.mSurfaceValue, 'Project', 'Select Track: Prev')
+page.makeCommandBinding(trackNext.mSurfaceValue, 'Project', 'Select Track: Next')
+page.makeCommandBinding(jogLeft.mSurfaceValue, 'Transport', 'Nudge Cursor Left')
+page.makeCommandBinding(jogRight.mSurfaceValue, 'Transport', 'Nudge Cursor Right')
