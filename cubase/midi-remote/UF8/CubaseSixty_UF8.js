@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.4.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.4.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -377,3 +377,16 @@ for (var z = 0; z < zoomKeys.length; ++z) {
 	zoomButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, zoomKeys[z].note)
 	page.makeCommandBinding(zoomButton.mSurfaceValue, zoomKeys[z].category, zoomKeys[z].command)
 }
+
+// ---------------------------------------------------------------------------
+// Page left / right (notes 44 / 45): move the bank by one channel instead of eight.
+// ---------------------------------------------------------------------------
+
+var pageLeft = surface.makeButton(26, 14, 1, 1)
+var pageRight = surface.makeButton(27, 14, 1, 1)
+pageLeft.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 44)
+pageRight.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 45)
+page.makeActionBinding(pageLeft.mSurfaceValue, bankZone.mAction.mShiftLeft)
+page.makeActionBinding(pageRight.mSurfaceValue, bankZone.mAction.mShiftRight)
+stopSeekOnPress(pageLeft)
+stopSeekOnPress(pageRight)

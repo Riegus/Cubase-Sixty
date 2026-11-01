@@ -35,6 +35,7 @@ constexpr uint8_t kNoteSolo = 8, kNoteCut = 16, kNoteSel = 24, kNoteVPush = 32;
 constexpr uint8_t kNoteTouch = 104, kNoteBankLeft = 46, kNoteBankRight = 47;
 constexpr uint8_t kNoteTopSoft = 48;   // 48..55: top soft keys 1..8 (channel editor)
 constexpr uint8_t kNoteNoRec = 64;     // 64..71 (from the script): strip 1..8 cannot be record-armed
+constexpr uint8_t kNotePageLeft = 44, kNotePageRight = 45;
 constexpr uint8_t kNoteZoomPad = 72;   // 72..76: UF8 zoom pad up, left, centre, right, down
 constexpr uint8_t kNoteAutoRead = 56, kNoteAutoWrite = 57;
 constexpr uint8_t kNoteFoot1 = 62, kNoteFoot2 = 63;
@@ -60,6 +61,8 @@ inline std::optional<uint8_t> buttonToNote(uint8_t id)
     if (id == 0x5A) return kNoteAutoWrite;
     if (id == 0x00) return kNoteFoot1;
     if (id == 0x01) return kNoteFoot2;
+    if (id == 0x52) return kNotePageLeft;    // Page left / right: shift the bank by one channel
+    if (id == 0x53) return kNotePageRight;
     if (id == 0x78) return kNoteBankLeft;
     if (id == 0x79) return kNoteBankRight;
     if (id >= 0x7A && id <= 0x7E) return uint8_t(kNoteZoomPad + (id - 0x7A));   // zoom pad: up, left, centre, right, down
