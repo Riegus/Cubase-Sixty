@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.4.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.4.4-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -368,7 +368,7 @@ stopSeekOnPress(bankRight)
 var zoomKeys = [
 	{ note: 72, category: 'Zoom', command: 'Zoom In Vertically' },
 	{ note: 73, category: 'Zoom', command: 'Zoom Out' },
-	{ note: 74, category: 'Edit', command: 'Open/Close Editor' },
+	{ note: 74, category: 'Editors', command: 'Open/Close Editor' },
 	{ note: 75, category: 'Zoom', command: 'Zoom In' },
 	{ note: 76, category: 'Zoom', command: 'Zoom Out Vertically' }
 ]
@@ -390,3 +390,20 @@ page.makeActionBinding(pageLeft.mSurfaceValue, bankZone.mAction.mShiftLeft)
 page.makeActionBinding(pageRight.mSurfaceValue, bankZone.mAction.mShiftRight)
 stopSeekOnPress(pageLeft)
 stopSeekOnPress(pageRight)
+
+// ---------------------------------------------------------------------------
+// Automation mode keys (notes 58 / 59 / 60 / 61 = Off / Trim / Latch / Touch): Cubase's global automation
+// mode. Cubase has no Off mode, so the Off key selects Cross-Over.
+// ---------------------------------------------------------------------------
+
+var autoModes = [
+	{ note: 58, command: 'Automation Mode - Cross-Over' },
+	{ note: 59, command: 'Automation Mode - Trim' },
+	{ note: 60, command: 'Automation Mode - Auto-Latch' },
+	{ note: 61, command: 'Automation Mode - Touch' }
+]
+for (var a = 0; a < autoModes.length; ++a) {
+	var modeButton = surface.makeButton(28 + a, 15, 1, 1)
+	modeButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, autoModes[a].note)
+	page.makeCommandBinding(modeButton.mSurfaceValue, 'Automation', autoModes[a].command)
+}
