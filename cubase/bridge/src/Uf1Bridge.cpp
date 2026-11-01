@@ -102,6 +102,28 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
         break;
     case K::Button:
+        // BANK banks the UF8; ARROW selects the previous / next track (a channel-encoder step, notes 40 / 41).
+        if (ev.id == 0x21 || ev.id == 0x23) {
+            if (!ev.pressed) break;
+            const bool right = ev.id == 0x23;
+            if (uf8BankPress(right)) break;
+            // No UF8: step the selection eight tracks instead (spaced out; back-to-back pulses were merged).
+            std::thread([right] {
+                for (int i = 0; i < 8; ++i) {
+                    note(uint8_t(right ? 41 : 40), true);
+                    note(uint8_t(right ? 41 : 40), false);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                }
+            }).detach();
+            break;
+        }
+        if (ev.id == 0x24 || ev.id == 0x26) {
+            if (!ev.pressed) break;
+            const uint8_t n = ev.id == 0x26 ? 41 : 40;
+            note(n, true);
+            note(n, false);
+            break;
+        }
         if (auto n = uf1m::buttonToNote(ev.id)) note(*n, ev.pressed);
         break;
     default: break;

@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.6.1-dev (display, sends with screen feedback, channel encoder, jog)')
+console.log('[CubaseSixty UF1] script loaded, version 0.7.1-dev (display, sends with screen feedback, channel encoder, jog)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -222,3 +222,22 @@ page.makeCommandBinding(trackPrev.mSurfaceValue, 'Project', 'Select Track: Prev'
 page.makeCommandBinding(trackNext.mSurfaceValue, 'Project', 'Select Track: Next')
 page.makeCommandBinding(jogLeft.mSurfaceValue, 'Transport', 'Nudge Cursor Left')
 page.makeCommandBinding(jogRight.mSurfaceValue, 'Transport', 'Nudge Cursor Right')
+
+// ---------------------------------------------------------------------------
+// NAV cross (notes 48-52): left / right = zoom out / in, up / down = vertical zoom in / out, centre opens /
+// closes the editor (like Enter).
+// The bridge handles ARROW (one track) and BANK (eight tracks) itself, as channel-encoder pulses.
+// ---------------------------------------------------------------------------
+
+var navKeys = [
+	{ note: 48, category: 'Zoom', command: 'Zoom In Vertically' },
+	{ note: 49, category: 'Zoom', command: 'Zoom Out' },
+	{ note: 50, category: 'Edit', command: 'Open/Close Editor' },
+	{ note: 51, category: 'Zoom', command: 'Zoom In' },
+	{ note: 52, category: 'Zoom', command: 'Zoom Out Vertically' }
+]
+for (var n = 0; n < navKeys.length; ++n) {
+	var navButton = surface.makeButton(4 + n, 6, 1, 1)
+	navButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, navKeys[n].note)
+	page.makeCommandBinding(navButton.mSurfaceValue, navKeys[n].category, navKeys[n].command)
+}

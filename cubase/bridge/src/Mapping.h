@@ -35,6 +35,7 @@ constexpr uint8_t kNoteSolo = 8, kNoteCut = 16, kNoteSel = 24, kNoteVPush = 32;
 constexpr uint8_t kNoteTouch = 104, kNoteBankLeft = 46, kNoteBankRight = 47;
 constexpr uint8_t kNoteTopSoft = 48;   // 48..55: top soft keys 1..8 (channel editor)
 constexpr uint8_t kNoteNoRec = 64;     // 64..71 (from the script): strip 1..8 cannot be record-armed
+constexpr uint8_t kNoteZoomPad = 72;   // 72..76: UF8 zoom pad up, left, centre, right, down
 constexpr uint8_t kNoteAutoRead = 56, kNoteAutoWrite = 57;
 constexpr uint8_t kNoteFoot1 = 62, kNoteFoot2 = 63;
 constexpr uint8_t kCcVPot = 16;
@@ -61,6 +62,7 @@ inline std::optional<uint8_t> buttonToNote(uint8_t id)
     if (id == 0x01) return kNoteFoot2;
     if (id == 0x78) return kNoteBankLeft;
     if (id == 0x79) return kNoteBankRight;
+    if (id >= 0x7A && id <= 0x7E) return uint8_t(kNoteZoomPad + (id - 0x7A));   // zoom pad: up, left, centre, right, down
     return std::nullopt;
 }
 
@@ -144,6 +146,11 @@ inline std::optional<uint8_t> buttonToNote(uint8_t id)
         case 0x33: return kNoteClick;
         case 0x21: return kNoteBankLeft;
         case 0x23: return kNoteBankRight;
+        case 0x28: return 48;   // NAV up
+        case 0x29: return 49;   // NAV left
+        case 0x2A: return 50;   // NAV centre
+        case 0x2B: return 51;   // NAV right
+        case 0x2C: return 52;   // NAV down
         default: break;
     }
     if (id >= 0x08 && id <= 0x0D) return uint8_t(kNoteVPush + (id - 0x08));   // pushes 32..37

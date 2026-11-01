@@ -56,6 +56,7 @@ bool g_trace8 = false;
 std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (group, folder, FX): dark and ignored
 std::atomic<bool> g_recOn[8] = {};
 void setLed(int strip, int cls, bool on);
+std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
 std::atomic<long long> g_cubaseFirstMs{0};   // when Cubase first sent anything (steady clock, ms)
 std::atomic<bool> g_cubaseSpoke{false};   // set once Cubase has sent us a name or colour
 
@@ -246,6 +247,15 @@ void onMidiIn(std::vector<unsigned char>& msg)
 
 } // namespace
 
+// The UF1's BANK keys bank the UF8 (as if its own bank key had been pressed).
+bool cs::uf8BankPress(bool right)
+{
+    if (!g_uf8Running) return false;
+    note(right ? kNoteBankRight : kNoteBankLeft, true);
+    note(right ? kNoteBankRight : kNoteBankLeft, false);
+    return true;
+}
+
 int main(int argc, char** argv)
 {
     for (int i = 1; i < argc; ++i)
@@ -269,6 +279,7 @@ int main(int argc, char** argv)
             g_dev.setRawInputHandler(onUsbInput);
             std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
             uf8Ok = true;
+            g_uf8Running = true;
         }
     }
     const bool uf1Ok = cs::uf1Start();

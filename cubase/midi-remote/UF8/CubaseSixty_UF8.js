@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.3.3-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.4.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -359,3 +359,21 @@ function stopSeekOnPress(button) {
 }
 stopSeekOnPress(bankLeft)
 stopSeekOnPress(bankRight)
+
+// ---------------------------------------------------------------------------
+// Zoom pad (notes 72-76: up, left, centre, right, down), same as the UF1's NAV cross: left / right = zoom
+// out / in, up / down = vertical zoom in / out, centre opens / closes the editor.
+// ---------------------------------------------------------------------------
+
+var zoomKeys = [
+	{ note: 72, category: 'Zoom', command: 'Zoom In Vertically' },
+	{ note: 73, category: 'Zoom', command: 'Zoom Out' },
+	{ note: 74, category: 'Edit', command: 'Open/Close Editor' },
+	{ note: 75, category: 'Zoom', command: 'Zoom In' },
+	{ note: 76, category: 'Zoom', command: 'Zoom Out Vertically' }
+]
+for (var z = 0; z < zoomKeys.length; ++z) {
+	var zoomButton = surface.makeButton(20 + z, 14, 1, 1)
+	zoomButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, zoomKeys[z].note)
+	page.makeCommandBinding(zoomButton.mSurfaceValue, zoomKeys[z].category, zoomKeys[z].command)
+}
