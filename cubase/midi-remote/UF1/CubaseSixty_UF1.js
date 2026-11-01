@@ -6,6 +6,7 @@
 //
 // Install in
 //   Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty\UF1\
+// (tools\install-scripts.ps1 does this for you.)
 
 var midiremote_api = require('midiremote_api_v1')
 

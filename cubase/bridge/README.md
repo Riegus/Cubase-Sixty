@@ -1,33 +1,78 @@
 # Cubase-Sixty Bridge
 
-The bridge is a small background app that sits between the SSL controllers and Cubase:
+A small Windows program that sits between the SSL controllers and Cubase:
 
-- **USB side:** opens the UF8, UC1 and UF1 over their vendor-USB interfaces, using the protocol and device code from Rea-Sixty's `extension/src/` (`Protocol`, `UF8Device`, `UC1Device`, `HidDevice` and related).
-- **MIDI side:** creates virtual MIDI ports and translates between SSL frames and the messages in [`../docs/bridge-midi-protocol.md`](../docs/bridge-midi-protocol.md).
+- **USB side:** opens the UF8 and UF1 over their vendor-USB interfaces, using the device and protocol code from Rea-Sixty's `extension/src/` (`UF8Device`, `UF1Device`, `Protocol`, `UF1Protocol`, `Palette`, ...), compiled in place rather than copied.
+- **MIDI side:** talks to the loopMIDI ports (through RtMidi) and translates between SSL frames and the messages in [`../docs/bridge-midi-protocol.md`](../docs/bridge-midi-protocol.md). The Cubase end is the MIDI Remote scripts in [`../midi-remote/`](../midi-remote/).
 
-SSL 360° must not be running, since it claims the controllers' USB interfaces exclusively.
+SSL 360° must not be running: it claims the controllers' USB interfaces exclusively. Each surface is optional; the bridge skips a surface whose device or ports are missing and says so.
 
-## Plan
+## Status
 
-1. **Prove the USB layer runs without REAPER.** Build Rea-Sixty's standalone probes (for example `uf8_color_test`) on Windows and run them with Cubase open. If the UF8 responds, the approach works.
-2. **Separate the reusable code.** Identify which files in `extension/src/` depend on the REAPER SDK and which are pure protocol and device code. Build the latter into a library the bridge links against, without copying files.
-3. **Virtual MIDI ports.** Choose how to create ports on Windows: the Windows MIDI Services app SDK (Windows 11) or a virtual MIDI driver. macOS can create virtual ports through CoreMIDI directly.
-4. **Faders first.** Move the motor faders from Cubase and read them back, with fader touch.
-5. **Buttons, V-Pots, LEDs, banking.**
-6. **Scribble strips and track colours**, once the script can send them as SysEx.
-
-## Later phases
-
-7. **UC1 and plug-in focus.** Follow the focused insert or channel-strip plug-in in Cubase and map its parameters to the UC1. This depends on how much of the insert and strip-effect parameters the MIDI Remote API exposes, so prototype it early.
-8. **SSL plug-in stream and meters.** Rea-Sixty receives the SSL plug-ins' meter stream by standing in for SSL 360° Core. The VST3s do not depend on the DAW, so this should carry over; the open question is tying each plug-in instance to a Cubase track. REAPER's "Rea-Sixty Input Level" JSFX probe has no Cubase equivalent, so a small VST3 that reports levels to the bridge is the likely replacement. Send meters over a separate channel (UDP or shared memory), not MIDI.
-9. **Extras.** Layers, soft keys, a second UF8, the Stream Deck and Companion bridge, and the settings UI (ReaImGui is REAPER-only, so a local web UI served by the bridge is one option). Per-project state needs a sidecar file keyed by project, or a state-holder plug-in, since Cubase has no equivalent of REAPER's project ExtState.
-
-## Risks
-
-- **MIDI Remote API limits** (focused plug-in access, metering, project identity, value take-over) are the main unknown.
-- **What this adds over SSL 360°**, which already supports Cubase through HUI/MCU and VST3 integration. Pin down which Rea-Sixty features you want in Cubase; that list is the scope.
-- **Licences:** Rea-Sixty's licence, and the Steinberg VST3 SDK terms if you write the probe plug-in.
+| Surface | Working |
+|---------|---------|
+| UF8 | Faders (motor, touch, echo suppression), SEL / SOLO / CUT with LEDs, top soft keys (record-enable), V-pots and V-pot push, banking, transport, automation Read / Write with LEDs, scribble-strip names and colours. Foot switches are implemented but untested. |
+| UF1 | Fader (motor, touch), SOLO / CUT / SEL, transport keys with LEDs, V-pot 1. The display shows a "Cubase-Sixty" banner only. |
+| UC1 | Not started. |
 
 ## Building
 
-Not yet buildable. The build will use CMake, like Rea-Sixty's extension, and reuse its libusb and hidapi setup.
+Requires Visual Studio Build Tools (MSVC), CMake and [libusb](https://libusb.info) (the Windows binary release). RtMidi is fetched automatically.
+
+```
+cmake -S cubase\bridge -B cubase\bridge\build -DLIBUSB_ROOT=C:/path/to/libusb
+cmake --build cubase\bridge\build --config Release
+```
+
+`LIBUSB_ROOT` is the folder that contains `libusb.h` somewhere below it and `VS2022\MS64\dll\libusb-1.0.lib`. Stop the running bridge before rebuilding, or the link step fails with LNK1104. The result is `cubase\bridge\build\Release\cubase_sixty_bridge.exe` (with `libusb-1.0.dll` next to it). `build\` is git-ignored.
+
+A small test program checks the note, LED and colour mapping without hardware:
+
+```
+cubase\bridge\build\Release\test_mapping.exe
+```
+
+## Running
+
+1. Set up loopMIDI and install the Cubase scripts as described in [`../midi-remote/README.md`](../midi-remote/README.md).
+2. Start Cubase first, then the bridge:
+   ```
+   cubase\bridge\build\Release\cubase_sixty_bridge.exe
+   ```
+3. If a surface does not respond, restart Cubase and then the bridge (Cubase sometimes only picks a script up after a restart).
+
+Options:
+
+| Option | What it does |
+|--------|--------------|
+| `--trace` | Prints UF1 events, the MIDI the UF8 and UF1 send to Cubase (not fader positions), and every UF1 LED change. |
+| `--lamptest` | Lights each UF1 LED in turn about 6 seconds after start-up. |
+
+## Behaviour to know about
+
+- **Foot switches.** An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts, which used to start the transport. The foot switches are ignored for the first 4 seconds.
+- **Starting the bridge after Cubase.** Cubase sends track names, colours, faders and LED states only when they change, so a bridge that starts later would see nothing. If nothing has arrived 2.5 seconds after start-up, the bridge presses bank-next and then bank-previous, which makes Cubase send everything again. If Cubase is on its last bank, bank-next does nothing and the UF8 ends up one bank back; bank once more.
+- **LEDs.** The UF1 buttons are lit by colour (an LED with colour black is off), as in Rea-Sixty. LED brightness is set to full when the UF1 opens.
+
+## Layout
+
+```
+src/main.cpp        UF8 handling, MIDI ports, main loop
+src/Uf1Bridge.*     UF1 handling (own device and MIDI ports)
+src/Mapping.h       Button / LED / colour mapping shared by both (namespace cs, cs::uf1m)
+tests/              test_mapping
+```
+
+## Later
+
+- **UF1:** display (track name, values), V-pots 2 to 4, encoders and jog, SEL LED and track colour, navigation buttons.
+- **UC1 and plug-in focus.** Depends on how much of the insert and strip-effect parameters the MIDI Remote API exposes; prototype early.
+- **SSL plug-in stream and meters.** Rea-Sixty gets the SSL plug-ins' meters by standing in for SSL 360° Core. Tying each plug-in instance to a Cubase track is the open question.
+- **Extras:** layers, a second UF8, settings UI, packaging.
+
+## Risks
+
+- **MIDI Remote API limits** (focused plug-in access, metering, live colour updates) are the main unknown.
+- **Licences:** Rea-Sixty's licence, and the Steinberg VST3 SDK terms if a probe plug-in is ever written.
+
+See also [`../docs/extension-survey.md`](../docs/extension-survey.md) for which parts of Rea-Sixty can be reused.

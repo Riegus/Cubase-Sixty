@@ -51,6 +51,7 @@ uint8_t           g_palette[kStrips] = {};
 std::mutex        g_paletteMx;
 
 bool g_trace8 = false;
+std::atomic<bool> g_cubaseSpoke{false};   // set once Cubase has sent us a name or colour
 
 void sendMidi(std::vector<unsigned char> m)
 {
@@ -167,6 +168,7 @@ void onMidiIn(double, std::vector<unsigned char>* msg, void*)
     const uint8_t status = m[0] & 0xF0;
 
     if (m[0] == 0xF0) {   // SysEx: names and colours
+        g_cubaseSpoke = true;
         if (auto n = parseName(m)) {
             std::string t(n->text.begin(), n->text.end());
             if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
@@ -240,6 +242,19 @@ int main(int argc, char** argv)
         return 1;
     }
     std::printf("Bridging; Ctrl+C to stop.\n");
+    if (uf8Ok) {
+        // Cubase sent the track names and colours when it started, before the bridge was listening, and it only
+        // sends changes. If nothing has arrived a couple of seconds after start-up, press bank-next and then
+        // bank-previous: Cubase then sends everything again (names, colours, faders, LEDs). This assumes Cubase is
+        // not on its last bank; there bank-next does nothing and the bank would end up one step back.
+        std::thread([] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+            if (g_cubaseSpoke) return;
+            note(kNoteBankRight, true);  note(kNoteBankRight, false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            note(kNoteBankLeft, true);   note(kNoteBankLeft, false);
+        }).detach();
+    }
     if (uf1Ok) {
         bool lamp = false;
         for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--lamptest") lamp = true;

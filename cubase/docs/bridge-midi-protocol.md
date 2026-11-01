@@ -1,6 +1,6 @@
-# Bridge ↔ Cubase MIDI protocol (draft v0)
+# Bridge ↔ Cubase MIDI protocol (draft)
 
-This is the contract between the Cubase-Sixty Bridge and the MIDI Remote script. It is a first draft covering the UF8 fader bank only, and will change as the bridge takes shape.
+This is the contract between the Cubase-Sixty Bridge and the MIDI Remote scripts. It covers the UF8 and the UF1 and will change as the bridge takes shape.
 
 ## Ports
 
@@ -9,14 +9,14 @@ The bridge creates two virtual MIDI ports per surface, one for each direction. N
 | Surface | Cubase input (bridge → Cubase)   | Cubase output (Cubase → bridge)     |
 |---------|----------------------------------|-------------------------------------|
 | UF8     | `Cubase-Sixty UF8 to Cubase`     | `Cubase-Sixty UF8 from Cubase`      |
+| UF1     | `Cubase-Sixty UF1 to Cubase`     | `Cubase-Sixty UF1 from Cubase`      |
 | UC1     | `Cubase-Sixty UC1 to Cubase` (later) | `Cubase-Sixty UC1 from Cubase` (later) |
-| UF1     | `Cubase-Sixty UF1 to Cubase` (later) | `Cubase-Sixty UF1 from Cubase` (later) |
 
-The MIDI Remote script detects the surface by these exact names.
+Each MIDI Remote script detects its surface by these exact names. Keep the ports out of Cubase's *All MIDI Inputs*.
 
 Why two ports with different names: a virtual port made with a tool like loopMIDI is a loopback, so anything written to it is delivered straight back to whoever reads it. If Cubase used one port for both directions, it would hear its own output. In testing, a fader moved in Cubase snapped back to its old value for that reason. With one port per direction, the bridge writes to the first and reads the second, and nothing loops.
 
-## UF8 messages (v0)
+## UF8 messages
 
 Strips are numbered 1–8 and map to MIDI channels 1–8.
 
@@ -25,16 +25,37 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Fader position    | Pitch bend, channel = strip      | both         | 14-bit. Cubase → bridge moves the motor fader. |
 | Fader touch       | Note 104 + strip−1, vel 127 / 0  | bridge → Cubase | 127 = touched, 0 = released. |
 | V-Pot turn        | CC 16 + strip−1, channel 1       | bridge → Cubase | Relative: 1–63 = right, 65–127 = left (signed bit). |
-| V-Pot press       | Note 32 + strip−1                | bridge → Cubase | |
+| V-Pot press       | Note 32 + strip−1                | bridge → Cubase | Opens the channel editor. |
 | SEL               | Note 24 + strip−1                | both         | Cubase → bridge sets the LED. |
 | SOLO              | Note 8 + strip−1                 | both         | Cubase → bridge sets the LED. |
 | CUT (mute)        | Note 16 + strip−1                | both         | Cubase → bridge sets the LED. |
+| Top soft key      | Note 48 + strip−1                | both         | Toggles record-enable; Cubase → bridge sets the LED. |
 | Bank left / right | Note 46 / 47                     | bridge → Cubase | |
 | Play / Stop / Rec | Note 94 / 93 / 95                | both         | Cubase → bridge sets the LED. |
+| Cycle / Click     | Note 86 / 87                     | both         | UF1 only so far. |
+| Rewind / Forward  | Note 91 / 92                     | both         | UF1 only so far. |
+| Automation Read / Write | Note 56 / 57               | both         | Act on the selected track; Cubase → bridge sets the LED. |
+| Foot switch 1 / 2 | Note 62 / 63                     | bridge → Cubase | Play / record. Ignored for 4 s after start-up (phantom press). |
+
+LED state arrives as note on / off, or as polyphonic aftertouch with value 127 for "on"; the bridge accepts both.
 
 Button notes and fader-touch notes follow Mackie Control numbering. That keeps the draft familiar and makes it easy to test the script with a generic MCU device before the bridge exists. It is not MCU emulation: the bridge talks to the SSL hardware directly and only uses these numbers between itself and Cubase.
 
-## Scribble strips and track colours (draft v0)
+## UF1 messages
+
+The UF1 is a single strip that controls the selected track, and uses the UF8's strip-1 numbering on channel 1.
+
+| Control | Message | Direction | Notes |
+|---------|---------|-----------|-------|
+| Fader position | Pitch bend, channel 1 | both | 14-bit. |
+| Fader touch | Note 104 | bridge → Cubase | |
+| SOLO / CUT / SEL | Notes 8 / 16 / 24 | both | Cubase → bridge sets the LED. |
+| Encoders | CC 16 + id, relative signed-bit | bridge → Cubase | id 0 above the fader, 1–4 V-pots, 5 channel, 6 jog. Only V-pot 1 (CC 17) is used so far. |
+| V-pot pushes | Notes 32–37 | bridge → Cubase | |
+| Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |
+| Bank | Notes 46 / 47 | bridge → Cubase | |
+
+## Scribble strips and track colours (UF8)
 
 Cubase pushes a track's name and colour to the bridge as SysEx on the surface's output port. Both messages use the non-commercial manufacturer ID `7D`, followed by the ASCII tag `52 36` ("R6"). The strip byte is 0–7 (strip 1 = 0), the same index as the strip's MIDI channel.
 
@@ -48,6 +69,5 @@ Both are sent whenever the bank changes or the track's name or colour changes. A
 ## Not yet covered
 
 - Meters.
-- UC1 and UF1 mappings.
+- UC1 mappings, and the UF1 display.
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.
-- Echo suppression. A fader moved in Cubase comes back as a motor move on the UF8, which must not be reported to Cubase as a touch or a new position.

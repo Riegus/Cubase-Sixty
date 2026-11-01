@@ -1,11 +1,13 @@
-// Cubase-Sixty – MIDI Remote script for SSL UF8 (via the Cubase-Sixty Bridge)
+// Cubase-Sixty – MIDI Remote script for the SSL UF8 (via the Cubase-Sixty Bridge)
 //
-// Draft v0: eight faders with touch, SEL/SOLO/CUT, banking and transport.
+// Eight faders with touch, SEL / SOLO / CUT, record-enable on the top soft keys,
+// channel editor on the V-pot push, banking, transport, automation Read / Write,
+// and track names and colours for the scribble strips.
 // The MIDI it speaks is defined in cubase/docs/bridge-midi-protocol.md.
 //
-// Cubase looks for this file in
-//   Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty\SSL\
-// See the repo README for linking that folder to this one.
+// Install in
+//   Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty\UF8\
+// (tools\install-scripts.ps1 does this for you.)
 
 var midiremote_api = require('midiremote_api_v1')
 
@@ -25,7 +27,7 @@ function dbg(text) {
 }
 console.log('[CubaseSixty] script loaded, version ' + SCRIPT_VERSION)
 
-var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'SSL', 'Riegus')
+var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF8', 'Riegus')
 
 var midiInput = deviceDriver.mPorts.makeMidiInput()
 var midiOutput = deviceDriver.mPorts.makeMidiOutput()
