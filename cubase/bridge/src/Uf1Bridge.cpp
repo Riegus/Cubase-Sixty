@@ -12,6 +12,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <string>
 #include <unordered_set>
@@ -39,6 +40,11 @@ std::atomic<bool> g_open{false};
 std::atomic<bool> g_trace{false};
 bool g_engaged = false;
 std::mutex g_engMx;
+std::vector<uint8_t> g_tcShown;               // last time-field payload sent
+// The last display / LED message from Cubase per kind, replayed after the UF1 is reopened (Cubase only
+// sends what changes, so a reopened UF1 would otherwise stay blank).
+std::mutex g_cacheMx;
+std::map<int, std::vector<unsigned char>> g_cache;
 std::unordered_set<uint8_t> g_ledEnabled;   // LEDs that already got their FF3B enable
 std::mutex g_ledMx;
 
@@ -58,7 +64,7 @@ void sendMidi(std::vector<unsigned char> m)
 }
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
-bool g_shift = false, g_sends58 = false, g_master = false;   // UF1 key states (touched on the USB thread)
+bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false;   // UF1 key states (touched on the USB thread)
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
@@ -132,12 +138,16 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         // MASTER: the strip controls the main output (note 45) or the selected track again (note 44).
-        if (ev.id == 0x39) {
+        // MASTER (0x39) and FLIP (0x38) pick one of four strip sub-pages: 44 selected track, 45 main output,
+        // 46 selected track flipped, 47 main output flipped (flipped = fader on pan, pan knob on volume).
+        if (ev.id == 0x39 || ev.id == 0x38) {
             if (!ev.pressed) break;
-            g_master = !g_master;
-            note(g_master ? 45 : 44, true);
-            note(g_master ? 45 : 44, false);
+            if (ev.id == 0x39) g_master = !g_master; else g_flip = !g_flip;
+            const uint8_t n = uint8_t(44 + (g_master ? 1 : 0) + (g_flip ? 2 : 0));
+            note(n, true);
+            note(n, false);
             setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
+            setLed(uf1m::Led{0x20, 0xFFFFFF}, g_flip);
             showStripNumber();
             break;
         }
@@ -335,21 +345,31 @@ void onSysex(const std::vector<unsigned char>& m)
         // '.', ':' and ',' fold into the dot of the cell before them. Right-aligned; if the text needs more
         // than ten cells, the leftmost ones (normally padding) are dropped.
         std::string t(m.begin() + 5, m.end() - 1);
-        auto isSep = [](char c) { return c == '.' || c == ':' || c == ','; };
+        // Readability: a ':' becomes a blank cell instead of a dot, so "0:00:47.691" reads "0 00 47.691"
+        // (dots stay for decimals and the bars/beats separators). If that does not fit, a leading group of
+        // zeros (hours) is dropped first: "00:00:47:12" -> "00 47 12".
+        for (char& c : t) if (c == ':') c = ' ';
+        auto isSep = [](char c) { return c == '.' || c == ','; };
         auto countCells = [&](const std::string& s) {
             int n = 0;
             for (size_t i = 0; i < s.size(); ++i) if (!isSep(s[i]) || i == 0) ++n;
             return n;
         };
+        {
+            const size_t first = t.find_first_not_of(' ');
+            const size_t gap = (first == std::string::npos) ? std::string::npos : t.find(' ', first);
+            if (countCells(t) > ::uf1::kTcCells && gap != std::string::npos
+                && t.find_first_not_of('0', first) == gap)
+                t.erase(0, gap + 1);
+        }
         while (countCells(t) > ::uf1::kTcCells && !t.empty()) {
             t.erase(0, 1);
             while (!t.empty() && isSep(t[0])) t.erase(0, 1);
         }
         const int cells = countCells(t);
         const std::string padded = std::string(size_t(::uf1::kTcCells - cells), ' ') + t;
-        static std::vector<uint8_t> shown;
         auto payload = ::uf1::seg7Payload(padded);
-        if (payload != shown) { shown = payload; g_dev.send(::uf1::buildScreen(::uf1::scr::kTimecode, payload)); }
+        if (payload != g_tcShown) { g_tcShown = payload; g_dev.send(::uf1::buildScreen(::uf1::scr::kTimecode, payload)); }
     } else if (m[4] == 0x0A) {
         // A new track was selected: show its home view and ignore the burst of send values that follows.
         selectionChanged();
@@ -368,6 +388,13 @@ void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     traceMidi("in", m);
+    {
+        // Remember the latest of each kind: SysEx by command (name, colour, level, value lines, bars, time),
+        // notes / aftertouch by note number (LED states).
+        std::lock_guard<std::mutex> lk(g_cacheMx);
+        if (m.size() >= 6 && m[0] == 0xF0 && m[1] == 0x7D) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80 || (m[0] & 0xF0) == 0xA0)) g_cache[m[1]] = m;
+    }
     if (!m.empty() && m[0] == 0xF0) { onSysex(m); return; }
     if (m.size() < 3) return;
     const uint8_t status = m[0] & 0xF0;
@@ -422,9 +449,17 @@ void uf1LampTest()
     std::printf("UF1 lamp test done.\n");
 }
 
-bool uf1Start()
+// Opens the UF1 (three tries) and draws the start-up screen. Used at start and after a reopen.
+bool uf1OpenDevice()
 {
-    if (!g_dev.open()) {
+    // The device sometimes is not ready right after the previous bridge let go of it: try three times.
+    bool opened = g_dev.open();
+    for (int attempt = 2; !opened && attempt <= 3; ++attempt) {
+        std::fprintf(stderr, "UF1: could not open the device (%s); trying again (%d of 3)...\n", g_dev.lastError().c_str(), attempt);
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        opened = g_dev.open();
+    }
+    if (!opened) {
         std::fprintf(stderr, "UF1: could not open the device (%s); skipping the UF1.\n", g_dev.lastError().c_str());
         return false;
     }
@@ -459,6 +494,12 @@ bool uf1Start()
         g_dev.send(::uf1::buildMasterBrightness(0xff));
         g_dev.send(::uf1::buildLedBrightness(0x20));
     }
+    return true;
+}
+
+bool uf1Start()
+{
+    if (!uf1OpenDevice()) return false;
     // Ports last, so Cubase's first burst of state (sent when it sees the ports appear) finds the screen ready.
     if (!g_out.open(kPortTo) || !g_in.open(kPortFrom, &onMidiIn)) {
         std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\"; skipping the UF1.\n", kPortTo, kPortFrom);
@@ -484,5 +525,32 @@ void uf1SetStripNumber(int n)
 }
 
 bool uf1NeedsReopen() { return g_open && g_dev.needsReopen(); }
+
+std::string uf1LastError() { return g_dev.lastError(); }
+
+// The UF1 stopped answering (e.g. it missed the wake right after the previous bridge let go of it): close
+// it, open it again, and replay the last state Cubase sent. The MIDI ports stay as they are.
+bool uf1Reopen()
+{
+    g_dev.close();
+    g_open = false;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    {
+        std::lock_guard<std::mutex> lk(g_ledMx);
+        g_ledEnabled.clear();   // the LED enables have to be sent again
+    }
+    g_tcShown.clear();
+    if (!uf1OpenDevice()) return false;
+    std::thread(revertLoop).detach();
+    std::map<int, std::vector<unsigned char>> cache;
+    { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
+    for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
+    setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
+    setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
+    setLed(uf1m::Led{0x20, 0xFFFFFF}, g_flip);
+    showStripNumber();
+    std::printf("UF1 reopened.\n");
+    return true;
+}
 
 } // namespace cs

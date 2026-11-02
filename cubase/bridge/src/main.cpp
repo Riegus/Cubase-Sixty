@@ -58,6 +58,7 @@ bool g_trace8 = false;
 std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (group, folder, FX): dark and ignored
 std::atomic<bool> g_recOn[8] = {};
 void setLed(int strip, int cls, bool on);
+void sendLedFrames(const uf8::LedColourFrames& frames);
 std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
 std::array<uint8_t, 16> g_meterLevels{}, g_meterShown{};   // UF8 VU bytes, [s0 in, s0 out, s1 in, ...]
 auto g_meterLastPush = std::chrono::steady_clock::now();
@@ -112,6 +113,16 @@ void handleFrame(const uf8frames::Frame& fr)
     }
     case 0x22: {   // button: FF 22 03 id 00 state ck
         const bool pressed = d[5] == 0x01;
+        if (d[3] == 0x54) {   // FLIP: faders on pan, V-pots on volume (script sub-pages, notes 77 / 78)
+            if (pressed) {
+                static bool flip = false;
+                flip = !flip;
+                note(flip ? 78 : 77, true);
+                note(flip ? 78 : 77, false);
+                sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Flip, flip));
+            }
+            break;
+        }
         if (auto n = buttonToNote(d[3])) {
             // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
             // which started the transport. Ignore the foot switches for the first seconds.
@@ -328,12 +339,20 @@ void cs::autoModePressed(uint8_t n)
     static bool trim = false;
     std::lock_guard<std::mutex> lk(mx);
     if (n == kNoteAutoTrim) trim = !trim;
-    else mode = n;
+    else if (n != 0) mode = n;   // 0 = just draw the current state (start-up)
     if (!g_uf8Running) return;
-    // Off (Cross-Over) in blue: lit white it stayed dark (the white LED encoding did not take on this key).
-    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoOff,
-        mode == kNoteAutoOff ? uf8::GlobalLedState::Bright : uf8::GlobalLedState::Dim,
-        uf8::ledColourForTrackRgb(0x3070FF)));
+    {
+        // Off (Cross-Over): the colour-pair frames alone left it dark (white and blue tried). Rea-Sixty found
+        // the same on the Auto key (cell 0x55) and Plug-in / Page keys: they also need the legacy FF 3B
+        // on/off frame. Try that here.
+        // Purple, and dim rather than dark when another mode is active (like its neighbours): the legacy
+        // frame stays "on" in both states, the colour pair carries bright or dim.
+        auto off = uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoOff,
+            mode == kNoteAutoOff ? uf8::GlobalLedState::Bright : uf8::GlobalLedState::Dim,
+            uf8::ledColourForTrackRgb(0x9030FF));
+        off.legacy = uf8::buildLedCommand(0x27, true);
+        sendLedFrames(off);
+    }
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoLatch, mode == kNoteAutoLatch));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoTouch, mode == kNoteAutoTouch));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoTrim, trim));
@@ -359,7 +378,14 @@ int main(int argc, char** argv)
     // Each surface is optional: it is skipped (with a message) if its ports or device are missing.
     bool uf8Ok = false;
     {
-        if (!g_dev.open()) {
+        // The device sometimes is not ready right after the previous bridge let go of it: try three times.
+        bool opened = g_dev.open();
+        for (int attempt = 2; !opened && attempt <= 3; ++attempt) {
+            std::fprintf(stderr, "UF8: could not open the device (%s); trying again (%d of 3)...\n", g_dev.lastError().c_str(), attempt);
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            opened = g_dev.open();
+        }
+        if (!opened) {
             std::fprintf(stderr, "UF8: could not open the device: %s\n"
                                  "Is SSL 360 (or SSL 360 Core) still running? Quit it first.\n",
                          g_dev.lastError().c_str());
@@ -372,6 +398,7 @@ int main(int argc, char** argv)
             std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
             uf8Ok = true;
             g_uf8Running = true;
+            cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
         }
     }
     const bool uf1Ok = cs::uf1Start();
@@ -401,8 +428,12 @@ int main(int argc, char** argv)
 
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        if ((uf8Ok && g_dev.needsReopen()) || cs::uf1NeedsReopen()) {
-            std::fprintf(stderr, "A surface went away; exiting (restart the bridge).\n");
+        if (cs::uf1NeedsReopen()) {
+            std::fprintf(stderr, "UF1 stopped answering (%s); reopening...\n", cs::uf1LastError().c_str());
+            if (!cs::uf1Reopen()) { std::fprintf(stderr, "UF1 could not be reopened; exiting (restart the bridge).\n"); break; }
+        }
+        if (uf8Ok && g_dev.needsReopen()) {
+            std::fprintf(stderr, "The UF8 went away (%s); exiting (restart the bridge).\n", g_dev.lastError().c_str());
             break;
         }
     }

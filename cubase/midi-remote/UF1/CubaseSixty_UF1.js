@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.11.3-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.12.0-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -71,13 +71,25 @@ var transport = page.mHostAccess.mTransport.mValue
 // The strip (fader, pan, SOLO, CUT) follows the selected track, or the main output while MASTER is on.
 // Two sub-pages; the bridge activates them with notes 44 (selected track) / 45 (main output).
 var stripArea = page.makeSubPageArea('Strip')
+// FLIP swaps fader and pan knob (the fader then controls pan), so there are four sub-pages: selected
+// track / main output, each normal or flipped. The bridge activates them with notes 44 / 45 / 46 / 47.
 var stripSelected = stripArea.makeSubPage('Selected track')
 var stripMaster = stripArea.makeSubPage('Main output')
+var stripSelectedFlip = stripArea.makeSubPage('Selected track, flipped')
+var stripMasterFlip = stripArea.makeSubPage('Main output, flipped')
 
-page.makeValueBinding(fader.mSurfaceValue, track.mVolume).setValueTakeOverModeJump().setSubPage(stripSelected)
-page.makeValueBinding(solo.mSurfaceValue, track.mSolo).setTypeToggle().setSubPage(stripSelected)
-page.makeValueBinding(cut.mSurfaceValue, track.mMute).setTypeToggle().setSubPage(stripSelected)
-page.makeValueBinding(vpot.mSurfaceValue, track.mPan).setSubPage(stripSelected)
+function bindStrip(values, normal, flipped) {
+	page.makeValueBinding(fader.mSurfaceValue, values.mVolume).setValueTakeOverModeJump().setSubPage(normal)
+	page.makeValueBinding(vpot.mSurfaceValue, values.mPan).setSubPage(normal)
+	page.makeValueBinding(fader.mSurfaceValue, values.mPan).setValueTakeOverModeJump().setSubPage(flipped)
+	page.makeValueBinding(vpot.mSurfaceValue, values.mVolume).setSubPage(flipped)
+	var subs = [normal, flipped]
+	for (var k = 0; k < subs.length; ++k) {
+		page.makeValueBinding(solo.mSurfaceValue, values.mSolo).setTypeToggle().setSubPage(subs[k])
+		page.makeValueBinding(cut.mSurfaceValue, values.mMute).setTypeToggle().setSubPage(subs[k])
+	}
+}
+bindStrip(track, stripSelected, stripSelectedFlip)
 page.makeValueBinding(sel.mSurfaceValue, track.mEditorOpen).setTypeToggle()
 
 // The main output: a one-channel bank with only output channels.
@@ -90,10 +102,7 @@ try {
 		try { outZone[outFilters[of]]() } catch (e) { console.log('[CubaseSixty UF1] main output bank: ' + outFilters[of] + ' not available') }
 	}
 	mainOut = outZone.makeMixerBankChannel()
-	page.makeValueBinding(fader.mSurfaceValue, mainOut.mValue.mVolume).setValueTakeOverModeJump().setSubPage(stripMaster)
-	page.makeValueBinding(solo.mSurfaceValue, mainOut.mValue.mSolo).setTypeToggle().setSubPage(stripMaster)
-	page.makeValueBinding(cut.mSurfaceValue, mainOut.mValue.mMute).setTypeToggle().setSubPage(stripMaster)
-	page.makeValueBinding(vpot.mSurfaceValue, mainOut.mValue.mPan).setSubPage(stripMaster)
+	bindStrip(mainOut.mValue, stripMaster, stripMasterFlip)
 } catch (e) {
 	console.log('[CubaseSixty UF1] main output could not be bound: ' + e)
 }
@@ -105,6 +114,8 @@ function activatorButton(x, note, subPage) {
 }
 activatorButton(0, 44, stripSelected)
 activatorButton(1, 45, stripMaster)
+activatorButton(4, 46, stripSelectedFlip)
+activatorButton(5, 47, stripMasterFlip)
 
 // V-pots 1-4 (CC 17-20, pushes notes 33-36): sends 1-4 of the selected track.
 // Turn = send level, push = send on / off. The knob above the fader (CC 16) is pan, bound above.
@@ -133,7 +144,32 @@ function attachFeedback(surfaceValue, prefix, barStyle, home) {
 	}
 }
 
-attachFeedback(vpot.mSurfaceValue, 'Pan ', 0x01, true)   // pan is the home view; sends show for a few seconds
+// Pan is the value line's home view (sends show for a few seconds); the fader's level goes to the dB field.
+// Under FLIP the two controls swap, so the pan text and bar come from the fader and the level from the knob.
+var flipActive = false
+var lastPanText = null, lastPanPos = null, lastLevelText = null
+function panText(activeDevice, value, units) {
+	var text = 'Pan ' + value + (units ? units : '')
+	if (text === lastPanText) return
+	lastPanText = text
+	sendValueLine(activeDevice, text, true)
+}
+function panPos(activeDevice, value) {
+	if (value === lastPanPos) return
+	lastPanPos = value
+	sendBar(activeDevice, value, 0x01, true)
+}
+function levelText(activeDevice, value) {
+	if (value === lastLevelText) return
+	lastLevelText = value
+	sendLevel(activeDevice, value)
+}
+vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+	if (flipActive) levelText(activeDevice, value); else panText(activeDevice, value, units)
+}
+vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+	if (!flipActive) panPos(activeDevice, value)
+}
 
 // 5-8 switches the V-pots between sends 1-4 and 5-8 (the bridge sends notes 53 / 54).
 var sendArea = page.makeSubPageArea('Sends')
@@ -233,7 +269,10 @@ fader.mSurfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueT
 }
 fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
 	dbg('display value: [' + value + '] units=[' + units + ']')
-	sendLevel(activeDevice, value)
+	if (flipActive) panText(activeDevice, value, units); else levelText(activeDevice, value)
+}
+fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+	if (flipActive) panPos(activeDevice, value)
 }
 
 // Name and colour: the selected track's, or the main output's while MASTER is on.
@@ -271,8 +310,15 @@ if (mainOut) {
 		if (masterActive) sendColor(activeDevice, masterInfo.r, masterInfo.g, masterInfo.b)
 	}
 }
-stripMaster.mOnActivate = function (activeDevice) { masterActive = true; showStrip(activeDevice) }
-stripSelected.mOnActivate = function (activeDevice) { masterActive = false; showStrip(activeDevice) }
+function stripActivated(activeDevice, master, flip) {
+	masterActive = master
+	if (flip !== flipActive) { flipActive = flip; lastPanText = lastPanPos = lastLevelText = null }
+	showStrip(activeDevice)
+}
+stripSelected.mOnActivate = function (activeDevice) { stripActivated(activeDevice, false, false) }
+stripMaster.mOnActivate = function (activeDevice) { stripActivated(activeDevice, true, false) }
+stripSelectedFlip.mOnActivate = function (activeDevice) { stripActivated(activeDevice, false, true) }
+stripMasterFlip.mOnActivate = function (activeDevice) { stripActivated(activeDevice, true, true) }
 
 // ---------------------------------------------------------------------------
 // Channel encoder (notes 40 / 41 = left / right) and jog wheel (42 / 43): Cubase commands.
@@ -343,7 +389,11 @@ for (var am = 0; am < uf1AutoModes.length; ++am) {
 function uf1MeterSide(name, cc, selectedValue, mainValue) {
 	var meter = surface.makeCustomValueVariable(name)
 	page.makeValueBinding(meter, selectedValue).setSubPage(stripSelected)
-	if (mainValue) page.makeValueBinding(meter, mainValue).setSubPage(stripMaster)
+	page.makeValueBinding(meter, selectedValue).setSubPage(stripSelectedFlip)
+	if (mainValue) {
+		page.makeValueBinding(meter, mainValue).setSubPage(stripMaster)
+		page.makeValueBinding(meter, mainValue).setSubPage(stripMasterFlip)
+	}
 	var last = -1
 	meter.mOnProcessValueChange = function (activeDevice, value) {
 		var v = meterToMidi(value)

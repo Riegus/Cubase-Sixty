@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.5.3-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.6.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -115,13 +115,39 @@ var bankZone = page.mHostAccess.mMixConsole
 	.excludeInputChannels()
 	.excludeOutputChannels()
 
+// FLIP swaps faders and V-pots on all strips (faders on pan, V-pots on volume). Two sub-pages, activated by
+// the bridge with notes 77 (normal) / 78 (flipped).
+var flipArea = page.makeSubPageArea('Flip')
+var flipNormal = flipArea.makeSubPage('Normal')
+var flipFlipped = flipArea.makeSubPage('Flipped')
+var uf8FlipActive = false
+var flipResets = []
+;(function () {
+	var normalKey = surface.makeButton(34, 14, 1, 1)
+	var flippedKey = surface.makeButton(35, 14, 1, 1)
+	normalKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 77)
+	flippedKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 78)
+	page.makeActionBinding(normalKey.mSurfaceValue, flipNormal.mAction.mActivate)
+	page.makeActionBinding(flippedKey.mSurfaceValue, flipFlipped.mAction.mActivate)
+	function setFlip(on) {
+		if (on === uf8FlipActive) return
+		uf8FlipActive = on
+		for (var r = 0; r < flipResets.length; ++r) flipResets[r]()
+	}
+	flipNormal.mOnActivate = function (activeDevice) { setFlip(false) }
+	flipFlipped.mOnActivate = function (activeDevice) { setFlip(true) }
+})()
+
 for (var i = 0; i < STRIPS; ++i) {
 	var channel = bankZone.makeMixerBankChannel()
 	var strip = strips[i]
 
 	page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mVolume)
-		.setValueTakeOverModeJump()
-	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan)
+		.setValueTakeOverModeJump().setSubPage(flipNormal)
+	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(flipNormal)
+	page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mPan)
+		.setValueTakeOverModeJump().setSubPage(flipFlipped)
+	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(flipFlipped)
 	page.makeValueBinding(strip.select.mSurfaceValue, channel.mValue.mSelected)
 	page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
 		.setTypeToggle()
@@ -177,36 +203,44 @@ for (var i = 0; i < STRIPS; ++i) {
 		}
 	})(i)
 
-	// Pan on the strip's display: value line ("Pan" + Cubase's text) and the readout bar under it.
-	;(function (index, vpot) {
-		var lastText = null
-		var lastPos = null
-		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+	// Pan on the strip's display (value line "Pan" + Cubase's text, readout bar) and the level in the dB
+	// readout. Normally pan comes from the V-pot and the level from the fader; under FLIP the other way round.
+	;(function (index, vpot, fader) {
+		var lastPanText = null, lastPanPos = null, lastDb = null
+		flipResets.push(function () { lastPanText = lastPanPos = lastDb = null })
+		function panText(activeDevice, value, units) {
 			var text = String(value) + (units ? units : '')
-			if (text === lastText) return
-			lastText = text
+			if (text === lastPanText) return
+			lastPanText = text
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
 		}
-		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		function panPos(activeDevice, value) {
 			var pos = Math.max(0, Math.min(127, Math.round(value * 127)))
-			if (pos === lastPos) return
-			lastPos = pos
+			if (pos === lastPanPos) return
+			lastPanPos = pos
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, pos, 0xF7]))
 		}
-	})(i, strip.vpot)
-
-	;(function (index, fader) {
-		// The fader's level as text ("-4.94") for the dB readout on the strip (SysEx 0C <strip> <text>).
-		var lastDb = null
-		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		function dbText(activeDevice, value) {
 			var text = String(value)
 			if (text === lastDb) return
 			lastDb = text
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 		}
-		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value, diff) {
-			dbg('fader ' + (index + 1) + ' value ' + Number(value).toFixed(4))
+		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+			if (uf8FlipActive) dbText(activeDevice, value); else panText(activeDevice, value, units)
 		}
+		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			if (!uf8FlipActive) panPos(activeDevice, value)
+		}
+		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+			if (uf8FlipActive) panText(activeDevice, value, units); else dbText(activeDevice, value)
+		}
+		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			if (uf8FlipActive) panPos(activeDevice, value)
+		}
+	})(i, strip.vpot, strip.fader)
+
+	;(function (index, fader) {
 		strips[index].solo.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 			dbg('strip ' + (index + 1) + ' SOLO ' + Number(value).toFixed(2))
 		}
