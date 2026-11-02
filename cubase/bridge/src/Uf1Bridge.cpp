@@ -425,6 +425,20 @@ void onSysex(const std::vector<unsigned char>& m)
         // Readability: a ':' becomes a blank cell instead of a dot, so "0:00:47.691" reads "0 00 47.691"
         // (dots stay for decimals and the bars/beats separators). If that does not fit, a leading group of
         // zeros (hours) is dropped first: "00:00:47:12" -> "00 47 12".
+        {
+            // Seconds format "H:MM:SS.mmm": shown as blank-separated groups, e.g. "47 691", "3 47 691",
+            // "1 03 47 69" - hours and minutes only when they are not zero, the first group without leading
+            // zeros, and the milliseconds cut to fit the ten cells.
+            int h = 0, mi = 0, se = 0; char ms[8] = {0};
+            if (std::sscanf(t.c_str(), " %d:%d:%d.%7[0-9]", &h, &mi, &se, ms) == 4) {
+                char buf[48];
+                if (h > 0) std::snprintf(buf, sizeof(buf), "%d %02d %02d %s", h, mi, se, ms);
+                else if (mi > 0) std::snprintf(buf, sizeof(buf), "%d %02d %s", mi, se, ms);
+                else std::snprintf(buf, sizeof(buf), "%d %s", se, ms);
+                t = buf;
+                while (t.size() > size_t(::uf1::kTcCells) && t.back() != ' ') t.pop_back();   // trim milliseconds
+            }
+        }
         for (char& c : t) if (c == ':') c = ' ';
         auto isSep = [](char c) { return c == '.' || c == ','; };
         auto countCells = [&](const std::string& s) {
