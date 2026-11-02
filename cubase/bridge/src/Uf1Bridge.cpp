@@ -328,6 +328,28 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t pos = uint8_t(m[5] > 100 ? 100 : m[5]);
         const uint8_t style = (m.size() >= 8 && (m[6] == 0x01 || m[6] == 0x02 || m[6] == 0x08)) ? m[6] : 0x02;
         if (m[4] == 0x09) barHome(pos, style); else barTemporary(pos, style);
+    } else if (m[4] == 0x0D) {
+        // Transport position text -> the 7-segment time field on the big display. Cubase pads every part of
+        // the position to a fixed width with spaces ("  1. 1. 1.   0"), so spaces stay as blank cells: the
+        // digits then keep their places instead of shifting as the numbers change (that shifting flickered).
+        // '.', ':' and ',' fold into the dot of the cell before them. Right-aligned; if the text needs more
+        // than ten cells, the leftmost ones (normally padding) are dropped.
+        std::string t(m.begin() + 5, m.end() - 1);
+        auto isSep = [](char c) { return c == '.' || c == ':' || c == ','; };
+        auto countCells = [&](const std::string& s) {
+            int n = 0;
+            for (size_t i = 0; i < s.size(); ++i) if (!isSep(s[i]) || i == 0) ++n;
+            return n;
+        };
+        while (countCells(t) > ::uf1::kTcCells && !t.empty()) {
+            t.erase(0, 1);
+            while (!t.empty() && isSep(t[0])) t.erase(0, 1);
+        }
+        const int cells = countCells(t);
+        const std::string padded = std::string(size_t(::uf1::kTcCells - cells), ' ') + t;
+        static std::vector<uint8_t> shown;
+        auto payload = ::uf1::seg7Payload(padded);
+        if (payload != shown) { shown = payload; g_dev.send(::uf1::buildScreen(::uf1::scr::kTimecode, payload)); }
     } else if (m[4] == 0x0A) {
         // A new track was selected: show its home view and ignore the burst of send values that follows.
         selectionChanged();

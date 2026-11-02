@@ -143,6 +143,7 @@ constexpr uint8_t kCcEncoder = 16;   // 16 + encoder id (0 above-fader, 1..4 V-p
 inline std::optional<uint8_t> buttonToNote(uint8_t id)
 {
     switch (id) {
+        case 0x25: return 55;          // 360 key: next time display format
         case 0x18: return 62;          // channel soft key above the display: insert bypass
         case 0x1D: return kNoteSolo;
         case 0x1E: return kNoteCut;

@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.10.1-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.11.3-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -371,6 +371,49 @@ try {
 var bypassKey = surface.makeButton(6, 1, 1, 1)
 bypassKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 62)
 page.makeCommandBinding(bypassKey.mSurfaceValue, 'Mixer', 'Bypass: Inserts')
+
+// ---------------------------------------------------------------------------
+// Time display: the transport position goes to the bridge as SysEx 0D <text> and shows in the big
+// display's 7-segment field. The 360 key (note 55) steps the time format, like clicking the format in
+// Cubase's transport bar.
+// ---------------------------------------------------------------------------
+
+;(function () {
+	var primary = null, locator = null
+	try { primary = page.mHostAccess.mTransport.mTimeDisplay.mPrimary; locator = primary.mTransportLocator } catch (e) { }
+	if (!locator) { console.log('[CubaseSixty UF1] time display not available in this Cubase version'); return }
+	// The callback is mOnChange(activeDevice, activeMapping, time, format) (as in the community X-Touch
+	// script); the arguments are checked, so a different order still works.
+	var lastTime = null
+	var logged = 0
+	locator.mOnChange = function () {
+		var strings = []
+		for (var a = 0; a < arguments.length; ++a) if (typeof arguments[a] === 'string') strings.push(arguments[a])
+		if (logged < 2) { ++logged; console.log('[CubaseSixty UF1] time display: ' + JSON.stringify(strings)) }
+		var time = strings.length ? strings[0] : null
+		if (time === null || time === lastTime) return
+		lastTime = time
+		midiOutput.sendMidi(arguments[0], SYSEX_HEADER.concat([0x0D], toAscii7(time), [0xF7]))
+	}
+	var formatKey = surface.makeButton(7, 1, 1, 1)
+	formatKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 55)
+	var holders = [locator.mAction, locator.mActions, primary.mAction, primary.mActions]
+	var names = ['mNextTimeFormat', 'mCycleTimeFormat', 'mCycleTimeFormats', 'mNextFormat']
+	for (var h = 0; h < holders.length; ++h) {
+		if (!holders[h]) continue
+		for (var n = 0; n < names.length; ++n) {
+			if (holders[h][names[n]]) {
+				page.makeActionBinding(formatKey.mSurfaceValue, holders[h][names[n]])
+				console.log('[CubaseSixty UF1] 360 key: bound to ' + names[n])
+				return
+			}
+		}
+	}
+	// No API action: use the command that swaps the primary and secondary time formats (the two clocks in
+	// Cubase's transport bar), so 360 switches between, say, bars and timecode.
+	page.makeCommandBinding(formatKey.mSurfaceValue, 'Transport', 'Exchange Time Formats')
+	console.log('[CubaseSixty UF1] 360 key: Transport / Exchange Time Formats')
+})()
 
 // Meter scale: Cubase reports the meter as linear amplitude (0..1), which read far too low when sent
 // straight to the LEDs. Convert to dB and map -55..0 dBFS onto 0..127 (the bridge then uses the UF8's own
