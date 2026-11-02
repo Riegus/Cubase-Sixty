@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.9.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.9.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -583,7 +583,21 @@ function meterToMidi(value) {
 	}
 	// Called for every strip name: once the bank has moved, check again (and step once more if needed).
 	var lastLoggedOffset = -2
+	// Tell the bridge how many tracks the bank has and where it starts (SysEx 12: total, offset, each 2 x 7
+	// bit; 7F 7F = not known), so its bank-right stops at the bank where the last track is on strip 8.
+	var sentTotal = -2, sentOffset = -2
+	function reportBank(activeDevice) {
+		var total = 0
+		while (total < CHANNELS && allTitles[total]) ++total
+		var offset = currentOffset()
+		if (total === sentTotal && offset === sentOffset) return
+		sentTotal = total
+		sentOffset = offset
+		function two(v) { return v < 0 ? [0x7F, 0x7F] : [(v >> 7) & 0x7F, v & 0x7F] }
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x12]).concat(two(total)).concat(two(offset)).concat([0xF7]))
+	}
 	followOnStripTitle = function (activeDevice) {
+		reportBank(activeDevice)
 		if (FOLLOW_OBSERVE_ONLY) {
 			// Test mode: only report where the bank is whenever it moves, and do nothing.
 			var ob = currentOffset()
@@ -632,7 +646,7 @@ function meterToMidi(value) {
 			var sel = surface.makeCustomValueVariable('followSel' + c)
 			page.makeValueBinding(sel, ch.mValue.mSelected)
 			;(function (index, ch) {
-				ch.mOnTitleChange = function (activeDevice, activeMapping, title) { allTitles[index] = title }
+				ch.mOnTitleChange = function (activeDevice, activeMapping, title) { allTitles[index] = title; reportBank(activeDevice) }
 				sel.mOnProcessValueChange = function (activeDevice, value) {
 					if (value > 0.5) selectedSet[index] = true
 					else delete selectedSet[index]

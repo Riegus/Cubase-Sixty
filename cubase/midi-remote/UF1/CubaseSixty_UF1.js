@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.16.0-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.16.1-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -543,6 +543,7 @@ try {
 	}
 	try {
 		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Track numbers').excludeInputChannels().excludeOutputChannels()
+			.setFollowVisibility(false)   // count hidden tracks too, so the numbers match the MixConsole's
 		for (var c = 0; c < CHANNELS; ++c) {
 			var ch = zone.makeMixerBankChannel()
 			var sel = surface.makeCustomValueVariable('trackNumberSel' + c)

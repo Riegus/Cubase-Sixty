@@ -68,7 +68,32 @@ bool g_stripEmpty[8] = {};             // strip shows no track (empty name): met
 std::string g_dbText[8];               // last fader-level text per strip, shown again when a track returns
    // the UF8 and its ports are open
 std::atomic<long long> g_cubaseFirstMs{0};   // when Cubase first sent anything (steady clock, ms)
-std::atomic<bool> g_cubaseSpoke{false};   // set once Cubase has sent us a name or colour
+std::atomic<bool> g_cubaseSpoke{false};
+
+// Bank-right by the user (UF8 key or UF1 BANK): stop at the bank where the last track is on strip 8,
+// instead of a bank with empty strips at the end. The script reports the bank's track count and position
+// (SysEx 12). Near the end, the bridge sends the needed single-track shifts (the Page-right note) instead
+// of a bank step; on the last full bank it does nothing. Unknown count or position: a normal bank step.
+std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
+void note(uint8_t n, bool on);
+// Returns true when it handled the press (the caller must then not send the bank note).
+bool userBankRight(bool pressed)
+{
+    const int total = g_bankTotal, offset = g_bankOffset;
+    if (total < 0 || offset < 0) return false;
+    const int remaining = total - (offset + 8);   // tracks after the last strip
+    if (remaining >= 8) return false;             // a full bank follows: the normal step
+    if (!pressed) return false;                   // releases pass (a stray release does no harm)
+    if (remaining <= 0) return true;              // the last track is already on a strip: stay
+    std::thread([remaining] {
+        for (int i = 0; i < remaining; ++i) {
+            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(60));
+            note(kNotePageRight, true);
+            note(kNotePageRight, false);
+        }
+    }).detach();
+    return true;
+}   // set once Cubase has sent us a name or colour
 
 void sendMidi(std::vector<unsigned char> m)
 {
@@ -131,6 +156,7 @@ void handleFrame(const uf8frames::Frame& fr)
             const bool foot = (*n == 62 || *n == 63);
             if (foot && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(4)) break;
             if (*n >= kNoteTopSoft && *n < kNoteTopSoft + kStrips && g_noRec[*n - kNoteTopSoft]) break;   // cannot arm
+            if (*n == kNoteBankRight && userBankRight(pressed)) break;
             note(*n, pressed);
             if (pressed && *n >= kNoteAutoOff && *n <= kNoteAutoTouch) cs::autoModePressed(*n);
         }
@@ -257,6 +283,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+        } else if (m.size() >= 10 && m[4] == 0x12) {
+            // Bank size and position from the script: total (2 x 7 bit), offset (2 x 7 bit); 7F 7F = unknown.
+            auto v = [&](int i) { return (m[i] == 0x7F && m[i + 1] == 0x7F) ? -1 : (m[i] << 7) | m[i + 1]; };
+            g_bankTotal = v(5);
+            g_bankOffset = v(7);
         } else if (m.size() >= 6 && m[4] == 0x11) {
             // The script asks for a "tick" in 300 ms (note 80): it has no timer of its own, and wants to look
             // at the bank only after Cubase has finished reacting to a new selection.
@@ -415,6 +446,7 @@ void cs::autoModePressed(uint8_t n)
 bool cs::uf8BankPress(bool right)
 {
     if (!g_uf8Running) return false;
+    if (right && userBankRight(true)) return true;
     note(right ? kNoteBankRight : kNoteBankLeft, true);
     note(right ? kNoteBankRight : kNoteBankLeft, false);
     return true;
