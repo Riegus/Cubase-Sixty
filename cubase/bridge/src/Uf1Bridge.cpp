@@ -8,6 +8,7 @@
 
 #include "Uf1Bridge.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -30,9 +31,18 @@ namespace {
 
 constexpr const char* kPortTo   = "Cubase-Sixty UF1 to Cubase";
 constexpr const char* kPortFrom = "Cubase-Sixty UF1 from Cubase";
+// A Mackie Control device for what the MIDI Remote API cannot do well (scrubbing). Set up in Cubase as a
+// "Mackie Control" remote device with these ports. Only the jog (CC 60) and the SCRUB key (note 101) are
+// used; everything else Cubase sends to it is ignored.
+constexpr const char* kMcuTo   = "Cubase-Sixty MCU to Cubase";
+constexpr const char* kMcuFrom = "Cubase-Sixty MCU from Cubase";
 
 ::uf1::UF1Device g_dev;
 MidiOutPort g_out;
+MidiOutPort g_mcuOut;
+void mcuSend(std::vector<unsigned char> m) { g_mcuOut.send(m); }
+MidiInPort g_mcuIn;
+bool g_mcuOpen = false;
 MidiInPort  g_in;
 std::mutex g_outMx;
 std::atomic<bool> g_touched{false};
@@ -64,10 +74,39 @@ void sendMidi(std::vector<unsigned char> m)
 }
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
-bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false;   // UF1 key states (touched on the USB thread)
+int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
+bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
+
+// Shuttle: speed index -7..7 (0 = stopped). Negative = reverse. Notes 65..71 = reverse 8x .. 1/8x,
+// 72..78 = forward 1/8x .. 8x (Cubase's "Shuttle Play" commands); stop = the STOP key's note.
+int g_shuttleSpeed = 0;
+void shuttleSend()
+{
+    uint8_t n;
+    if (g_shuttleSpeed == 0) n = uf1m::kNoteStop;
+    else if (g_shuttleSpeed < 0) n = uint8_t(65 + (g_shuttleSpeed + 7));   // -7 -> 65 (reverse 8x), -1 -> 71
+    else n = uint8_t(71 + g_shuttleSpeed);                               //  1 -> 72 (1/8x),  7 -> 78 (8x)
+    note(n, true);
+    note(n, false);
+}
+void shuttleStep(int dir)
+{
+    const int next = std::max(-7, std::min(7, g_shuttleSpeed + dir));
+    if (next == g_shuttleSpeed) return;
+    g_shuttleSpeed = next;
+    shuttleSend();
+}
+void shuttleStop()
+{
+    if (g_shuttleSpeed != 0) { g_shuttleSpeed = 0; shuttleSend(); }
+}
+void showScrubLed()
+{
+    setLed(uf1m::Led{0x0F, g_shuttle ? 0xFF8000u : 0xFFFFFFu}, g_scrub || g_shuttle);
+}
 
 void onUf1Event(const ::uf1::InputEvent& ev)
 {
@@ -99,12 +138,25 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             static int acc[2] = {0, 0};
             const int kDetentsPerPulse[2] = {4, 4};          // channel encoder, jog wheel: raise to slow down
             const int k = ev.id - 5;
+            // SCRUB: the jog nudges the cursor on every detent (fast positioning). Cubase's own Jog Left / Right
+            // commands were tried for this and played choppy, jumpy audio.
+            const int perPulse = (ev.id == 6 && g_scrub && !g_shift) ? 1 : kDetentsPerPulse[k];
             if ((acc[k] > 0) != (ev.delta > 0)) acc[k] = 0;  // direction change restarts the count
             acc[k] += ev.delta;
-            const uint8_t base = ev.id == 5 ? 40 : 42;
-            while (acc[k] >= kDetentsPerPulse[k] || acc[k] <= -kDetentsPerPulse[k]) {
+            // Jog: nudge the cursor (42 / 43); with SHIFT held, previous / next marker (79 / 80); in SCRUB,
+            // Cubase's Jog Left / Right (63 / 64); in SHUTTLE, each step changes the shuttle speed.
+            const bool jog = ev.id == 6;
+            const uint8_t base = !jog ? 40 : g_shift ? 79 : 42;
+            while (acc[k] >= perPulse || acc[k] <= -perPulse) {
                 const bool right = acc[k] > 0;
-                acc[k] += right ? -kDetentsPerPulse[k] : kDetentsPerPulse[k];
+                acc[k] += right ? -perPulse : perPulse;
+                if (jog && g_shuttle && !g_shift) { shuttleStep(right ? 1 : -1); continue; }
+                if (jog && g_scrub && !g_shift && g_mcuOpen) {
+                    // Mackie jog wheel, one tick: CC 60, 0x01 = clockwise, 0x41 = counter-clockwise. In
+                    // Cubase's scrub mode (SCRUB key, below) this scrubs the audio.
+                    mcuSend({0xB0, 0x3C, uint8_t(right ? 0x01 : 0x41)});
+                    continue;
+                }
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }
@@ -128,6 +180,30 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
+        // SCRUB toggles the jog between nudging the cursor and Cubase's jog (scrubbing). LED on = scrub.
+        // BYPASS (the key above the display). The script reports the state as note 62 (see onMidiIn). A press
+        // bypasses every slot when some are active, or turns them all on when all are bypassed; nothing when
+        // the track has no inserts. Slots = MIDI channel 2, notes 0..15, velocity 127 = bypass, 0 = active.
+        if (ev.id == 0x18) {
+            if (!ev.pressed || g_bypassState == 0) break;
+            const uint8_t vel = g_bypassState == 1 ? 127 : 0;
+            for (uint8_t n = 0; n < 16; ++n) sendMidi({0x91, n, vel});
+            break;
+        }
+        // SHIFT + SCRUB toggles SHUTTLE instead: the jog then sets a shuttle speed (stopping when it goes
+        // back through zero). SCRUB and SHUTTLE exclude each other; the LED is white for scrub, orange for shuttle.
+        if (ev.id == 0x27) {
+            if (!ev.pressed) break;
+            if (g_shift) { g_shuttle = !g_shuttle; if (g_shuttle) g_scrub = false; else shuttleStop(); }
+            else {
+                g_scrub = !g_scrub;
+                if (g_scrub && g_shuttle) { g_shuttle = false; shuttleStop(); }
+                // Cubase's Mackie scrub mode follows: its SCRUB button (note 101) toggles it.
+                if (g_mcuOpen) { mcuSend({0x90, 0x65, 0x7F}); mcuSend({0x90, 0x65, 0x00}); }
+            }
+            showScrubLed();
+            break;
+        }
         // 5-8: the V-pots switch between sends 1-4 (note 53) and 5-8 (note 54). LED on = 5-8.
         if (ev.id == 0x22) {
             if (!ev.pressed) break;
@@ -168,7 +244,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id == 0x24 || ev.id == 0x26) {
             if (!ev.pressed) break;
-            const uint8_t n = ev.id == 0x26 ? 41 : 40;
+            // SHIFT + ARROW: step back / forward one bar (81 / 82).
+            const uint8_t n = g_shift ? (ev.id == 0x26 ? 82 : 81) : (ev.id == 0x26 ? 41 : 40);
             note(n, true);
             note(n, false);
             break;
@@ -426,6 +503,14 @@ void onMidiIn(std::vector<unsigned char>& msg)
     }
     if ((status == 0x90 || status == 0x80 || status == 0xA0)) {
         if (m[1] == kNoteSel) { g_selOn = status != 0x80 && m[2] > 0; showSelLed(); return; }
+        if (m[1] == 62 && status != 0xA0) {
+            // BYPASS LED: off without inserts, orange at 35 % while they are active, full orange when bypassed.
+            const int vel = status == 0x80 ? 0 : m[2];
+            g_bypassState = vel == 0 ? 0 : vel < 100 ? 1 : 2;
+            const uint32_t rgb = g_bypassState == 2 ? 0xFF8000u : 0x592D00u;
+            setLed(uf1m::Led{0x00, rgb}, g_bypassState != 0);
+            return;
+        }
         if (auto led = uf1m::noteToLed(m[1])) setLed(*led, status != 0x80 && m[2] > 0);
     }
 }
@@ -497,6 +582,20 @@ bool uf1OpenDevice()
     return true;
 }
 
+// Cubase -> the Mackie device: only the SCRUB LED (note 101) matters; it keeps our scrub state in step with
+// Cubase's (e.g. after a restart of either side).
+void onMcuIn(std::vector<unsigned char>& m)
+{
+    if (m.size() >= 3 && (m[0] & 0xF0) == 0x90 && m[1] == 0x65) {
+        const bool on = m[2] > 0;
+        if (on != g_scrub) {
+            g_scrub = on;
+            if (on && g_shuttle) { g_shuttle = false; shuttleStop(); }
+            showScrubLed();
+        }
+    }
+}
+
 bool uf1Start()
 {
     if (!uf1OpenDevice()) return false;
@@ -508,6 +607,8 @@ bool uf1Start()
         return false;
     }
     std::printf("UF1 open (serial %s).\n", g_dev.serial().c_str());
+    g_mcuOpen = g_mcuOut.open(kMcuTo) && g_mcuIn.open(kMcuFrom, &onMcuIn);
+    if (!g_mcuOpen) std::fprintf(stderr, "Mackie ports for scrubbing not available; SCRUB falls back to fast nudging.\n");
     std::thread(revertLoop).detach();
     return true;
 }
@@ -548,6 +649,7 @@ bool uf1Reopen()
     setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
     setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
     setLed(uf1m::Led{0x20, 0xFFFFFF}, g_flip);
+    showScrubLed();
     showStripNumber();
     std::printf("UF1 reopened.\n");
     return true;

@@ -11,8 +11,9 @@ The bridge creates two virtual MIDI ports per surface, one for each direction. N
 | UF8     | `Cubase-Sixty UF8 to Cubase`     | `Cubase-Sixty UF8 from Cubase`      |
 | UF1     | `Cubase-Sixty UF1 to Cubase`     | `Cubase-Sixty UF1 from Cubase`      |
 | UC1     | `Cubase-Sixty UC1 to Cubase` (later) | `Cubase-Sixty UC1 from Cubase` (later) |
+| Mackie Control | `Cubase-Sixty MCU to Cubase` | `Cubase-Sixty MCU from Cubase` |
 
-Each MIDI Remote script detects its surface by these exact names. Keep the ports out of Cubase's *All MIDI Inputs*.
+Each MIDI Remote script detects its surface by these exact names. Keep the ports out of Cubase's *All MIDI Inputs*. The Mackie Control pair is for a Mackie Control remote device in Cubase (see "Mackie Control" below), not a script.
 
 Why two ports with different names: a virtual port made with a tool like loopMIDI is a loopback, so anything written to it is delivered straight back to whoever reads it. If Cubase used one port for both directions, it would hear its own output. In testing, a fader moved in Cubase snapped back to its old value for that reason. With one port per direction, the bridge writes to the first and reads the second, and nothing loops.
 
@@ -41,6 +42,7 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Automation modes  | Notes 58 / 59 / 60 / 61          | bridge → Cubase | Off (= Cross-Over), Trim (toggle), Latch, Touch: Cubase's global automation mode. Cubase gives no feedback; the bridge lights the LEDs from the last key pressed. |
 | Meters            | CC 80 + strip−1 (left), CC 88 + strip−1 (right), 0–127 | Cubase → bridge | From the script, already in dB (−55…0 dBFS onto 0–127). A strip with no right value is shown mono. |
 | Foot switch 1 / 2 | Note 62 / 63                     | bridge → Cubase | Play / record. Ignored for 4 s after start-up (phantom press). |
+| FLIP              | Note 77 (normal) / 78 (flipped)  | bridge → Cubase | The bridge toggles on each press and lights the FLIP LED; the script switches sub-pages. |
 
 LED state arrives as note on / off, or as polyphonic aftertouch with value 127 for "on"; the bridge accepts both.
 
@@ -59,12 +61,16 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | V-pots 1–4 | CC 17–20, relative signed-bit | bridge → Cubase | Sends 1–4 of the selected track (level). |
 | V-pot pushes | Notes 33–36 | bridge → Cubase | Send on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
 | 5–8 | Note 53 (sends 1–4) / 54 (sends 5–8) | bridge → Cubase | The bridge toggles on each press and lights the 5–8 LED for 5–8. |
-| MASTER | Note 44 (selected track) / 45 (main output) | bridge → Cubase | The bridge toggles on each press and lights the MASTER LED. |
+| MASTER / FLIP | Notes 44–47 | bridge → Cubase | Strip sub-page: 44 selected track, 45 main output, 46 selected track flipped, 47 main output flipped. The bridge toggles MASTER and FLIP and lights their LEDs. |
 | SHIFT + keys | Notes 56–61 | bridge → Cubase | SHIFT held in the bridge. ◀ = 56 Read, ▶ = 57 Write (selected track), Cycle = 58 Cross-Over, Click = 59 Trim, 1 = 60 Latch, 2 = 61 Touch. |
 | Meter | CC 80 (left), CC 81 (right), 0–127 | Cubase → bridge | From the script (already in dB, −55…0 dBFS); the level meter on the small display. |
-| BYPASS key | Note 62 | bridge → Cubase | The key above the display. Bound to `Mixer` / `Bypass: Inserts`, which Cubase does not run from a script yet. LED id 0x00 (orange) if a feedback note 62 ever arrives. |
+| BYPASS state | Note 62, velocity 0 / 64 / 127 | Cubase → bridge | From the script: no inserts / inserts active / all bypassed. LED id 0x00 off / orange 35 % / orange. |
+| BYPASS slots | Channel 2, notes 0–15, velocity 127 / 0 | bridge → Cubase | On a press (key id 0x18, handled in the bridge): each insert slot's new state, 127 = bypass, 0 = active. |
+| 360° | Note 55 | bridge → Cubase | `Transport / Exchange Time Formats`. |
+| Markers / bar steps | Notes 79 / 80, 81 / 82 | bridge → Cubase | SHIFT + jog = previous / next marker; SHIFT + ARROW = step back / forward one bar. |
+| Shuttle speeds | Notes 65–78 | bridge → Cubase | SHUTTLE (SHIFT + SCRUB): reverse 8× … 1/8×, then 1/8× … 8×; zero = the Stop note. |
 | Channel encoder | Note 40 (left) / 41 (right) | bridge → Cubase | One note pulse per 4 detents. Select previous / next track. |
-| Jog wheel | Note 42 (left) / 43 (right) | bridge → Cubase | One note pulse per 4 detents. Nudge cursor left / right. |
+| Jog wheel | Note 42 (left) / 43 (right) | bridge → Cubase | One note pulse per 4 detents. Nudge cursor left / right. In SCRUB the jog goes to the Mackie port instead (below). |
 | Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |
 | ARROW ◀ / ▶ | Note 40 / 41 | bridge → Cubase | One channel-encoder step: previous / next track. |
 | BANK ◀ / ▶ | UF8 note 46 / 47 | bridge → Cubase (UF8 port) | Banks the UF8. Without a UF8: eight steps of note 40 / 41, 40 ms apart. |
@@ -88,8 +94,21 @@ The scripts send display data to the bridge as SysEx on the surface's output por
 | UF1 track selected | `F0 7D 52 36 0A F7` | Cubase → bridge | Show the home view now and ignore temporary values for 0.5 s (the new track's sends arrive in a burst). |
 | UF8 bank-right request | `F0 7D 52 36 0B F7` | Cubase → bridge | The bridge answers with a bank-right press (note 47), held until 3 s after Cubase first spoke. Used by the start-up search for the selected track. |
 | UF8 fader level text | `F0 7D 52 36 0C <strip> <text…> F7` | Cubase → bridge | The strip's dB readout (6 characters + `dB`). |
+| UF1 transport position | `F0 7D 52 36 0D <text…> F7` | Cubase → bridge | Cubase's time text, e.g. `  1. 1. 1.   0` or `0:00:47.691`, for the 7-segment time field. |
 
 Names and colours are sent whenever the bank changes or the track's name or colour changes. An empty name clears the strip. For the UF1, strip is always 0.
+
+## Mackie Control (scrubbing)
+
+The bridge talks to a Mackie Control device in Cubase only for what the MIDI Remote API cannot do well:
+
+| Item | Message (MCU port) | Direction | Notes |
+|------|--------------------|-----------|-------|
+| Scrub mode | Note 101 (0x65), 127 then 0 | bridge → Cubase | Toggles Cubase's scrub mode (UF1 SCRUB). |
+| Scrub LED | Note 101, velocity > 0 = on | Cubase → bridge | Keeps the UF1 SCRUB state and LED in step. |
+| Jog | CC 60 (0x3C), 0x01 = clockwise, 0x41 = counter-clockwise | bridge → Cubase | One tick per detent while scrubbing. |
+
+Everything else Cubase sends on that port (display, LEDs, faders) is ignored.
 
 ## Not yet covered
 

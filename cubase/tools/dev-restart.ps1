@@ -105,15 +105,22 @@ if (-not (Test-Path $bridgeExe)) { throw "Bridge not found: $bridgeExe (build it
 # --- 5. Start the bridge in its own window --------------------------------------------------------------
 $bridgeArgs = @()
 if ($Trace) { $bridgeArgs += '--trace' }
-Write-Host 'Starting the bridge...'
-if ($bridgeArgs.Count -gt 0) {
-    Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe)
-} else {
-    Start-Process -FilePath $bridgeExe -WorkingDirectory (Split-Path $bridgeExe)
+# Start it in its own window. Now and then it exits straight away when started right after the previous one
+# (a surface or a port not released yet), so give it up to three starts before giving up.
+$bridgeUp = $false
+for ($try = 1; $try -le 3 -and -not $bridgeUp; $try++) {
+    if ($try -gt 1) { Write-Warning "The bridge exited at start-up; starting it again ($try of 3)..."; Start-Sleep -Seconds 3 }
+    else { Write-Host 'Starting the bridge...' }
+    if ($bridgeArgs.Count -gt 0) {
+        Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe)
+    } else {
+        Start-Process -FilePath $bridgeExe -WorkingDirectory (Split-Path $bridgeExe)
+    }
+    Start-Sleep -Seconds 4     # let it open the surfaces and create the ports before Cubase looks for them
+    $bridgeUp = [bool](Get-Process -Name 'cubase_sixty_bridge' -ErrorAction SilentlyContinue)
 }
-Start-Sleep -Seconds 4     # let it open the surfaces and create the ports before Cubase looks for them
-if (-not (Get-Process -Name 'cubase_sixty_bridge' -ErrorAction SilentlyContinue)) {
-    throw 'The bridge is not running (start cubase\bridge\build\Release\cubase_sixty_bridge.exe by hand to see why). Cubase not started.'
+if (-not $bridgeUp) {
+    throw 'The bridge did not stay up after three starts (start cubase\bridge\build\Release\cubase_sixty_bridge.exe by hand to see why). Cubase not started.'
 }
 
 # --- 6. Start Cubase ------------------------------------------------------------------------------------

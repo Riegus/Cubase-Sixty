@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.12.0-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.15.2-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -339,6 +339,28 @@ page.makeCommandBinding(trackPrev.mSurfaceValue, 'Project', 'Select Track: Prev'
 page.makeCommandBinding(trackNext.mSurfaceValue, 'Project', 'Select Track: Next')
 page.makeCommandBinding(jogLeft.mSurfaceValue, 'Transport', 'Nudge Cursor Left')
 page.makeCommandBinding(jogRight.mSurfaceValue, 'Transport', 'Nudge Cursor Right')
+// With SCRUB on, the bridge sends the jog as notes 63 / 64: Cubase's own jog (scrubs the audio).
+var scrubLeft = pulseButton(10, 63)
+var scrubRight = pulseButton(11, 64)
+page.makeCommandBinding(scrubLeft.mSurfaceValue, 'Transport', 'Jog Left')
+page.makeCommandBinding(scrubRight.mSurfaceValue, 'Transport', 'Jog Right')
+
+// SHIFT + jog = previous / next marker (79 / 80); SHIFT + ARROW = step back / forward one bar (81 / 82);
+// SHUTTLE (SHIFT + SCRUB) sends notes 65-78 for Cubase's shuttle speeds, reverse 8x .. 1/8x, then 1/8x .. 8x.
+var moreTransport = [
+	{ note: 79, command: 'Locate Previous Marker' },
+	{ note: 80, command: 'Locate Next Marker' },
+	{ note: 81, command: 'Step Back Bar' },
+	{ note: 82, command: 'Step Bar' }
+]
+var shuttleSpeeds = ['Reverse 8x', 'Reverse 4x', 'Reverse 2x', 'Reverse 1x', 'Reverse 1/2x', 'Reverse 1/4x', 'Reverse 1/8x',
+	'1/8x', '1/4x', '1/2x', '1x', '2x', '4x', '8x']
+for (var sp = 0; sp < shuttleSpeeds.length; ++sp) moreTransport.push({ note: 65 + sp, command: 'Shuttle Play ' + shuttleSpeeds[sp] })
+for (var mt = 0; mt < moreTransport.length; ++mt) {
+	var mtButton = surface.makeButton(mt, 9, 1, 1)
+	mtButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, moreTransport[mt].note)
+	page.makeCommandBinding(mtButton.mSurfaceValue, 'Transport', moreTransport[mt].command)
+}
 
 // ---------------------------------------------------------------------------
 // NAV cross (notes 48-52): left / right = zoom out / in, up / down = vertical zoom in / out, centre opens /
@@ -413,14 +435,52 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// The key above the display (note 62): bypass the selected track's inserts. The API has no insert-bypass
-// value, so this is the Mixer command "Bypass: Inserts" (acts on the selected channel). Commands report
-// no state, so the key's LED stays off.
+// The key above the display (note 62): bypass all inserts of the selected track, with an LED that is on while
+// the track has active (non-bypassed) inserts and off when it has none.
+// One insert viewer per used slot. The script reports the state to the bridge as note 62: velocity 0 = no
+// inserts (LED off), 64 = inserts active (LED half lit), 127 = all bypassed (LED lit). On a press the bridge
+// sends every slot its new state on MIDI channel 2, notes 0..15 (velocity 127 = bypass, 0 = active).
+// (Channel 2, because notes 83..98 on channel 1 collided with the transport keys and started playback.)
 // ---------------------------------------------------------------------------
 
-var bypassKey = surface.makeButton(6, 1, 1, 1)
-bypassKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 62)
-page.makeCommandBinding(bypassKey.mSurfaceValue, 'Mixer', 'Bypass: Inserts')
+;(function () {
+	var SLOTS = 16
+	var slots = []
+	var ledOn = null
+	function updateLed(activeDevice) {
+		var present = false, active = false
+		for (var k = 0; k < slots.length; ++k) if (slots[k].present) { present = true; if (!slots[k].bypassed) active = true }
+		var vel = !present ? 0 : active ? 64 : 127
+		if (vel === ledOn) return
+		ledOn = vel
+		midiOutput.sendMidi(activeDevice, [0x90, 62, vel])
+	}
+	try {
+		for (var k = 0; k < SLOTS; ++k) {
+			var viewer = selectedChannel.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyBypass' + k)
+				.excludeEmptySlots().accessSlotAtIndex(k)
+			var state = surface.makeCustomValueVariable('insertBypass' + k)
+			page.makeValueBinding(state, viewer.mBypass)
+			var slot = { present: false, bypassed: false, state: state }
+			slots.push(slot)
+			;(function (slot, index) {
+				viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) {
+					slot.present = !!name
+					updateLed(activeDevice)
+				}
+				state.mOnProcessValueChange = function (activeDevice, value) {
+					slot.bypassed = value > 0.5
+					updateLed(activeDevice)
+				}
+			})(slot, k)
+			var slotKey = surface.makeButton(k, 10, 1, 1)
+			slotKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, k)
+			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
+		}
+	} catch (e) {
+		console.log('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)
+	}
+})()
 
 // ---------------------------------------------------------------------------
 // Time display: the transport position goes to the bridge as SysEx 0D <text> and shows in the big
