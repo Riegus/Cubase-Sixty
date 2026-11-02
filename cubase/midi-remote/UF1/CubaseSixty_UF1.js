@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.16.1-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.17.0-dev (MODE: PLUGIN = Quick Controls, DAW = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -121,8 +121,30 @@ activatorButton(5, 47, stripMasterFlip)
 // Turn = send level, push = send on / off. The knob above the fader (CC 16) is pan, bound above.
 
 // Screen feedback for a send V-pot: the value line shows "S1 -6.0dB", the bar under it the level.
+// A V-pot's value line: 'S<n> <level>' for a send, '<name> <value>' for a Quick Control (PLUGIN view).
 function attachSendFeedback(surfaceValue, number) {
-	attachFeedback(surfaceValue, function () { return 'S' + (number + sendOffset) + ' ' }, 0x02, false)
+	var title = ''
+	var lastText = null
+	var lastPos = null
+	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) { title = valueTitle || objectTitle || '' }
+	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		var text
+		if (qcActive) {
+			var v = String(value) + (units ? units : '')
+			var room = Math.max(3, 12 - v.length - 1)
+			text = (title ? String(title).substr(0, room) + ' ' : 'QC' + (number + sendOffset) + ' ') + v
+		} else {
+			text = 'S' + (number + sendOffset) + ' ' + value + (units ? units : (/^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
+		}
+		if (text === lastText) return
+		lastText = text
+		sendValueLine(activeDevice, text, false)
+	}
+	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		if (value === lastPos) return
+		lastPos = value
+		sendBar(activeDevice, value, 0x02, false)
+	}
 }
 
 // Value line + readout bar for one control. Cubase re-sends every bound value whenever one changes, so
@@ -175,11 +197,22 @@ vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 var sendArea = page.makeSubPageArea('Sends')
 var sends14 = sendArea.makeSubPage('Sends 1-4')
 var sends58 = sendArea.makeSubPage('Sends 5-8')
+// MODE picks the view (the bridge keeps MODE and the soft keys): PLUGIN puts the V-pots on Cubase's Quick
+// Controls (of the focused plug-in window, or the track's own), 1-4 or 5-8 (notes 88 / 89).
+var qc14 = sendArea.makeSubPage('Quick Controls 1-4')
+var qc58 = sendArea.makeSubPage('Quick Controls 5-8')
 var sendOffset = 0
-sends14.mOnActivate = function (activeDevice) { sendOffset = 0 }
-sends58.mOnActivate = function (activeDevice) { sendOffset = 4 }
+var qcActive = false
+sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false }
+sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false }
+qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true }
+qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true }
 activatorButton(2, 53, sends14)
 activatorButton(3, 54, sends58)
+activatorButton(6, 88, qc14)
+activatorButton(7, 89, qc58)
+var quickControls = null
+try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { console.log('[CubaseSixty UF1] Quick Controls not available: ' + e) }
 
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
@@ -192,6 +225,14 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
 	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
 	var banks = [{ subPage: sends14, index: sendIndex }, { subPage: sends58, index: sendIndex + 4 }]
+	if (quickControls) {
+		try {
+			page.makeValueBinding(sendKnob.mSurfaceValue, quickControls.getByIndex(sendIndex)).setSubPage(qc14)
+			page.makeValueBinding(sendKnob.mSurfaceValue, quickControls.getByIndex(sendIndex + 4)).setSubPage(qc58)
+		} catch (e) {
+			console.log('[CubaseSixty UF1] Quick Control ' + (sendIndex + 1) + ' could not be bound: ' + e)
+		}
+	}
 	for (var bk = 0; bk < banks.length; ++bk) {
 		try {
 			var send = selectedChannel.mSends.getByIndex(banks[bk].index)

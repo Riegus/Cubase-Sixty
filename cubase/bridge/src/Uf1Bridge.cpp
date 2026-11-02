@@ -76,9 +76,19 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
+bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
+bool g_pluginView = false;   // view: false = DAW (V-pots on sends), true = PLUGIN (V-pots on Quick Controls)
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
+void paintSoftKeys();
+// The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
+void sendVpotPage()
+{
+    const uint8_t n = g_pluginView ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
+    note(n, true);
+    note(n, false);
+}
 
 // Shuttle: speed index -7..7 (0 = stopped). Negative = reverse. Notes 65..71 = reverse 8x .. 1/8x,
 // 72..78 = forward 1/8x .. 8x (Cubase's "Shuttle Play" commands); stop = the STOP key's note.
@@ -204,12 +214,32 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             showScrubLed();
             break;
         }
+        // MODE: while held, the four display soft keys pick the view (as in Rea-Sixty): 1 PLUGIN (V-pots on
+        // Cubase's Quick Controls), 2 DAW (V-pots on the sends); 3 and 4 are not used yet. Releasing MODE
+        // closes the picker. The view keeps its 5-8 state (Quick Controls 5-8 / sends 5-8).
+        if (ev.id == 0x20) {
+            g_modeHeld = ev.pressed;
+            paintSoftKeys();
+            break;
+        }
+        if (ev.id >= 0x19 && ev.id <= 0x1C) {
+            if (!ev.pressed || !g_modeHeld) break;
+            if (ev.id == 0x19 || ev.id == 0x1A) {
+                const bool plugin = ev.id == 0x19;
+                if (plugin != g_pluginView) {
+                    g_pluginView = plugin;
+                    sendVpotPage();
+                    if (g_trace) std::printf("UF1 view: %s\n", plugin ? "PLUGIN" : "DAW");
+                }
+                paintSoftKeys();
+            }
+            break;
+        }
         // 5-8: the V-pots switch between sends 1-4 (note 53) and 5-8 (note 54). LED on = 5-8.
         if (ev.id == 0x22) {
             if (!ev.pressed) break;
             g_sends58 = !g_sends58;
-            note(g_sends58 ? 54 : 53, true);
-            note(g_sends58 ? 54 : 53, false);
+            sendVpotPage();
             setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
             break;
         }
@@ -288,6 +318,39 @@ void showSelLed()
     }
     g_dev.send(::uf1::buildColourRgb(sel.id, rgb));
     g_dev.send(::uf1::buildLedLevel(sel.id, 0x00));
+}
+
+// The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
+// takes no FF39 frame: Rea-Sixty found that one sticks its rectangle on.
+void softKeyLed(int i, uint32_t rgb)
+{
+    const uint8_t id = uint8_t(0x01 + i);
+    {
+        std::lock_guard<std::mutex> lk(g_ledMx);
+        if (g_ledEnabled.insert(id).second) g_dev.send(::uf1::buildLed(id, true));
+    }
+    g_dev.send(::uf1::buildColourRgb(id, rgb));
+    if (i != 0) g_dev.send(::uf1::buildLedLevel(id, 0x00));
+}
+void paintSoftKeys()
+{
+    if (!g_open) return;
+    static const char* const kPicker[4] = {"PLUGIN", "DAW", "", ""};
+    for (int i = 0; i < 4; ++i) {
+        const std::string label = g_modeHeld ? kPicker[i] : "";
+        std::vector<uint8_t> p;
+        p.push_back(uint8_t(i));
+        p.insert(p.end(), label.begin(), label.end());
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
+        uint32_t rgb = 0;   // dark
+        if (g_modeHeld && i < 2) {
+            const bool on = (i == 0) == g_pluginView;
+            rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
+        }
+        softKeyLed(i, rgb);
+    }
+    const uint8_t noHighlight = 0;
+    g_dev.send(::uf1::buildScreen(0x0102, std::span<const uint8_t>(&noHighlight, 1)));
 }
 
 // Screen text zone: 0x00, then the text (the UF1 reads one byte per glyph, so ASCII only here).
@@ -580,6 +643,7 @@ bool uf1OpenDevice()
         screenText(::uf1::scr::kCsType, std::string(12, ' '));
         screenText(::uf1::scr::kChNumber, "");
         screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
+        paintSoftKeys();   // the four display soft keys: blank and dark until MODE is held
         // The meter's neighbours, as Rea-Sixty writes them: peak indicator (0x000a) and the compressor / gate
         // gain-reduction LEDs (0x0015 / 0x0016), all at rest.
         {
@@ -670,6 +734,7 @@ bool uf1Reopen()
     setLed(uf1m::Led{0x20, 0xFFFFFF}, g_flip);
     showScrubLed();
     showStripNumber();
+    paintSoftKeys();
     std::printf("UF1 reopened.\n");
     return true;
 }
