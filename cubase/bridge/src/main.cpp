@@ -17,6 +17,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -202,10 +203,23 @@ void pushPalette()
     g_dev.send(uf8::buildColorCommand(idx));
 }
 
+// The latest message from Cubase per kind, replayed after the UF8 is reopened (Cubase only sends changes).
+std::mutex g_uf8CacheMx;
+std::map<int, std::vector<unsigned char>> g_uf8Cache;
+
 void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
+    {
+        // Names / colours / pan / levels by (command, strip); faders by channel; LED notes by note number.
+        std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+        const uint8_t st = m[0] & 0xF0;
+        if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && (m[4] == 0x01 || m[4] == 0x02 || m[4] == 0x06 || m[4] == 0x07 || m[4] == 0x0C))
+            g_uf8Cache[0x10000 + (m[4] << 8) + m[5]] = m;
+        else if (st == 0xE0 && m.size() >= 3) g_uf8Cache[0x20000 + (m[0] & 0x0F)] = m;
+        else if ((st == 0x90 || st == 0x80 || st == 0xA0) && m.size() >= 3) g_uf8Cache[m[1]] = m;
+    }
     const uint8_t status = m[0] & 0xF0;
 
     if (m[0] == 0xF0) {   // SysEx: names and colours
@@ -233,6 +247,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 g_dev.send(std::move(frames[0]));
                 g_dev.send(std::move(frames[1]));
                 g_dev.send(uf8::buildFaderDbReadout(uint8_t(n->strip), "", ""));
+                // Its SOLO / CUT / SEL LEDs keep the previous track's state (Cubase sends nothing for an
+                // empty strip), so switch them off.
+                for (int cls = 0; cls < 3; ++cls) setLed(n->strip, cls, false);
             }
         } else if (m.size() >= 7 && m[4] == 0x0C && m[5] < kStrips) {
             // Fader level text -> the strip's dB readout (6 characters + "dB").
@@ -240,16 +257,51 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
-        } else if (m.size() >= 6 && m[4] == 0x0B) {
-            // The script asks for one bank step to the right (start-up search for the selected track).
-            // Cubase ignores bank keys during its first seconds, so hold the press until 3 s after Cubase
-            // first spoke to us.
+        } else if (m.size() >= 6 && m[4] == 0x11) {
+            // The script asks for a "tick" in 300 ms (note 80): it has no timer of its own, and wants to look
+            // at the bank only after Cubase has finished reacting to a new selection.
+            std::thread([] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                note(80, true);
+                note(80, false);
+            }).detach();
+        } else if (m.size() >= 7 && m[4] == 0x10) {
+            // The script asks for a jump: bank reset (note 79, to the first bank), then <count> bank-rights,
+            // 60 ms apart. Used by "follow the selection" for far jumps.
+            const int count = m[5] <= 64 ? m[5] : 64;
+            const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            // Cubase ignores bank keys at first (at start-up a burst sent after 3 s still lost most steps).
+            const long long wait = g_cubaseFirstMs + 5000 - now;
+            std::thread([count, wait] {
+                if (wait > 0) std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+                note(79, true);
+                note(79, false);
+                for (int i = 0; i < count; ++i) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    note(kNoteBankRight, true);
+                    note(kNoteBankRight, false);
+                }
+                // Tell the script the burst is over (note 80), so it checks where the bank landed.
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+                note(80, true);
+                note(80, false);
+            }).detach();
+        } else if (m.size() >= 6 && (m[4] == 0x0B || m[4] == 0x0F)) {
+            // The script asks for bank steps: 0B = right, 0F = left, optional count byte (default 1). Used by
+            // the start-up search and by "follow the selection". Cubase ignores bank keys during its first
+            // seconds, so the presses wait until 3 s after Cubase first spoke, and they are spaced 60 ms apart
+            // (presses sent back to back were merged).
+            const bool right = m[4] == 0x0B;
+            const int count = (m.size() >= 7 && m[5] >= 1 && m[5] <= 64) ? m[5] : 1;
             const long long now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
             const long long wait = g_cubaseFirstMs + 3000 - now;
-            std::thread([wait] {
+            std::thread([wait, right, count] {
                 if (wait > 0) std::this_thread::sleep_for(std::chrono::milliseconds(wait));
-                note(kNoteBankRight, true);
-                note(kNoteBankRight, false);
+                for (int i = 0; i < count; ++i) {
+                    note(right ? kNoteBankRight : kNoteBankLeft, true);
+                    note(right ? kNoteBankRight : kNoteBankLeft, false);
+                    if (i + 1 < count) std::this_thread::sleep_for(std::chrono::milliseconds(60));
+                }
             }).detach();
         } else if (m.size() >= 8 && m[4] == 0x06 && m[5] < kStrips) {
             // Pan position 0..127 -> the readout bar under the strip (a single line, like SSL's pan).
@@ -321,6 +373,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         }
         if (auto t = noteToLed(m[1])) {
             const bool on = status != 0x80 && m[2] > 0;
+            if (on && t->cls <= 2 && t->strip >= 0 && t->strip < kStrips && g_stripEmpty[t->strip]) return;   // empty strip stays dark
             setLed(t->strip, t->cls, on);
         }
     }
@@ -433,8 +486,29 @@ int main(int argc, char** argv)
             if (!cs::uf1Reopen()) { std::fprintf(stderr, "UF1 could not be reopened; exiting (restart the bridge).\n"); break; }
         }
         if (uf8Ok && g_dev.needsReopen()) {
-            std::fprintf(stderr, "The UF8 went away (%s); exiting (restart the bridge).\n", g_dev.lastError().c_str());
-            break;
+            // Reopen it (three tries) and replay the last state Cubase sent; the MIDI ports stay as they are.
+            std::fprintf(stderr, "The UF8 stopped answering (%s); reopening...\n", g_dev.lastError().c_str());
+            g_dev.close();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            bool reopened = false;
+            for (int attempt = 1; attempt <= 3 && !reopened; ++attempt) {
+                if (attempt > 1) std::this_thread::sleep_for(std::chrono::seconds(2));
+                reopened = g_dev.open();
+            }
+            if (!reopened) {
+                std::fprintf(stderr, "The UF8 could not be reopened (%s); exiting (restart the bridge).\n", g_dev.lastError().c_str());
+                g_uf8Running = false;
+                uf8Ok = false;
+                break;
+            }
+            g_dev.setRawInputHandler(onUsbInput);
+            { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
+            g_meterShown = {};
+            std::map<int, std::vector<unsigned char>> cache;
+            { std::lock_guard<std::mutex> lk(g_uf8CacheMx); cache = g_uf8Cache; }
+            for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
+            cs::autoModePressed(0);
+            std::printf("UF8 reopened.\n");
         }
     }
     if (uf8Ok) g_dev.close();

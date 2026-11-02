@@ -371,10 +371,12 @@ void revertLoop() {
 // Channel-number box: the UF8 strip holding the selected track (blank while MASTER is on, or when the
 // track is not on the UF8's current bank).
 std::atomic<int> g_stripNo{0};
+std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected track's MixConsole position, 0 = unknown
 void showStripNumber()
 {
+    // The track number when the script knows it, else the UF8 strip; blank on MASTER.
     if (!g_open) return;
-    const int n = g_stripNo;
+    const int n = g_trackNo > 0 ? int(g_trackNo) : int(g_stripNo);
     screenText(::uf1::scr::kChNumber, (g_master || n == 0) ? std::string() : std::to_string(n));
 }
 
@@ -415,6 +417,9 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t pos = uint8_t(m[5] > 100 ? 100 : m[5]);
         const uint8_t style = (m.size() >= 8 && (m[6] == 0x01 || m[6] == 0x02 || m[6] == 0x08)) ? m[6] : 0x02;
         if (m[4] == 0x09) barHome(pos, style); else barTemporary(pos, style);
+    } else if (m[4] == 0x0E && m.size() >= 8) {
+        g_trackNo = (int(m[5]) << 7) | int(m[6]);
+        showStripNumber();
     } else if (m[4] == 0x0D) {
         // Transport position text -> the 7-segment time field on the big display. Cubase pads every part of
         // the position to a fixed width with spaces ("  1. 1. 1.   0"), so spaces stay as blank cells: the

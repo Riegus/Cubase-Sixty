@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.15.2-dev (sends 1-8, MASTER, SHIFT automation, meter)')
+console.log('[CubaseSixty UF1] script loaded, version 0.16.0-dev (sends 1-8, MASTER, SHIFT automation, meter)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -523,6 +523,41 @@ try {
 	// Cubase's transport bar), so 360 switches between, say, bars and timecode.
 	page.makeCommandBinding(formatKey.mSurfaceValue, 'Transport', 'Exchange Time Formats')
 	console.log('[CubaseSixty UF1] 360 key: Transport / Exchange Time Formats')
+})()
+
+// ---------------------------------------------------------------------------
+// Track number for the channel-number box: Cubase does not give it, so a hidden bank of all mixer channels
+// (the same channel types as the UF8 bank) watches which one is selected. Its position is the number,
+// counted in MixConsole order. Sent as SysEx 0E <high 7 bits> <low 7 bits>; 0 = not found.
+// ---------------------------------------------------------------------------
+
+;(function () {
+	var CHANNELS = 256
+	var selectedIndex = -1
+	var sentNumber = -1
+	function sendNumber(activeDevice) {
+		var n = selectedIndex + 1
+		if (n === sentNumber) return
+		sentNumber = n
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
+	}
+	try {
+		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Track numbers').excludeInputChannels().excludeOutputChannels()
+		for (var c = 0; c < CHANNELS; ++c) {
+			var ch = zone.makeMixerBankChannel()
+			var sel = surface.makeCustomValueVariable('trackNumberSel' + c)
+			page.makeValueBinding(sel, ch.mValue.mSelected)
+			;(function (index) {
+				sel.mOnProcessValueChange = function (activeDevice, value) {
+					if (value > 0.5) selectedIndex = index
+					else if (selectedIndex === index) selectedIndex = -1
+					sendNumber(activeDevice)
+				}
+			})(c)
+		}
+	} catch (e) {
+		console.log('[CubaseSixty UF1] track numbers not available: ' + e)
+	}
 })()
 
 // Meter scale: Cubase reports the meter as linear amplitude (0..1), which read far too low when sent
