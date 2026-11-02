@@ -62,7 +62,8 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | Pan knob | CC 16, relative signed-bit | bridge → Cubase | The knob above the fader (encoder id 0). Pan of the selected track. |
 | V-pots 1–4 | CC 17–20, relative signed-bit | bridge → Cubase | Sends 1–4 of the selected track (level). |
 | V-pot pushes | Notes 33–36 | bridge → Cubase | Send on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
-| 5–8 | Note 53 (sends 1–4) / 54 (sends 5–8) | bridge → Cubase | The bridge toggles on each press and lights the 5–8 LED for 5–8. |
+| 5–8 | Note 53 (sends 1–4) / 54 (sends 5–8); in the PLUGIN view 88 (Quick Controls 1–4) / 89 (5–8) | bridge → Cubase | The bridge toggles on each press and lights the 5–8 LED for 5–8. |
+| MODE + display soft keys | Note 53 / 54 (DAW) or 88 / 89 (PLUGIN) | bridge → Cubase | Handled in the bridge: while MODE is held, the four display soft keys show the view picker (1 PLUGIN, 2 DAW, 3 and 4 not used yet; labels at cell 0x0104, LEDs 0x01–0x04, the active view lit yellow). Picking a view sends the V-pot page for that view and the current 5–8 state. |
 | MASTER / FLIP | Notes 44–47 | bridge → Cubase | Strip sub-page: 44 selected track, 45 main output, 46 selected track flipped, 47 main output flipped. The bridge toggles MASTER and FLIP and lights their LEDs. |
 | SHIFT + keys | Notes 56–61 | bridge → Cubase | SHIFT held in the bridge. ◀ = 56 Read, ▶ = 57 Write (selected track), Cycle = 58 Cross-Over, Click = 59 Trim, 1 = 60 Latch, 2 = 61 Touch. |
 | Meter | CC 80 (left), CC 81 (right), 0–127 | Cubase → bridge | From the script (already in dB, −55…0 dBFS); the level meter on the small display. |
@@ -120,5 +121,5 @@ Everything else Cubase sends on that port (display, LEDs, faders) is ignored.
 ## Not yet covered
 
 - UC1 mappings.
-- The UF1 MODE key.
+- The UF1 MODE views METER and SENDS (soft keys 3 and 4).
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.
