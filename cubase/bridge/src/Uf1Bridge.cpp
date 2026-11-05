@@ -26,6 +26,7 @@
 #include "Mapping.h"
 #include "UF1Device.h"
 #include "UF1Protocol.h"
+#include "Uf1Pacer.h"
 
 namespace cs {
 namespace {
@@ -82,8 +83,8 @@ bool g_modeHeld = false;     // MODE held: the four display soft keys show the v
 // 3 SENDS = V-pots on the sends and the four sends shown in the display's V-pot cells).
 enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
 std::atomic<int> g_view{kViewDaw};
-void paintSendCells(bool force = false, bool beat = false);
-void startCellBeat();
+void paintSendCells(bool force = false);
+void startIdleCycle();
 struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
 std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
@@ -263,7 +264,6 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     g_view = view;
                     if (pageChanges) sendVpotPage();
                     paintSendCells(true);
-                    if (view == kViewSends) startCellBeat();
                     if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : "SENDS");
                 }
                 paintSoftKeys();
@@ -407,32 +407,46 @@ std::string sendCellLine(const SendCell& c)
 // the V-pot row behind and choppy. So updates only mark the cells dirty, and a paint goes out at most every
 // 40 ms (25 per second) with the latest state.
 long long nowMs();
-// The SENDS cells are drawn by a metronome: every 40.8 ms, without a break, as long as the view is shown.
-// Rea-Sixty found that the UF1 renders continuously only while frames arrive in an unbroken ~40.8 ms stream
-// (SSL 360 streams its cycle all the time, even in the channel view); with bursty updates the firmware falls
-// back to rendering when the stream pauses. Turning a V-pot is exactly that: smooth at first, then choppy.
-// The bar sweep test (a steady 40 ms stream) was smooth, text or not. So the bars frame goes out on every
-// beat, changed or not, and changed text goes with it.
-std::atomic<bool> g_cellBeatRunning{false};
-void startCellBeat()
+// ---------------------------------------------------------------------------
+// The idle cycle. Rea-Sixty found (uf1CyclePacerLoop_, cap84 / cap101) that the UF1 draws its big display
+// continuously only while it gets SSL's cycle without a break: every ~40.8 ms a meter group (0009 000a 0015
+// 0016) about 18 ms in and a closing group (011d) at the end, with silences in between that are the
+// device's render windows. Without the stream, or with frames landing inside it, the firmware falls back to
+// drawing when the traffic pauses: V-pot cells turned smooth at first, then choppy. So the bridge streams
+// the channel view's idle cycle from the moment the UF1 is open, and carries the level meter in it; other
+// frames sent meanwhile are held by the device class and go out right after each cycle (as SSL does).
+// ---------------------------------------------------------------------------
+std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
+std::atomic<bool> g_cycleRunning{false};
+void startIdleCycle()
 {
     bool expected = false;
-    if (!g_cellBeatRunning.compare_exchange_strong(expected, true)) return;
+    if (!g_cycleRunning.compare_exchange_strong(expected, true)) return;
     std::thread([] {
-        auto next = std::chrono::steady_clock::now();
-        while (g_view == kViewSends && g_open) {
-            next += std::chrono::microseconds(40800);
-            paintSendCells(false, true);
-            std::this_thread::sleep_until(next);
+        auto slot = std::chrono::steady_clock::now();
+        while (g_open) {
+            uf1pace::Parts p;
+            const uint8_t level[4] = { g_meterL.load(), g_meterR.load(), 0x00, 0x00 };
+            const uint8_t idle[4] = { 0x00, 0x00, 0x00, 0x00 };
+            const uint8_t zero = 0x00, closeValue = 0x11;   // 011d = 11 closes the channel view's idle cycle
+            p.meters.push_back(::uf1::buildScreen(0x0009, level));
+            p.meters.push_back(::uf1::buildScreen(0x000a, idle));
+            p.meters.push_back(::uf1::buildScreen(0x0015, std::span<const uint8_t>(&zero, 1)));
+            p.meters.push_back(::uf1::buildScreen(0x0016, std::span<const uint8_t>(&zero, 1)));
+            p.tail.push_back(::uf1::buildScreen(0x011d, std::span<const uint8_t>(&closeValue, 1)));
+            uf1pace::emitCycle(g_dev, p, slot);
+            slot += std::chrono::microseconds(40800);
+            std::this_thread::sleep_until(slot);
         }
-        g_cellBeatRunning = false;
+        g_cycleRunning = false;
     }).detach();
 }
 
 
+
 // Only what changed goes out (turning one V-pot used to resend all four cells, the bars and the styles for
 // every step, which made the bar slow and choppy). force: send everything (view change, start-up, reopen).
-void paintSendCells(bool force, bool beat)
+void paintSendCells(bool force)
 {
     if (!g_open) return;
     std::lock_guard<std::mutex> lk(g_cellMx);
@@ -477,9 +491,9 @@ void paintSendCells(bool force, bool beat)
         bars[size_t(i) * 2 + 1] = 0x80;
         styles[size_t(i)] = on ? 0x01 : 0x03;
     }
-    if (force || beat || bars != shownBars) {
+    if (force || bars != shownBars) {
         shownBars = bars;
-        if (g_trace && !beat) std::printf("%lld cell bars out: %d %d %d %d\n", nowMs() % 100000, bars[0], bars[2], bars[4], bars[6]);
+        if (g_trace) std::printf("%lld cell bars out: %d %d %d %d\n", nowMs() % 100000, bars[0], bars[2], bars[4], bars[6]);
         g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
     }
     if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
@@ -628,7 +642,7 @@ void onSysex(const std::vector<unsigned char>& m)
         lk.unlock();
         // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
         // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
-        // Drawn by the beat (startCellBeat), which picks up the new state on its next tick.
+        if (g_view == kViewSends) paintSendCells(false);
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
@@ -715,8 +729,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         else { lvL = lv; if (!g_uf1RightSeen) lvR = lv; }
         if (lvL == shownL && lvR == shownR) return;
         shownL = lvL; shownR = lvR;
-        const uint8_t cell[4] = { lvL, lvR, 0x00, 0x00 };
-        g_dev.send(::uf1::buildScreen(0x0009, cell));
+        g_meterL = lvL; g_meterR = lvR;   // the idle cycle carries the meter (startIdleCycle)
         return;
     }
     if (status == 0xE0 && (m[0] & 0x0F) == 0) {   // fader from Cubase
@@ -794,6 +807,7 @@ bool uf1OpenDevice()
         screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
         paintSoftKeys();   // the four display soft keys: blank and dark until MODE is held
         paintSendCells(true);  // the V-pot cells: blank outside the SENDS view
+        startIdleCycle();      // the unbroken cycle stream the UF1 wants (see startIdleCycle)
         // The meter's neighbours, as Rea-Sixty writes them: peak indicator (0x000a) and the compressor / gate
         // gain-reduction LEDs (0x0015 / 0x0016), all at rest.
         {
@@ -886,7 +900,7 @@ bool uf1Reopen()
     showStripNumber();
     paintSoftKeys();
     paintSendCells(true);
-    if (g_view == kViewSends) startCellBeat();
+    startIdleCycle();
     std::printf("UF1 reopened.\n");
     return true;
 }
