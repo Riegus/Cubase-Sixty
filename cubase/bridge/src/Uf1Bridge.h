@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include <vector>
 // UF1 side of the bridge: owns the UF1 USB device and its own pair of MIDI ports
 // ("Cubase-Sixty UF1 to Cubase" / "... from Cubase"). See Uf1Bridge.cpp.
 namespace cs {
@@ -22,4 +23,7 @@ void autoModePressed(uint8_t note);
 // The UF8 strip (1-8) that holds the selected track, 0 = not on the UF8's current bank. Shown in the UF1's
 // channel-number box.
 void uf1SetStripNumber(int n);
+// A SysEx message for the UF1 script (passed on from the UF8 script: which of several same-named tracks is
+// selected, SysEx 1C).
+void uf1SendToScript(const std::vector<unsigned char>& msg);
 }

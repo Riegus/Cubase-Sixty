@@ -914,6 +914,8 @@ void uf1SetStripNumber(int n)
     if (g_stripNo.exchange(n) != n) showStripNumber();
 }
 
+void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
+
 bool uf1NeedsReopen() { return g_open && g_dev.needsReopen(); }
 
 std::string uf1LastError() { return g_dev.lastError(); }

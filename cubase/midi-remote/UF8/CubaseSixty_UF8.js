@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.11.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.11.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -555,6 +555,7 @@ function meterToMidi(value) {
 				}
 			}
 		}
+		sendSameNameRank(activeDevice, pick)
 		// Only a real change may bank: Cubase re-sends the same values after every bank step.
 		if (pick === selectedIndex) return
 		selectedIndex = pick
@@ -568,6 +569,28 @@ function meterToMidi(value) {
 		pickCurrent(activeDevice)
 	}
 	followStripSelect = function (activeDevice) { pickCurrent(activeDevice) }
+	// Tell the UF1 script (via the bridge) which of several same-named tracks is selected: its rank among
+	// them, top to bottom (SysEx 1C <rank> <name, 3 x 7 bits per character>). The UF1 is not told otherwise:
+	// Cubase reports only the name, which does not change between them.
+	var sentRank = -1, sentRankTitle = null
+	function sendSameNameRank(activeDevice, pick) {
+		if (pick < 0 || !currentTitle) return
+		var rank = 0, count = 0
+		for (var j = 0; j < allTitles.length; ++j) {
+			if (allTitles[j] !== currentTitle) continue
+			if (j < pick) ++rank
+			++count
+		}
+		if (count < 2 || (rank === sentRank && currentTitle === sentRankTitle)) return
+		sentRank = rank
+		sentRankTitle = currentTitle
+		var name = []
+		for (var n = 0; n < currentTitle.length && n < 48; ++n) {
+			var c = currentTitle.charCodeAt(n)
+			name.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1C, rank & 0x7F], name, [0xF7]))
+	}
 	function currentOffset() {
 		// The bank position: where the strips' names appear in the full list.
 		for (var o = 0; o < CHANNELS; ++o) {

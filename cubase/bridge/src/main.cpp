@@ -311,6 +311,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+        } else if (m.size() >= 7 && m[4] == 0x1C) {
+            // Which of several same-named tracks the UF8 script found selected: for the UF1 script's track number.
+            cs::uf1SendToScript(std::vector<unsigned char>(m.begin(), m.end()));
         } else if (m.size() >= 6 && m[4] == 0x1B) {
             // The UF8 script asks for the helper's channel lists.
             if (g_helperOpen) {
