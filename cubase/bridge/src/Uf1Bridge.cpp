@@ -83,6 +83,7 @@ bool g_modeHeld = false;     // MODE held: the four display soft keys show the v
 // 3 SENDS = V-pots on the sends and the four sends shown in the display's V-pot cells).
 enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
 std::atomic<int> g_view{kViewDaw};
+long long nowMs();
 void paintSendCells(bool force = false);
 void startIdleCycle();
 struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
@@ -131,7 +132,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
 {
     using K = ::uf1::InputKind;
     if (g_trace && ev.kind != K::FaderPosition)
-        std::printf("[UF1 event] kind=%d id=0x%02X pressed=%d delta=%d\n", int(ev.kind), ev.id, int(ev.pressed), ev.delta);
+        std::printf("%lld [UF1 event] kind=%d id=0x%02X pressed=%d delta=%d\n", nowMs() % 100000, int(ev.kind), ev.id, int(ev.pressed), ev.delta);
     switch (ev.kind) {
     case K::FaderTouch:
         g_touched = ev.pressed;
@@ -406,7 +407,6 @@ std::string sendCellLine(const SendCell& c)
 // Turning a V-pot brings several updates per step (level text, position); drawing each one at once kept
 // the V-pot row behind and choppy. So updates only mark the cells dirty, and a paint goes out at most every
 // 40 ms (25 per second) with the latest state.
-long long nowMs();
 // ---------------------------------------------------------------------------
 // The idle cycle. Rea-Sixty found (uf1CyclePacerLoop_, cap84 / cap101) that the UF1 draws its big display
 // continuously only while it gets SSL's cycle without a break: every ~40.8 ms a meter group (0009 000a 0015
