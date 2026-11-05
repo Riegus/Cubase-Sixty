@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.18.1-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
+console.log('[CubaseSixty UF1] script loaded, version 0.19.0-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -126,6 +126,27 @@ activatorButton(5, 47, stripMasterFlip)
 // (SysEx 15: pot index, position 0..100, "name|level"). Sent in every view; the bridge shows them only in SENDS.
 // The send's name is its destination, reported by the send slot itself (the knob's title is only the slot
 // number and "Level"). sendNames holds sends 1-8; the cells show the four on the V-pots' page.
+// The V-pots 1-4 are absolute: the bridge keeps each one's position, adds the turns itself and sends the
+// new position (as Rea-Sixty owns the value in REAPER). So it needs Cubase's position: SysEx 17 <pot>
+// <high 7 bits> <low 7 bits> on every change, and again every second (Cubase drops what is sent while a
+// project loads).
+var vpotPositions = [-1, -1, -1, -1]
+function reportVpotPosition(activeDevice, index, value) {
+	var v = Math.max(0, Math.min(16383, Math.round(value * 16383)))
+	vpotPositions[index] = v
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+}
+var vpotIdleLast = 0
+deviceDriver.mOnIdle = function (activeDevice) {
+	var now = 0
+	try { now = Date.now() } catch (e) { return }
+	if (now - vpotIdleLast < 1000) return
+	vpotIdleLast = now
+	for (var i = 0; i < 4; ++i) {
+		var v = vpotPositions[i]
+		if (v >= 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, i, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+	}
+}
 var sendNames = ['', '', '', '', '', '', '', '']
 var sendCells = []
 // Cubase names a send "1- Reverb Vocal": drop the number, and fit the name into the cell's 9-character label
@@ -185,6 +206,7 @@ function attachSendFeedback(surfaceValue, number) {
 		sendValueLine(activeDevice, text, false)
 	}
 	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		reportVpotPosition(activeDevice, number - 1, value)
 		if (!qcActive) { cell.pos = Math.max(0, Math.min(100, Math.round(value * 100))); sendCellInfo(activeDevice, number - 1, cell) }
 		if (value === lastPos) return
 		lastPos = value
@@ -264,8 +286,8 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendKnob = surface.makeKnob(6 + sendIndex * 2, 2, 2, 2)
 	sendKnob.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput)
-		.bindToControlChange(0, 17 + sendIndex)
-		.setTypeRelativeSignedBit()
+		.bindToControlChange14Bit(0, 17 + sendIndex)   // absolute, 14 bit (CC 17-20 + 49-52): the bridge owns the turn
+		.setTypeAbsolute()
 	var sendPush = surface.makeButton(6 + sendIndex * 2, 4, 2, 1)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
 	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)

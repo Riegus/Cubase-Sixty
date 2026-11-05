@@ -87,6 +87,14 @@ std::atomic<int> g_view{kViewDaw};
 long long nowMs();
 void paintSendCells(bool force = false);
 void startIdleCycle();
+// V-pots 1-4 (sends / Quick Controls) are absolute in Cubase: the bridge keeps each one's position (0..16383,
+// from Cubase's SysEx 17), adds the turns itself and sends the new position as a 14-bit CC (17-20 + 49-52).
+// Like Rea-Sixty, which sets the value in REAPER itself: what is drawn is exactly what Cubase gets, with no
+// round trip in between (the relative steps went to Cubase and back, and Cubase's answers lagged and
+// wobbled).
+std::array<int, 4> g_vpotPos{-1, -1, -1, -1};
+std::array<long long, 4> g_vpotOwnUntil{};
+constexpr int kVpotStep = 82;   // per detent: half a percent of the range (what the relative steps gave)
 
 struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
 std::string sendCellLine(const SendCell& c);
@@ -182,6 +190,18 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }
+            break;
+        }
+        if (ev.id >= 1 && ev.id <= 4) {
+            const size_t k = size_t(ev.id - 1);
+            if (g_vpotPos[k] < 0) break;   // position not known yet (comes from Cubase within a second)
+            const int v = std::clamp(g_vpotPos[k] + ev.delta * kVpotStep, 0, 16383);
+            g_vpotPos[k] = v;
+            g_vpotOwnUntil[k] = nowMs() + 500;   // Cubase's echoes of our own turns are not taken back meanwhile
+            const uint8_t cc = uint8_t(uf1m::kCcEncoder + ev.id);
+            sendMidi({0xB0, cc, uint8_t((v >> 7) & 0x7F)});
+            sendMidi({0xB0, uint8_t(cc + 32), uint8_t(v & 0x7F)});
+            if (g_view == kViewSends) paintSendCells(false);
             break;
         }
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
@@ -420,7 +440,6 @@ std::string sendCellLine(const SendCell& c)
 // ---------------------------------------------------------------------------
 std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
 std::atomic<bool> g_cycleRunning{false};
-std::atomic<bool> g_recheckCells{false};   // a held-back wobble step: the idle cycle checks it again
 void startIdleCycle()
 {
     bool expected = false;
@@ -438,7 +457,6 @@ void startIdleCycle()
             p.meters.push_back(::uf1::buildScreen(0x0016, std::span<const uint8_t>(&zero, 1)));
             p.tail.push_back(::uf1::buildScreen(0x011d, std::span<const uint8_t>(&closeValue, 1)));
             uf1pace::emitCycle(g_dev, p, slot);
-            if (g_recheckCells.exchange(false) && g_view == kViewSends) paintSendCells(false);
             slot += std::chrono::microseconds(40800);
             std::this_thread::sleep_until(slot);
         }
@@ -471,26 +489,9 @@ void paintSendCells(bool force)
             p.insert(p.end(), line.begin(), line.end());
             g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
         }
-        // Cubase's position wobbles while a V-pot turns: one way, a point back, on again (traced: 77, 78, 76,
-        // 77, 76 while turning down), which makes the bar jitter. A step of one point against the bar's last
-        // direction is held back and shows only if it is still the position 300 ms later.
-        static std::array<uint8_t, 4> barPos{};
-        static std::array<int, 4> barDir{};
-        static std::array<long long, 4> backSince{};
-        const long long t = nowMs();
-        uint8_t want = on ? c.pos : 0;
-        const int d = int(want) - int(barPos[size_t(i)]);
-        bool held = false;
-        if (!force && on && (d == 1 || d == -1) && barDir[size_t(i)] != 0 && (d > 0) != (barDir[size_t(i)] > 0)) {
-            if (!backSince[size_t(i)]) backSince[size_t(i)] = t;
-            if (t - backSince[size_t(i)] < 300) { want = barPos[size_t(i)]; held = true; }
-        }
-        if (!held) backSince[size_t(i)] = 0;
-        if (want != barPos[size_t(i)]) {
-            barDir[size_t(i)] = want > barPos[size_t(i)] ? 1 : -1;
-            barPos[size_t(i)] = want;
-        }
-        if (held) g_recheckCells = true;
+        // The bar follows the bridge's own V-pot position (exact, see g_vpotPos), Cubase's otherwise.
+        const int own = g_vpotPos[size_t(i)];
+        const uint8_t want = !on ? 0 : own >= 0 ? uint8_t((own * 100 + 8191) / 16383) : c.pos;
         bars[size_t(i) * 2] = want;
         bars[size_t(i) * 2 + 1] = 0x80;
         styles[size_t(i)] = on ? 0x01 : 0x03;
@@ -632,6 +633,13 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t style = (m.size() >= 8 && (m[6] == 0x01 || m[6] == 0x02 || m[6] == 0x08)) ? m[6] : 0x02;
         if (m[4] == 0x09) barHome(pos, style);
         else if (g_view != kViewSends) barTemporary(pos, style);
+    } else if (m[4] == 0x17 && m.size() >= 9 && m[5] < 4) {
+        // A V-pot's position in Cubase (0..16383). Taken unless the V-pot is being turned right now.
+        const size_t k = m[5];
+        if (nowMs() >= g_vpotOwnUntil[k]) {
+            const int v = (int(m[6]) << 7) | int(m[7]);
+            if (v != g_vpotPos[k]) { g_vpotPos[k] = v; if (g_view == kViewSends) paintSendCells(false); }
+        }
     } else if (m[4] == 0x15 && m.size() >= 9 && m[5] < 4) {
         // A send for the SENDS view's cells: pot index, position 0..100, then "name|value" (empty = no send).
         std::unique_lock<std::mutex> lk(g_cellMx);
