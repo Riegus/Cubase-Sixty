@@ -9,6 +9,7 @@
 #include "Uf1Bridge.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -77,7 +78,11 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
-bool g_pluginView = false;   // view: false = DAW (V-pots on sends), true = PLUGIN (V-pots on Quick Controls)
+// The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
+// 3 SENDS = V-pots on the sends and the four sends shown in the display's V-pot cells).
+enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
+int g_view = kViewDaw;
+void paintSendCells();
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
@@ -85,7 +90,7 @@ void paintSoftKeys();
 // The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
 void sendVpotPage()
 {
-    const uint8_t n = g_pluginView ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
+    const uint8_t n = g_view == kViewPlugin ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
     note(n, true);
     note(n, false);
 }
@@ -224,12 +229,14 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
             if (!ev.pressed || !g_modeHeld) break;
-            if (ev.id == 0x19 || ev.id == 0x1A) {
-                const bool plugin = ev.id == 0x19;
-                if (plugin != g_pluginView) {
-                    g_pluginView = plugin;
-                    sendVpotPage();
-                    if (g_trace) std::printf("UF1 view: %s\n", plugin ? "PLUGIN" : "DAW");
+            if (ev.id == 0x19 || ev.id == 0x1A || ev.id == 0x1C) {
+                const int view = ev.id - 0x19;
+                if (view != g_view) {
+                    const bool pageChanges = (view == kViewPlugin) != (g_view == kViewPlugin);
+                    g_view = view;
+                    if (pageChanges) sendVpotPage();
+                    paintSendCells();
+                    if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : "SENDS");
                 }
                 paintSoftKeys();
             }
@@ -335,7 +342,7 @@ void softKeyLed(int i, uint32_t rgb)
 void paintSoftKeys()
 {
     if (!g_open) return;
-    static const char* const kPicker[4] = {"PLUGIN", "DAW", "", ""};
+    static const char* const kPicker[4] = {"PLUGIN", "DAW", "", "SENDS"};   // 3 = METER, later
     for (int i = 0; i < 4; ++i) {
         const std::string label = g_modeHeld ? kPicker[i] : "";
         std::vector<uint8_t> p;
@@ -343,14 +350,51 @@ void paintSoftKeys()
         p.insert(p.end(), label.begin(), label.end());
         g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
         uint32_t rgb = 0;   // dark
-        if (g_modeHeld && i < 2) {
-            const bool on = (i == 0) == g_pluginView;
+        if (g_modeHeld && i != 2) {
+            const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
         }
         softKeyLed(i, rgb);
     }
     const uint8_t noHighlight = 0;
     g_dev.send(::uf1::buildScreen(0x0102, std::span<const uint8_t>(&noHighlight, 1)));
+}
+
+// SENDS view: the four sends in the display's V-pot cells (Rea-Sixty's cells: 0x010e text per pot with the
+// pot index first, 0x010f bars = position 0..100 + brightness 0x80 per pot, 0x010d styles: 0x01 pointer,
+// 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
+// cells show them only in SENDS and are blank otherwise.
+struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
+std::array<SendCell, 4> g_sendCells;
+std::string sendCellLine(const SendCell& c)
+{
+    // Rea-Sixty's value line: the name left (11 characters), the value right-aligned in 19.
+    std::string name = c.name.substr(0, 11), value = c.value.substr(0, 8);
+    std::string line = name;
+    line.append(19 - name.size() - value.size(), ' ');
+    line += value;
+    return line;
+}
+void paintSendCells()
+{
+    if (!g_open) return;
+    const bool show = g_view == kViewSends;
+    std::array<uint8_t, 8> bars{};
+    std::array<uint8_t, 4> styles{};
+    for (int i = 0; i < 4; ++i) {
+        const SendCell& c = g_sendCells[size_t(i)];
+        const bool on = show && c.used;
+        const std::string line = on ? sendCellLine(c) : std::string();
+        std::vector<uint8_t> p;
+        p.push_back(uint8_t(i));
+        p.insert(p.end(), line.begin(), line.end());
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
+        bars[size_t(i) * 2] = on ? c.pos : 0;
+        bars[size_t(i) * 2 + 1] = 0x80;
+        styles[size_t(i)] = on ? 0x01 : 0x03;
+    }
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles));
 }
 
 // Screen text zone: 0x00, then the text (the UF1 reads one byte per glyph, so ASCII only here).
@@ -480,6 +524,16 @@ void onSysex(const std::vector<unsigned char>& m)
         const uint8_t pos = uint8_t(m[5] > 100 ? 100 : m[5]);
         const uint8_t style = (m.size() >= 8 && (m[6] == 0x01 || m[6] == 0x02 || m[6] == 0x08)) ? m[6] : 0x02;
         if (m[4] == 0x09) barHome(pos, style); else barTemporary(pos, style);
+    } else if (m[4] == 0x15 && m.size() >= 9 && m[5] < 4) {
+        // A send for the SENDS view's cells: pot index, position 0..100, then "name|value" (empty = no send).
+        SendCell& c = g_sendCells[m[5]];
+        std::string t(m.begin() + 7, m.end() - 1);
+        const size_t bar = t.find('|');
+        c.name = bar == std::string::npos ? t : t.substr(0, bar);
+        c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
+        c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
+        c.used = !c.name.empty() || !c.value.empty();
+        if (g_view == kViewSends) paintSendCells();
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
@@ -644,6 +698,7 @@ bool uf1OpenDevice()
         screenText(::uf1::scr::kChNumber, "");
         screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
         paintSoftKeys();   // the four display soft keys: blank and dark until MODE is held
+        paintSendCells();  // the V-pot cells: blank outside the SENDS view
         // The meter's neighbours, as Rea-Sixty writes them: peak indicator (0x000a) and the compressor / gate
         // gain-reduction LEDs (0x0015 / 0x0016), all at rest.
         {
@@ -735,6 +790,7 @@ bool uf1Reopen()
     showScrubLed();
     showStripNumber();
     paintSoftKeys();
+    paintSendCells();
     std::printf("UF1 reopened.\n");
     return true;
 }

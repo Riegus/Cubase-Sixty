@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.17.0-dev (MODE: PLUGIN = Quick Controls, DAW = sends)')
+console.log('[CubaseSixty UF1] script loaded, version 0.18.0-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -122,12 +122,33 @@ activatorButton(5, 47, stripMasterFlip)
 
 // Screen feedback for a send V-pot: the value line shows "S1 -6.0dB", the bar under it the level.
 // A V-pot's value line: 'S<n> <level>' for a send, '<name> <value>' for a Quick Control (PLUGIN view).
+// SENDS view: each send's name, level and position also go to the bridge for the display's V-pot cells
+// (SysEx 15: pot index, position 0..100, "name|level"). Sent in every view; the bridge shows them only in SENDS.
+var loggedSendTitles = 0
+function sendCellInfo(activeDevice, index, cell) {
+	if (qcActive) return
+	var text = cell.value === '' && cell.name === '' ? '' : cell.name + '|' + cell.value
+	var key = cell.pos + '/' + text
+	if (key === cell.sent) return
+	cell.sent = key
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x15, index, cell.pos], toAscii7(text), [0xF7]))
+}
 function attachSendFeedback(surfaceValue, number) {
 	var title = ''
 	var lastText = null
 	var lastPos = null
-	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) { title = valueTitle || objectTitle || '' }
+	var cell = { name: '', value: '', pos: 0, sent: null }
+	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
+		if (loggedSendTitles < 8) { ++loggedSendTitles; console.log('[CubaseSixty UF1] V-pot ' + number + ' title: object [' + objectTitle + '] value [' + valueTitle + ']') }
+		title = valueTitle || objectTitle || ''
+		if (!qcActive) { cell.name = objectTitle || valueTitle || ''; sendCellInfo(activeDevice, number - 1, cell) }
+	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		if (!qcActive) {
+			var v = String(value)
+			cell.value = v === '' ? '' : v + (units ? units : (/^-?[0-9.]+$/.test(v) ? 'dB' : ''))
+			sendCellInfo(activeDevice, number - 1, cell)
+		}
 		var text
 		if (qcActive) {
 			var v = String(value) + (units ? units : '')
@@ -141,6 +162,7 @@ function attachSendFeedback(surfaceValue, number) {
 		sendValueLine(activeDevice, text, false)
 	}
 	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		if (!qcActive) { cell.pos = Math.max(0, Math.min(100, Math.round(value * 100))); sendCellInfo(activeDevice, number - 1, cell) }
 		if (value === lastPos) return
 		lastPos = value
 		sendBar(activeDevice, value, 0x02, false)
