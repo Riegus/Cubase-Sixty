@@ -379,6 +379,7 @@ std::string sendCellLine(const SendCell& c)
 // Turning a V-pot brings several updates per step (level text, position); drawing each one at once kept
 // the V-pot row behind and choppy. So updates only mark the cells dirty, and a paint goes out at most every
 // 40 ms (25 per second) with the latest state.
+long long nowMs();
 std::atomic<bool> g_cellsDirty{false};
 std::atomic<bool> g_cellPainterRunning{false};
 void scheduleSendCells()
@@ -413,7 +414,12 @@ void paintSendCells(bool force)
         const SendCell& c = g_sendCells[size_t(i)];
         const bool on = show && c.used;
         const std::string line = on ? sendCellLine(c) : std::string();
-        if (force || line != shownLine[size_t(i)]) {
+        // The text is held back while it keeps changing (at most every 250 ms, and always once it settles):
+        // the bars alone stay quick. Experiment: is the text the slow part of the V-pot row?
+        static std::array<long long, 4> textAt{};
+        const long long t = nowMs();
+        if (force || (line != shownLine[size_t(i)] && t - textAt[size_t(i)] >= 250)) {
+            textAt[size_t(i)] = t;
             shownLine[size_t(i)] = line;
             std::vector<uint8_t> p;
             p.push_back(uint8_t(i));
@@ -425,6 +431,11 @@ void paintSendCells(bool force)
         styles[size_t(i)] = on ? 0x01 : 0x03;
     }
     if (force || bars != shownBars) { shownBars = bars; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars)); }
+    for (int i = 0; i < 4; ++i) {
+        const SendCell& c = g_sendCells[size_t(i)];
+        const bool on = show && c.used;
+        if ((on ? sendCellLine(c) : std::string()) != shownLine[size_t(i)]) g_cellsDirty = true;   // text still due
+    }
     if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
 }
 
