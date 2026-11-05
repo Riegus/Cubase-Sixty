@@ -232,6 +232,13 @@ void pushPalette()
 // The latest message from Cubase per kind, replayed after the UF8 is reopened (Cubase only sends changes).
 std::mutex g_uf8CacheMx;
 std::map<int, std::vector<unsigned char>> g_uf8Cache;
+// During a follow-selection jump the UF8 is frozen: what Cubase sends for the banks passed on the way is only
+// cached, and the end state is shown once, so the jump looks direct instead of banking one by one.
+std::atomic<bool> g_uf8Frozen{false};
+std::atomic<int> g_freezeGen{0};
+std::atomic<bool> g_freezeHeld{false};
+std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ... 13 00): bursts leave it on
+void replayUf8Cache();
 
 void onMidiIn(std::vector<unsigned char>& msg)
 {
@@ -245,6 +252,13 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_uf8Cache[0x10000 + (m[4] << 8) + m[5]] = m;
         else if (st == 0xE0 && m.size() >= 3) g_uf8Cache[0x20000 + (m[0] & 0x0F)] = m;
         else if ((st == 0x90 || st == 0x80 || st == 0xA0) && m.size() >= 3) g_uf8Cache[m[1]] = m;
+    }
+    if (g_uf8Frozen) {
+        // Frozen (jump running): drop the strip state (cached above, shown after the jump) and meters;
+        // the script's requests still go through.
+        const uint8_t st = m[0] & 0xF0;
+        const bool stripSysex = m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && (m[4] == 0x01 || m[4] == 0x02 || m[4] == 0x06 || m[4] == 0x07 || m[4] == 0x0C);
+        if (stripSysex || st == 0xE0 || st == 0x90 || st == 0x80 || st == 0xA0 || st == 0xB0) return;
     }
     const uint8_t status = m[0] & 0xF0;
 
@@ -283,6 +297,25 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+        } else if (m.size() >= 7 && m[4] == 0x13) {
+            // The script holds the UF8 frozen (01) while it finds the selected track at start-up, which can
+            // take several tries while Cubase still ignores bank presses; 00 shows the end state. Released by
+            // itself after 30 s in case the 00 never comes.
+            if (m[5]) {
+                const int gen = ++g_holdGen;
+                g_freezeHeld = true;
+                g_uf8Frozen = true;
+                std::thread([gen] {
+                    std::this_thread::sleep_for(std::chrono::seconds(30));
+                    if (g_holdGen == gen && g_freezeHeld) { ++g_freezeGen; g_freezeHeld = false; g_uf8Frozen = false; replayUf8Cache(); }
+                }).detach();
+            } else if (g_freezeHeld) {
+                ++g_holdGen;
+                ++g_freezeGen;   // a burst still running must not show anything early
+                g_freezeHeld = false;
+                g_uf8Frozen = false;
+                replayUf8Cache();
+            }
         } else if (m.size() >= 10 && m[4] == 0x12) {
             // Bank size and position from the script: total (2 x 7 bit), offset (2 x 7 bit); 7F 7F = unknown.
             auto v = [&](int i) { return (m[i] == 0x7F && m[i + 1] == 0x7F) ? -1 : (m[i] << 7) | m[i + 1]; };
@@ -305,12 +338,20 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const long long wait = g_cubaseFirstMs + 5000 - now;
             std::thread([count, wait] {
                 if (wait > 0) std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+                const int gen = ++g_freezeGen;
+                g_uf8Frozen = true;
                 note(79, true);
                 note(79, false);
                 for (int i = 0; i < count; ++i) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     note(kNoteBankRight, true);
                     note(kNoteBankRight, false);
+                }
+                // Let Cubase send the last bank, then show the end state (unless a newer jump took over).
+                std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                if (g_freezeGen == gen && !g_freezeHeld) {
+                    g_uf8Frozen = false;
+                    replayUf8Cache();
                 }
                 // Tell the script the burst is over (note 80), so it checks where the bank landed.
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
@@ -328,10 +369,18 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const long long wait = g_cubaseFirstMs + 3000 - now;
             std::thread([wait, right, count] {
                 if (wait > 0) std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+                // More than one step: freeze the UF8 like a jump, so only the end shows; 100 ms apart (at 60 ms
+                // Cubase merged presses).
+                const int gen = count > 1 ? ++g_freezeGen : 0;
+                if (count > 1) g_uf8Frozen = true;
                 for (int i = 0; i < count; ++i) {
                     note(right ? kNoteBankRight : kNoteBankLeft, true);
                     note(right ? kNoteBankRight : kNoteBankLeft, false);
-                    if (i + 1 < count) std::this_thread::sleep_for(std::chrono::milliseconds(60));
+                    if (i + 1 < count) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                if (count > 1) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                    if (g_freezeGen == gen && !g_freezeHeld) { g_uf8Frozen = false; replayUf8Cache(); }
                 }
             }).detach();
         } else if (m.size() >= 8 && m[4] == 0x06 && m[5] < kStrips) {
@@ -408,6 +457,15 @@ void onMidiIn(std::vector<unsigned char>& msg)
             setLed(t->strip, t->cls, on);
         }
     }
+}
+
+// Show the last state Cubase sent (names, colours, pan, dB texts, faders, LEDs) again: after a reopen, and
+// after a jump during which the UF8 was frozen.
+void replayUf8Cache()
+{
+    std::map<int, std::vector<unsigned char>> cache;
+    { std::lock_guard<std::mutex> lk(g_uf8CacheMx); cache = g_uf8Cache; }
+    for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
 }
 
 } // namespace
@@ -536,9 +594,7 @@ int main(int argc, char** argv)
             g_dev.setRawInputHandler(onUsbInput);
             { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
             g_meterShown = {};
-            std::map<int, std::vector<unsigned char>> cache;
-            { std::lock_guard<std::mutex> lk(g_uf8CacheMx); cache = g_uf8Cache; }
-            for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
+            replayUf8Cache();
             cs::autoModePressed(0);
             std::printf("UF8 reopened.\n");
         }

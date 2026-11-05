@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.9.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.10.4-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -497,18 +497,36 @@ function meterToMidi(value) {
 // Follow the selection: when a track is selected that is not on the eight strips (e.g. in the MixConsole),
 // bank to it. A hidden bank of all channels (same types as the UF8 bank) gives each channel's position,
 // name and selected state; the strips' names give the bank's current position. The bridge sends the bank
-// steps (SysEx 0B right / 0F left + count).
+// presses (SysEx 10 jump = reset + n bank-rights, 0B / 0F single steps). The timing comes from Cubase's
+// idle callback (about ten calls a second, measured), because notes from the bridge cannot run script code.
+//   - After a selection change, wait 300 ms: Cubase moves the bank itself first, in steps of eight.
+//   - If the track is still not on a strip: jump (back on the eight-grid), then check and correct with
+//     single steps. A try that did not move the bank (presses ignored) jumps again.
+//   - At start-up Cubase does not bank to the selection and ignores bank presses for a while: check every
+//     second for 30 s from the first idle call, until the selected track has been seen on a strip.
 // ---------------------------------------------------------------------------
 
 ;(function () {
 	var CHANNELS = 256
 	var allTitles = []
 	var selectedIndex = -1
-	// After a jump, check again once the strips show their new names, and correct (Cubase's bank steps do
-	// not always land where counted, e.g. near the end of the list or after Page steps).
 	var followTries = 0
-	var jumpOffset = -1
-	var startupPending = true   // jump to the selected track once, when everything is known at start-up
+	var lastTryOffset = -1   // the bank position when the last try was sent
+	var dueMs = 0            // when the next check is due (0 = none)
+	var startupUntil = 0     // start-up checks until this time (0 = not started yet, -1 = done)
+	var nextStartupCheck = 0
+	// At start-up the UF8 is held frozen while the tries run (Cubase ignores presses at first, so it can take
+	// several), and shows the bank once the selected track is on a strip (SysEx 13 01 / 13 00).
+	var startupFrozen = false
+	function startupFreeze(activeDevice, on) {
+		if (startupFrozen === on) return
+		startupFrozen = on
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, on ? 1 : 0, 0xF7]))
+	}
+	function nowMs() {
+		try { var t = Date.now(); if (typeof t === 'number' && t > 0) return t } catch (e) {}
+		return 0
+	}
 	// Several tracks can be selected; follow Cubase's current track (the last one clicked, the one the UF1
 	// shows): the selected channel whose name is the current track's name.
 	var selectedSet = {}
@@ -521,25 +539,20 @@ function meterToMidi(value) {
 			if (allTitles[i] === currentTitle && (pick < 0 || i < pick)) pick = i
 		}
 		if (pick < 0) pick = any
+		// No selected state known yet (possible at start-up): Cubase's current track, found by its name.
+		if (pick < 0 && currentTitle) for (var j = 0; j < allTitles.length; ++j) if (allTitles[j] === currentTitle) { pick = j; break }
 		// Only a real change may bank: Cubase re-sends the same values after every bank step.
 		if (pick === selectedIndex) return
 		selectedIndex = pick
 		if (FOLLOW_OBSERVE_ONLY) { console.log('[CubaseSixty] observe: selected #' + (pick + 1) + ' [' + allTitles[pick] + '], bank starts at #' + (currentOffset() + 1)); return }
 		followTries = 0
-		burstTarget = -1
-		if (pick < 0) return
-		if (currentOffset() >= 0) startupPending = false
-		// Cubase may move the bank itself when the selection changes (seen: one bank step by Cubase, then ours
-		// on top, one bank too far). So look only after it has settled: ask the bridge for a tick in 300 ms.
-		tickPending = true
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x11, 0xF7]))
+		if (pick < 0) { dueMs = 0; return }
+		dueMs = nowMs() + 300   // let Cubase move the bank first
 	}
-	var tickPending = false
 	followCurrentTitle = function (activeDevice, title) {
 		currentTitle = title
 		pickCurrent(activeDevice)
 	}
-	var burstTarget = -1   // while a jump burst runs: the bank position it should end on
 	function currentOffset() {
 		// The bank position: where the strips' names appear in the full list.
 		for (var o = 0; o < CHANNELS; ++o) {
@@ -555,34 +568,55 @@ function meterToMidi(value) {
 		return -1
 	}
 	function follow(activeDevice) {
-		if (FOLLOW_OBSERVE_ONLY) return
-		if (seek.active || selectedIndex < 0) { followTries = 0; return }
+		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0) { followTries = 0; return }
 		var offset = currentOffset()
 		if (offset < 0) { followTries = 0; return }
 		var delta = selectedIndex - offset
-		console.log('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' [' + allTitles[selectedIndex] + '], bank starts at #' + (offset + 1) + ' [' + stripTitles.join('|') + '], try ' + followTries)
-		if (delta >= 0 && delta < STRIPS) { followTries = 0; return }   // on a strip: done
-		if (followTries >= 12) { followTries = 0; return }              // give up rather than loop
-		++followTries
-		jumpOffset = offset
-		if (followTries === 1) {
-			// Cubase follows the selection itself (measured), but only in steps of eight from wherever the bank
-			// is: after the bank was moved to an odd position (e.g. at the end of the list) it cannot reach the
-			// first tracks. So when the track is still not on a strip after Cubase's own move, jump: reset to the
-			// first bank (back on the eight-grid) and send the needed bank-rights in one burst (SysEx 10 <count>).
-			// The check after it corrects with single steps if needed.
-			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
-			console.log('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps')
-			burstTarget = banks * STRIPS
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x10, banks, 0xF7]))
+		if (delta >= 0 && delta < STRIPS) {   // on a strip: done
+			if (followTries > 0) console.log('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' is on strip ' + (delta + 1))
+			if (startupUntil > 0) { startupUntil = -1; startupFreeze(activeDevice, false); console.log('[CubaseSixty] follow: start-up done') }
+			followTries = 0
 			return
 		}
-		// Close by, or correcting: one bank step, then check where it landed.
-		console.log('[CubaseSixty] follow: one bank step ' + (delta < 0 ? 'left' : 'right'))
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, 1, 0xF7]))
+		if (followTries >= 12) { console.log('[CubaseSixty] follow: gave up'); followTries = 0; return }
+		var now = nowMs()
+		if (startupUntil > 0) startupFreeze(activeDevice, true)
+		var jump = followTries === 0 || offset === lastTryOffset
+		++followTries
+		lastTryOffset = offset
+		console.log('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' [' + allTitles[selectedIndex] + '], bank starts at #' + (offset + 1) + ', try ' + followTries)
+		if (jump) {
+			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
+			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
+			console.log('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps')
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x10, banks, 0xF7]))
+			dueMs = now + banks * 100 + 1000   // the bridge spaces the presses 100 ms apart and shows the end 400 ms later
+			return
+		}
+		// Correct with all the remaining bank steps at once (the bridge shows only the end). Seen at start-up:
+		// a jump right after loading lost most of its presses.
+		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
+		steps = Math.max(1, Math.min(steps, 64))
+		console.log('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right'))
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
+		dueMs = now + steps * 100 + 800
 	}
-	// Called for every strip name: once the bank has moved, check again (and step once more if needed).
-	var lastLoggedOffset = -2
+	deviceDriver.mOnIdle = function (activeDevice) {
+		var now = nowMs()
+		if (now <= 0) return
+		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
+		// bank), so the first check waits 2.5 s.
+		if (startupUntil === 0) { startupUntil = now + 30000; nextStartupCheck = now + 2500 }
+		if (dueMs > 0 && now >= dueMs) { dueMs = 0; follow(activeDevice); return }
+		if (startupUntil > 0) {
+			if (now > startupUntil) { startupUntil = -1; startupFreeze(activeDevice, false); console.log('[CubaseSixty] follow: start-up checks ended'); return }
+			if (now >= nextStartupCheck && dueMs === 0) {
+				nextStartupCheck = now + 1000
+				followTries = 0
+				follow(activeDevice)
+			}
+		}
+	}
 	// Tell the bridge how many tracks the bank has and where it starts (SysEx 12: total, offset, each 2 x 7
 	// bit; 7F 7F = not known), so its bank-right stops at the bank where the last track is on strip 8.
 	var sentTotal = -2, sentOffset = -2
@@ -596,49 +630,10 @@ function meterToMidi(value) {
 		function two(v) { return v < 0 ? [0x7F, 0x7F] : [(v >> 7) & 0x7F, v & 0x7F] }
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x12]).concat(two(total)).concat(two(offset)).concat([0xF7]))
 	}
-	followOnStripTitle = function (activeDevice) {
-		reportBank(activeDevice)
-		if (FOLLOW_OBSERVE_ONLY) {
-			// Test mode: only report where the bank is whenever it moves, and do nothing.
-			var ob = currentOffset()
-			if (ob >= 0 && ob !== lastLoggedOffset) {
-				lastLoggedOffset = ob
-				console.log('[CubaseSixty] observe: bank now starts at #' + (ob + 1) + ', selected #' + (selectedIndex + 1))
-			}
-			return
-		}
-		// Start-up: the selection may be known before the strips have their names; try once they do.
-		if (startupPending && followTries === 0) { if (currentOffset() >= 0 && selectedIndex >= 0) { startupPending = false; follow(activeDevice) } return }
-		if (followTries === 0) return
-		var o = currentOffset()
-		if (o < 0 || o === jumpOffset) return
-		if (burstTarget >= 0) {
-			// The burst passes through other banks on the way; wait until it ends on its target, or the
-			// selected track shows up on a strip.
-			var d = selectedIndex - o
-			if (o !== burstTarget && !(d >= 0 && d < STRIPS)) return
-			burstTarget = -1
-		}
-		// currentOffset() only finds a position when all strip names fit it, so a valid new position means
-		// the new bank has fully arrived.
-		follow(activeDevice)
-	}
+	followOnStripTitle = function (activeDevice) { reportBank(activeDevice) }
 	var resetKey = surface.makeButton(36, 14, 1, 1)
 	resetKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 79)
 	page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank)
-	// "Burst done" from the bridge (note 80). A button only reports presses when it is bound to something,
-	// so it is bound to the reset of a dummy one-channel bank that nothing uses.
-	var doneKey = surface.makeButton(37, 14, 1, 1)
-	doneKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 80)
-	var dummyZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Burst done')
-	dummyZone.makeMixerBankChannel()
-	page.makeActionBinding(doneKey.mSurfaceValue, dummyZone.mAction.mResetBank)
-	doneKey.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-		// Note 80 from the bridge: a jump has finished, or the tick after a selection change.
-		if (value < 0.5) return
-		if (burstTarget >= 0) { console.log('[CubaseSixty] follow: jump finished'); burstTarget = -1; follow(activeDevice); return }
-		if (tickPending) { tickPending = false; follow(activeDevice) }
-	}
 	try {
 		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Follow selection').excludeInputChannels().excludeOutputChannels()
 		for (var c = 0; c < CHANNELS; ++c) {
