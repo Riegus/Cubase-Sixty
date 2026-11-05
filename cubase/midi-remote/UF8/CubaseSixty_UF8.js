@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.10.6-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.11.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -339,14 +339,10 @@ var FOLLOW_OBSERVE_ONLY = false
 var followOnStripTitle = function () {}   // set by the follow-selection block
 var followCurrentTitle = function () {}   // set by the follow-selection block
 var followStripSelect = function () {}    // set by the follow-selection block
+var onAllTitle = function () {}           // set by the follow-selection block
 var recTitles = []
 var armableSent = []
 
-var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Recordable')
-var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels']
-for (var f = 0; f < recFilters.length; ++f) {
-	try { recZone[recFilters[f]]() } catch (e) { console.log('[CubaseSixty] recordable bank: ' + recFilters[f] + ' not available: ' + e) }
-}
 
 function isRecordable(title) {
 	if (!title) return false
@@ -361,20 +357,17 @@ function updateArmable(activeDevice, index) {
 	midiOutput.sendMidi(activeDevice, [0x90, 64 + index, armable ? 0 : 127])
 }
 
+// The recordable tracks' names come from the helper script (SysEx 19 via the bridge, see the end of this
+// script): as a list in this script they made every bank move about 0.25 s slower.
 var recTitleCount = 0
-for (var k = 0; k < REC_CHANNELS; ++k) {
-	var recChannel = recZone.makeMixerBankChannel()
-	// No value binding here (names only): 128 bound values made Cubase pause while a send was turned.
-	;(function (slot) {
-		recChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
-			if (recTitles[slot] === undefined && title) {
-				recTitleCount++
-				if (recTitleCount === 1 || recTitleCount % 16 === 0) console.log('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
-			}
-			recTitles[slot] = title
-			for (var i = 0; i < STRIPS; ++i) updateArmable(activeDevice, i)
-		}
-	})(k)
+function onRecTitle(activeDevice, slot, title) {
+	if (recTitles[slot] === title) return
+	if (!recTitles[slot] && title) {
+		recTitleCount++
+		if (recTitleCount === 1 || recTitleCount % 16 === 0) console.log('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
+	}
+	recTitles[slot] = title
+	for (var i = 0; i < STRIPS; ++i) updateArmable(activeDevice, i)
 }
 
 // ---------------------------------------------------------------------------
@@ -626,6 +619,7 @@ function meterToMidi(value) {
 	deviceDriver.mOnIdle = function (activeDevice) {
 		var now = nowMs()
 		if (now <= 0) return
+		requestListsIfNeeded(activeDevice, now)
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
 		if (startupUntil === 0) { startupUntil = now + 30000; nextStartupCheck = now + 2500 }
@@ -656,22 +650,44 @@ function meterToMidi(value) {
 	var resetKey = surface.makeButton(36, 14, 1, 1)
 	resetKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 79)
 	page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank)
-	try {
-		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Follow selection').excludeInputChannels().excludeOutputChannels()
-		for (var c = 0; c < CHANNELS; ++c) {
-			var ch = zone.makeMixerBankChannel()
-			// Names only, no value binding per channel (its selected state): 256 bound values made Cubase pause
-			// for up to 0.7 s at a time while a send was turned (traced). The selected track is found by the
-			// current track's name (pickCurrent).
-			;(function (index, ch) {
-				ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
-					allTitles[index] = title
-					reportBank(activeDevice)
-					if (title && title === currentTitle) pickCurrent(activeDevice)
-				}
-			})(c, ch)
-		}
-	} catch (e) {
-		console.log('[CubaseSixty] follow selection not available: ' + e)
+	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script
+	// they made every bank move about 0.25 s slower.
+	onAllTitle = function (activeDevice, index, title) {
+		if (allTitles[index] === title) return
+		allTitles[index] = title
+		reportBank(activeDevice)
+		if (title && title === currentTitle) pickCurrent(activeDevice)
 	}
 })()
+
+// ---------------------------------------------------------------------------
+// Names from the helper script (cubase/midi-remote/Helper), passed on by the bridge as SysEx:
+//   18 <index hi> <index lo> <name>   all channels (follow selection)
+//   19 <slot> <name>                  recordable channels (record-enable keys)
+// Names are 3 x 7 bits per character. Until the first names arrive (Cubase drops what is sent while a
+// project loads), the script asks for them every 2 s (SysEx 1B, passed on to the helper).
+// ---------------------------------------------------------------------------
+var listNamesSeen = 0
+var listRequestAt = 0
+function requestListsIfNeeded(activeDevice, now) {
+	if (listNamesSeen > 0 || now < listRequestAt) return
+	listRequestAt = now + 2000
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1B, 0xF7]))
+}
+function decodeName(m, from) {
+	var s = ''
+	for (var i = from; i + 2 < m.length - 1; i += 3) s += String.fromCharCode((m[i] << 14) | (m[i + 1] << 7) | m[i + 2])
+	return s
+}
+midiInput.mOnSysex = function (activeDevice, message) {
+	var m = []
+	for (var i = 0; i < message.length; ++i) m.push(message[i])
+	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
+	if (m[4] === 0x18 && m.length >= 8) {
+		if (++listNamesSeen === 1) console.log('[CubaseSixty] channel lists from the helper script arriving')
+		onAllTitle(activeDevice, (m[5] << 7) | m[6], decodeName(m, 7))
+	} else if (m[4] === 0x19 && m.length >= 7) {
+		++listNamesSeen
+		onRecTitle(activeDevice, m[5], decodeName(m, 6))
+	}
+}

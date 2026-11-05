@@ -46,6 +46,16 @@ void onSignal(int) { g_run = false; }
 uf8::UF8Device g_dev;
 MidiOutPort    g_out;
 MidiInPort     g_in;
+// The helper MIDI Remote script (no hardware): it holds the UF8 script's large channel lists, because Cubase
+// re-checks every channel of a script whenever that script's bank moves (with the lists in the UF8 script a
+// bank press took ~0.3 s instead of ~0.07 s). The bridge passes its names (SysEx 18 / 19) on to the UF8
+// script, and the UF8 script's requests for them (SysEx 1B) on to the helper.
+constexpr const char* kHelperTo   = "Cubase-Sixty Helper to Cubase";
+constexpr const char* kHelperFrom = "Cubase-Sixty Helper from Cubase";
+MidiOutPort    g_helperOut;
+MidiInPort     g_helperIn;
+std::atomic<bool> g_helperOpen{false};
+std::mutex     g_helperMx;
 std::mutex     g_outMx;
 uf8frames::Assembler g_asm;
 
@@ -301,6 +311,13 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+        } else if (m.size() >= 6 && m[4] == 0x1B) {
+            // The UF8 script asks for the helper's channel lists.
+            if (g_helperOpen) {
+                std::vector<unsigned char> copy(m.begin(), m.end());
+                std::lock_guard<std::mutex> lk(g_helperMx);
+                g_helperOut.send(copy);
+            }
         } else if (m.size() >= 7 && m[4] == 0x13) {
             // The script holds the UF8 frozen (01) while it finds the selected track at start-up, which can
             // take several tries while Cubase still ignores bank presses; 00 shows the end state. Released by
@@ -543,6 +560,13 @@ int main(int argc, char** argv)
         } else {
             g_dev.setRawInputHandler(onUsbInput);
             std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
+            // The helper's ports: its channel names go straight on to the UF8 script.
+            g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
+                if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
+                std::lock_guard<std::mutex> lk(g_outMx);
+                try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
+            });
+            if (!g_helperOpen) std::fprintf(stderr, "Helper ports not available: the UF8 does not follow the selection, and its record keys stay dark.\n");
             uf8Ok = true;
             g_uf8Running = true;
             cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
