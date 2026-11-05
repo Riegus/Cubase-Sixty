@@ -95,10 +95,11 @@ bool userBankRight(bool pressed)
     return true;
 }   // set once Cubase has sent us a name or colour
 
+long long traceMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() % 100000; }
 void sendMidi(std::vector<unsigned char> m)
 {
     if (g_trace8 && !(m.size() && (m[0] & 0xF0) == 0xE0)) {
-        std::printf("[UF8 MIDI out]");
+        std::printf("%lld [UF8 MIDI out]", traceMs());
         for (unsigned char b : m) std::printf(" %02X", b);
         std::printf("\n");
     }
@@ -244,6 +245,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
+    // Trace: when each strip's name arrives (timing of bank changes).
+    if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
+        std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
     {
         // Names / colours / pan / levels by (command, strip); faders by channel; LED notes by note number.
         std::lock_guard<std::mutex> lk(g_uf8CacheMx);
