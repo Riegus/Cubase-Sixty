@@ -81,8 +81,9 @@ bool g_modeHeld = false;     // MODE held: the four display soft keys show the v
 // The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
 // 3 SENDS = V-pots on the sends and the four sends shown in the display's V-pot cells).
 enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
-int g_view = kViewDaw;
-void paintSendCells(bool force = false);
+std::atomic<int> g_view{kViewDaw};
+void paintSendCells(bool force = false, bool beat = false);
+void startCellBeat();
 struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
 std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
@@ -262,6 +263,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     g_view = view;
                     if (pageChanges) sendVpotPage();
                     paintSendCells(true);
+                    if (view == kViewSends) startCellBeat();
                     if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : "SENDS");
                 }
                 paintSoftKeys();
@@ -405,57 +407,32 @@ std::string sendCellLine(const SendCell& c)
 // the V-pot row behind and choppy. So updates only mark the cells dirty, and a paint goes out at most every
 // 40 ms (25 per second) with the latest state.
 long long nowMs();
-std::atomic<bool> g_cellsDirty{false};
-// Paced drawing: the first update after a pause is drawn at once, later ones at most every 40 ms with the
-// latest state (the sweep test drew 25 per second smoothly). Drawing every update as it came started smooth
-// and then turned choppy: the frames came faster than the UF1 takes them, and a backlog built up.
-std::mutex g_paceMx;
-long long g_lastCellPaint = 0;
-bool g_paceTimer = false;
-void paintSendCellsPaced()
+// The SENDS cells are drawn by a metronome: every 40.8 ms, without a break, as long as the view is shown.
+// Rea-Sixty found that the UF1 renders continuously only while frames arrive in an unbroken ~40.8 ms stream
+// (SSL 360 streams its cycle all the time, even in the channel view); with bursty updates the firmware falls
+// back to rendering when the stream pauses. Turning a V-pot is exactly that: smooth at first, then choppy.
+// The bar sweep test (a steady 40 ms stream) was smooth, text or not. So the bars frame goes out on every
+// beat, changed or not, and changed text goes with it.
+std::atomic<bool> g_cellBeatRunning{false};
+void startCellBeat()
 {
-    long long wait = 0;
-    {
-        std::lock_guard<std::mutex> lk(g_paceMx);
-        const long long t = nowMs();
-        if (g_paceTimer) return;                 // a paint is already due; it takes the latest state
-        wait = g_lastCellPaint + 40 - t;
-        if (wait > 0) g_paceTimer = true;
-        else g_lastCellPaint = t;
-    }
-    if (wait <= 0) {
-        g_cellsDirty = false;
-        paintSendCells(false);
-        if (g_trace) std::printf("%lld cell paint, UF1 queue %zu\n", nowMs() % 100000, g_dev.pendingFrames());
-        if (g_cellsDirty) { std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); paintSendCellsPaced(); }).detach(); }
-        return;
-    }
-    std::thread([wait] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(wait));
-        { std::lock_guard<std::mutex> lk(g_paceMx); g_paceTimer = false; }
-        paintSendCellsPaced();
-    }).detach();
-}
-std::atomic<bool> g_cellPainterRunning{false};
-void scheduleSendCells()
-{
-    g_cellsDirty = true;
     bool expected = false;
-    if (!g_cellPainterRunning.compare_exchange_strong(expected, true)) return;
+    if (!g_cellBeatRunning.compare_exchange_strong(expected, true)) return;
     std::thread([] {
-        for (int idle = 0; idle < 25; ) {   // stops after 1 s without updates
-            std::this_thread::sleep_for(std::chrono::milliseconds(40));
-            if (g_cellsDirty.exchange(false)) { idle = 0; paintSendCells(false); }
-            else ++idle;
+        auto next = std::chrono::steady_clock::now();
+        while (g_view == kViewSends && g_open) {
+            next += std::chrono::microseconds(40800);
+            paintSendCells(false, true);
+            std::this_thread::sleep_until(next);
         }
-        g_cellPainterRunning = false;
-        if (g_cellsDirty) scheduleSendCells();
+        g_cellBeatRunning = false;
     }).detach();
 }
 
+
 // Only what changed goes out (turning one V-pot used to resend all four cells, the bars and the styles for
 // every step, which made the bar slow and choppy). force: send everything (view change, start-up, reopen).
-void paintSendCells(bool force)
+void paintSendCells(bool force, bool beat)
 {
     if (!g_open) return;
     std::lock_guard<std::mutex> lk(g_cellMx);
@@ -487,7 +464,7 @@ void paintSendCells(bool force)
         const int d = int(want) - int(barPos[size_t(i)]);
         if (!force && on && (d == 1 || d == -1) && barDir[size_t(i)] != 0 && (d > 0) != (barDir[size_t(i)] > 0)) {
             if (!backSince[size_t(i)]) backSince[size_t(i)] = t;
-            if (t - backSince[size_t(i)] < 300) { want = barPos[size_t(i)]; g_cellsDirty = true; }
+            if (t - backSince[size_t(i)] < 300) { want = barPos[size_t(i)]; }
         }
         if (want != barPos[size_t(i)]) {
             barDir[size_t(i)] = want > barPos[size_t(i)] ? 1 : -1;
@@ -500,9 +477,9 @@ void paintSendCells(bool force)
         bars[size_t(i) * 2 + 1] = 0x80;
         styles[size_t(i)] = on ? 0x01 : 0x03;
     }
-    if (force || bars != shownBars) {
+    if (force || beat || bars != shownBars) {
         shownBars = bars;
-        if (g_trace) std::printf("%lld cell bars out: %d %d %d %d\n", nowMs() % 100000, bars[0], bars[2], bars[4], bars[6]);
+        if (g_trace && !beat) std::printf("%lld cell bars out: %d %d %d %d\n", nowMs() % 100000, bars[0], bars[2], bars[4], bars[6]);
         g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
     }
     if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
@@ -651,7 +628,7 @@ void onSysex(const std::vector<unsigned char>& m)
         lk.unlock();
         // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
         // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
-        if (g_view == kViewSends) paintSendCellsPaced();
+        // Drawn by the beat (startCellBeat), which picks up the new state on its next tick.
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
@@ -909,6 +886,7 @@ bool uf1Reopen()
     showStripNumber();
     paintSoftKeys();
     paintSendCells(true);
+    if (g_view == kViewSends) startCellBeat();
     std::printf("UF1 reopened.\n");
     return true;
 }
