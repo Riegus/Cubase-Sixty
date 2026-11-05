@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.10.4-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.10.5-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -355,8 +355,7 @@ function updateArmable(activeDevice, index) {
 var recTitleCount = 0
 for (var k = 0; k < REC_CHANNELS; ++k) {
 	var recChannel = recZone.makeMixerBankChannel()
-	var recProbe = surface.makeCustomValueVariable('recProbe' + k)
-	page.makeValueBinding(recProbe, recChannel.mValue.mRecordEnable)
+	// No value binding here (names only): 128 bound values made Cubase pause while a send was turned.
 	;(function (slot) {
 		recChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			if (recTitles[slot] === undefined && title) {
@@ -638,14 +637,14 @@ function meterToMidi(value) {
 		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Follow selection').excludeInputChannels().excludeOutputChannels()
 		for (var c = 0; c < CHANNELS; ++c) {
 			var ch = zone.makeMixerBankChannel()
-			var sel = surface.makeCustomValueVariable('followSel' + c)
-			page.makeValueBinding(sel, ch.mValue.mSelected)
+			// Names only, no value binding per channel (its selected state): 256 bound values made Cubase pause
+			// for up to 0.7 s at a time while a send was turned (traced). The selected track is found by the
+			// current track's name (pickCurrent).
 			;(function (index, ch) {
-				ch.mOnTitleChange = function (activeDevice, activeMapping, title) { allTitles[index] = title; reportBank(activeDevice) }
-				sel.mOnProcessValueChange = function (activeDevice, value) {
-					if (value > 0.5) selectedSet[index] = true
-					else delete selectedSet[index]
-					pickCurrent(activeDevice)
+				ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+					allTitles[index] = title
+					reportBank(activeDevice)
+					if (title && title === currentTitle) pickCurrent(activeDevice)
 				}
 			})(c, ch)
 		}

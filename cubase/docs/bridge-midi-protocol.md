@@ -60,10 +60,10 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | Fader touch | Note 104 | bridge → Cubase | |
 | SOLO / CUT / SEL | Notes 8 / 16 / 24 | both | Cubase → bridge sets the LED. The SEL LED shows the track colour (from SysEx 02), dim, and bright while the editor is open. |
 | Pan knob | CC 16, relative signed-bit | bridge → Cubase | The knob above the fader (encoder id 0). Pan of the selected track. |
-| V-pots 1–4 | CC 17–20, relative signed-bit | bridge → Cubase | Sends 1–4 of the selected track (level). |
+| V-pots 1–4 | 14-bit CC: 17–20 (high 7 bits) + 49–52 (low 7 bits), absolute | bridge → Cubase | Sends 1–4 / 5–8 of the selected track (level), or Quick Controls in PLUGIN. The bridge keeps each V-pot's position (from SysEx 17), adds the turns itself (82 of 16383 per detent) and sends the new absolute position, so it can draw it at once. |
 | V-pot pushes | Notes 33–36 | bridge → Cubase | Send on / off. Note 32 = push of the pan knob, 37 = channel encoder push (unused). |
 | 5–8 | Note 53 (sends 1–4) / 54 (sends 5–8); in the PLUGIN view 88 (Quick Controls 1–4) / 89 (5–8) | bridge → Cubase | The bridge toggles on each press and lights the 5–8 LED for 5–8. |
-| MODE + display soft keys | Note 53 / 54 (DAW) or 88 / 89 (PLUGIN) | bridge → Cubase | Handled in the bridge: while MODE is held, the four display soft keys show the view picker (1 PLUGIN, 2 DAW, 3 and 4 not used yet; labels at cell 0x0104, LEDs 0x01–0x04, the active view lit yellow). Picking a view sends the V-pot page for that view and the current 5–8 state. |
+| MODE + display soft keys | Note 53 / 54 (DAW) or 88 / 89 (PLUGIN) | bridge → Cubase | Handled in the bridge: while MODE is held, the four display soft keys show the view picker (1 PLUGIN, 2 DAW, 4 SENDS, 3 not used yet; labels at cell 0x0104, LEDs 0x01–0x04, the active view lit yellow). Picking a view sends the V-pot page for that view and the current 5–8 state (SENDS uses the DAW notes). |
 | MASTER / FLIP | Notes 44–47 | bridge → Cubase | Strip sub-page: 44 selected track, 45 main output, 46 selected track flipped, 47 main output flipped. The bridge toggles MASTER and FLIP and lights their LEDs. |
 | SHIFT + keys | Notes 56–61 | bridge → Cubase | SHIFT held in the bridge. ◀ = 56 Read, ▶ = 57 Write (selected track), Cycle = 58 Cross-Over, Click = 59 Trim, 1 = 60 Latch, 2 = 61 Touch. |
 | Meter | CC 80 (left), CC 81 (right), 0–127 | Cubase → bridge | From the script (already in dB, −55…0 dBFS); the level meter on the small display. |
@@ -102,6 +102,8 @@ The scripts send display data to the bridge as SysEx on the surface's output por
 | UF8 bank-left request | `F0 7D 52 36 0F [<count>] F7` | Cubase → bridge | As 0B, with bank-left presses (note 46). |
 | UF8 jump | `F0 7D 52 36 10 <count> F7` | Cubase → bridge | Bank reset (note 79), then `count` bank-rights 100 ms apart, then note 80 250 ms later. Held until 5 s after Cubase first spoke. The UF8 is frozen meanwhile: what Cubase sends for the banks passed is only cached, and 400 ms after the last press the end state is shown once. Used to follow the selection. |
 | UF8 tick | `F0 7D 52 36 11 F7` | Cubase → bridge | The bridge sends note 80 after 300 ms. Not used any more (see note 80). |
+| UF1 send cell | `F0 7D 52 36 15 <pot 0–3> <position 0–100> <name>|<level> F7` | Cubase → bridge | A send's name (the destination, without Cubase's "1- " prefix, shortened to 9 characters) and level text, for the SENDS view's V-pot cells. Sent in DAW and SENDS (not PLUGIN); empty text = no send. |
+| UF1 V-pot position | `F0 7D 52 36 17 <pot 0–3> <high 7 bits> <low 7 bits> F7` | Cubase → bridge | The V-pot's value in Cubase (0..16383), on every change and once a second. The bridge takes it unless the V-pot was turned in the last 0.5 s. |
 | UF8 freeze | `F0 7D 52 36 13 <01 / 00> F7` | Cubase → bridge | 01: hold the UF8 frozen (display, faders, LEDs, meters: cached, not shown) across several jumps; 00: release and show the end state. Used while the script looks for the selected track at start-up. Released by itself after 30 s. |
 | UF8 bank size | `F0 7D 52 36 12 <total hi> <total lo> <offset hi> <offset lo> F7` | Cubase → bridge | The number of channels in the UF8 bank and where the bank starts (0 = first); `7F 7F` = not known. Sent when either changes; the bridge uses it to stop bank-right at the last full bank. |
 
@@ -122,5 +124,5 @@ Everything else Cubase sends on that port (display, LEDs, faders) is ignored.
 ## Not yet covered
 
 - UC1 mappings.
-- The UF1 MODE views METER and SENDS (soft keys 3 and 4).
+- The UF1 MODE view METER (soft key 3).
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.

@@ -9,6 +9,8 @@
 #include "Uf1Bridge.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -25,6 +27,7 @@
 #include "Mapping.h"
 #include "UF1Device.h"
 #include "UF1Protocol.h"
+#include "Uf1Pacer.h"
 
 namespace cs {
 namespace {
@@ -77,7 +80,24 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
-bool g_pluginView = false;   // view: false = DAW (V-pots on sends), true = PLUGIN (V-pots on Quick Controls)
+// The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
+// 3 SENDS = V-pots on the sends and the four sends shown in the display's V-pot cells).
+enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
+std::atomic<int> g_view{kViewDaw};
+long long nowMs();
+void paintSendCells(bool force = false);
+void startIdleCycle();
+// V-pots 1-4 (sends / Quick Controls) are absolute in Cubase: the bridge keeps each one's position (0..16383,
+// from Cubase's SysEx 17), adds the turns itself and sends the new position as a 14-bit CC (17-20 + 49-52).
+// Like Rea-Sixty, which sets the value in REAPER itself: what is drawn is exactly what Cubase gets, with no
+// round trip in between (the relative steps went to Cubase and back, and Cubase's answers lagged and
+// wobbled).
+std::array<int, 4> g_vpotPos{-1, -1, -1, -1};
+std::array<long long, 4> g_vpotOwnUntil{};
+constexpr int kVpotStep = 82;   // per detent: half a percent of the range (what the relative steps gave)
+
+struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
+std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
@@ -85,7 +105,7 @@ void paintSoftKeys();
 // The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
 void sendVpotPage()
 {
-    const uint8_t n = g_pluginView ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
+    const uint8_t n = g_view == kViewPlugin ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
     note(n, true);
     note(n, false);
 }
@@ -122,7 +142,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
 {
     using K = ::uf1::InputKind;
     if (g_trace && ev.kind != K::FaderPosition)
-        std::printf("[UF1 event] kind=%d id=0x%02X pressed=%d delta=%d\n", int(ev.kind), ev.id, int(ev.pressed), ev.delta);
+        std::printf("%lld [UF1 event] kind=%d id=0x%02X pressed=%d delta=%d\n", nowMs() % 100000, int(ev.kind), ev.id, int(ev.pressed), ev.delta);
     switch (ev.kind) {
     case K::FaderTouch:
         g_touched = ev.pressed;
@@ -170,6 +190,18 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }
+            break;
+        }
+        if (ev.id >= 1 && ev.id <= 4) {
+            const size_t k = size_t(ev.id - 1);
+            if (g_vpotPos[k] < 0) break;   // position not known yet (comes from Cubase within a second)
+            const int v = std::clamp(g_vpotPos[k] + ev.delta * kVpotStep, 0, 16383);
+            g_vpotPos[k] = v;
+            g_vpotOwnUntil[k] = nowMs() + 500;   // Cubase's echoes of our own turns are not taken back meanwhile
+            const uint8_t cc = uint8_t(uf1m::kCcEncoder + ev.id);
+            sendMidi({0xB0, cc, uint8_t((v >> 7) & 0x7F)});
+            sendMidi({0xB0, uint8_t(cc + 32), uint8_t(v & 0x7F)});
+            if (g_view == kViewSends) paintSendCells(false);
             break;
         }
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
@@ -224,12 +256,14 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
             if (!ev.pressed || !g_modeHeld) break;
-            if (ev.id == 0x19 || ev.id == 0x1A) {
-                const bool plugin = ev.id == 0x19;
-                if (plugin != g_pluginView) {
-                    g_pluginView = plugin;
-                    sendVpotPage();
-                    if (g_trace) std::printf("UF1 view: %s\n", plugin ? "PLUGIN" : "DAW");
+            if (ev.id == 0x19 || ev.id == 0x1A || ev.id == 0x1C) {
+                const int view = ev.id - 0x19;
+                if (view != g_view) {
+                    const bool pageChanges = (view == kViewPlugin) != (g_view == kViewPlugin);
+                    g_view = view;
+                    if (pageChanges) sendVpotPage();
+                    paintSendCells(true);
+                    if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : "SENDS");
                 }
                 paintSoftKeys();
             }
@@ -335,7 +369,7 @@ void softKeyLed(int i, uint32_t rgb)
 void paintSoftKeys()
 {
     if (!g_open) return;
-    static const char* const kPicker[4] = {"PLUGIN", "DAW", "", ""};
+    static const char* const kPicker[4] = {"PLUGIN", "DAW", "", "SENDS"};   // 3 = METER, later
     for (int i = 0; i < 4; ++i) {
         const std::string label = g_modeHeld ? kPicker[i] : "";
         std::vector<uint8_t> p;
@@ -343,14 +377,150 @@ void paintSoftKeys()
         p.insert(p.end(), label.begin(), label.end());
         g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
         uint32_t rgb = 0;   // dark
-        if (g_modeHeld && i < 2) {
-            const bool on = (i == 0) == g_pluginView;
+        if (g_modeHeld && i != 2) {
+            const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
         }
         softKeyLed(i, rgb);
     }
     const uint8_t noHighlight = 0;
     g_dev.send(::uf1::buildScreen(0x0102, std::span<const uint8_t>(&noHighlight, 1)));
+}
+
+// SENDS view: the four sends in the display's V-pot cells (Rea-Sixty's cells: 0x010e text per pot with the
+// pot index first, 0x010f bars = position 0..100 + brightness 0x80 per pot, 0x010d styles: 0x01 pointer,
+// 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
+// cells show them only in SENDS and are blank otherwise.
+std::array<SendCell, 4> g_sendCells;
+std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
+// ---------------------------------------------------------------------------
+// The send level text while turning. The bar follows the bridge's own position at once, but the dB text
+// comes from Cubase and trails behind. Cubase's level curve is the same for every send, so the bridge learns
+// it: each position Cubase reports (SysEx 17) is paired with the text Cubase sent just before it (SysEx 15)
+// and kept. While a V-pot turns, the text for the bridge's own position is looked up: the text Cubase gave
+// for that exact position, or interpolated between two known positions close by (formatted like Cubase:
+// two decimals below 10 dB, one above). Where nothing is known nearby, Cubase's own text is shown.
+// ---------------------------------------------------------------------------
+std::mutex g_levelMx;
+std::map<int, std::string> g_levelText;       // position 0..16383 -> Cubase's text for it
+std::array<std::string, 4> g_lastCubaseText;  // per pot: Cubase's latest text and when it came
+std::array<long long, 4> g_lastCubaseTextMs{};
+bool parseDb(const std::string& t, double& db)
+{
+    char* end = nullptr;
+    db = std::strtod(t.c_str(), &end);
+    return end != t.c_str() && std::string(end).rfind("dB", 0) == 0;
+}
+std::string levelTextFor(int pos)
+{
+    std::lock_guard<std::mutex> lk(g_levelMx);
+    if (g_levelText.empty()) return {};
+    auto hi = g_levelText.lower_bound(pos);
+    if (hi != g_levelText.end() && hi->first == pos) return hi->second;
+    if (hi == g_levelText.end() || hi == g_levelText.begin()) return {};
+    auto lo = std::prev(hi);
+    // Known on both sides: a straight line between them. Up to a quarter of the range apart: falling back
+    // to Cubase's own (lagging) text in a gap made the number jump back and forth (seen on video), and a
+    // rough value for half a second is better; Cubase's exact value follows when the turning stops.
+    if (hi->first - lo->first > 4000) {
+        if (pos - lo->first <= 20) return lo->second;
+        if (hi->first - pos <= 20) return hi->second;
+        return {};
+    }
+    double a = 0, b = 0;
+    if (!parseDb(lo->second, a) || !parseDb(hi->second, b)) return {};
+    const double db = a + (b - a) * double(pos - lo->first) / double(hi->first - lo->first);
+    char buf[16];
+    std::snprintf(buf, sizeof buf, std::fabs(db) < 10.0 ? "%.2fdB" : "%.1fdB", db);
+    return buf;
+}
+
+std::string sendCellLine(const SendCell& c)
+{
+    // Rea-Sixty's value line: the name left (11 characters), the value right-aligned in 19.
+    std::string name = c.name.substr(0, 11), value = c.value.substr(0, 8);
+    std::string line = name;
+    line.append(19 - name.size() - value.size(), ' ');
+    line += value;
+    return line;
+}
+// ---------------------------------------------------------------------------
+// The idle cycle. Rea-Sixty found (uf1CyclePacerLoop_, cap84 / cap101) that the UF1 draws its big display
+// continuously only while it gets SSL's cycle without a break: every ~40.8 ms a meter group (0009 000a 0015
+// 0016) about 18 ms in and a closing group (011d) at the end, with silences in between that are the
+// device's render windows. Without the stream, or with frames landing inside it, the firmware falls back to
+// drawing when the traffic pauses: V-pot cells turned smooth at first, then choppy. So the bridge streams
+// the channel view's idle cycle from the moment the UF1 is open, and carries the level meter in it; other
+// frames sent meanwhile are held by the device class and go out right after each cycle (as SSL does).
+// ---------------------------------------------------------------------------
+std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
+std::atomic<bool> g_cycleRunning{false};
+void startIdleCycle()
+{
+    bool expected = false;
+    if (!g_cycleRunning.compare_exchange_strong(expected, true)) return;
+    std::thread([] {
+        auto slot = std::chrono::steady_clock::now();
+        while (g_open) {
+            uf1pace::Parts p;
+            const uint8_t level[4] = { g_meterL.load(), g_meterR.load(), 0x00, 0x00 };
+            const uint8_t idle[4] = { 0x00, 0x00, 0x00, 0x00 };
+            const uint8_t zero = 0x00, closeValue = 0x11;   // 011d = 11 closes the channel view's idle cycle
+            p.meters.push_back(::uf1::buildScreen(0x0009, level));
+            p.meters.push_back(::uf1::buildScreen(0x000a, idle));
+            p.meters.push_back(::uf1::buildScreen(0x0015, std::span<const uint8_t>(&zero, 1)));
+            p.meters.push_back(::uf1::buildScreen(0x0016, std::span<const uint8_t>(&zero, 1)));
+            p.tail.push_back(::uf1::buildScreen(0x011d, std::span<const uint8_t>(&closeValue, 1)));
+            uf1pace::emitCycle(g_dev, p, slot);
+            slot += std::chrono::microseconds(40800);
+            std::this_thread::sleep_until(slot);
+        }
+        g_cycleRunning = false;
+    }).detach();
+}
+
+
+
+// Only what changed goes out (turning one V-pot used to resend all four cells, the bars and the styles for
+// every step, which made the bar slow and choppy). force: send everything (view change, start-up, reopen).
+void paintSendCells(bool force)
+{
+    if (!g_open) return;
+    std::lock_guard<std::mutex> lk(g_cellMx);
+    static std::array<std::string, 4> shownLine;
+    static std::array<uint8_t, 8> shownBars{};
+    static std::array<uint8_t, 4> shownStyles{};
+    const bool show = g_view == kViewSends;
+    std::array<uint8_t, 8> bars{};
+    std::array<uint8_t, 4> styles{};
+    for (int i = 0; i < 4; ++i) {
+        const SendCell& c = g_sendCells[size_t(i)];
+        const bool on = show && c.used;
+        SendCell shownCell = c;
+        if (on && g_vpotPos[size_t(i)] >= 0 && nowMs() < g_vpotOwnUntil[size_t(i)]) {
+            const std::string t = levelTextFor(g_vpotPos[size_t(i)]);   // turning: the text for our own position
+            if (!t.empty()) shownCell.value = t;
+        }
+        const std::string line = on ? sendCellLine(shownCell) : std::string();
+        if (force || line != shownLine[size_t(i)]) {
+            shownLine[size_t(i)] = line;
+            std::vector<uint8_t> p;
+            p.push_back(uint8_t(i));
+            p.insert(p.end(), line.begin(), line.end());
+            g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
+        }
+        // The bar follows the bridge's own V-pot position (exact, see g_vpotPos), Cubase's otherwise.
+        const int own = g_vpotPos[size_t(i)];
+        const uint8_t want = !on ? 0 : own >= 0 ? uint8_t((own * 100 + 8191) / 16383) : c.pos;
+        bars[size_t(i) * 2] = want;
+        bars[size_t(i) * 2 + 1] = 0x80;
+        styles[size_t(i)] = on ? 0x01 : 0x03;
+    }
+    if (force || bars != shownBars) {
+        shownBars = bars;
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
+    }
+    if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
 }
 
 // Screen text zone: 0x00, then the text (the UF1 reads one byte per glyph, so ASCII only here).
@@ -474,12 +644,47 @@ void onSysex(const std::vector<unsigned char>& m)
         for (size_t i = 5; i + 1 < m.size(); ++i) t.push_back(char(m[i]));
         if (t.size() > 12) t.resize(12);
         if (g_trace) std::printf("UF1 value line (%s): \"%s\"\n", m[4] == 0x08 ? "home" : "temporary", t.c_str());
-        if (m[4] == 0x08) valueHome(t); else valueTemporary(t);
+        if (m[4] == 0x08) valueHome(t);
+        else if (g_view != kViewSends) valueTemporary(t);   // SENDS: the send's cell shows it already
     } else if ((m[4] == 0x05 || m[4] == 0x09) && m.size() >= 7) {
         // Readout bar: position 0..100, optional style byte (0x01 pointer, 0x02 fill). 05 temporary, 09 home.
         const uint8_t pos = uint8_t(m[5] > 100 ? 100 : m[5]);
         const uint8_t style = (m.size() >= 8 && (m[6] == 0x01 || m[6] == 0x02 || m[6] == 0x08)) ? m[6] : 0x02;
-        if (m[4] == 0x09) barHome(pos, style); else barTemporary(pos, style);
+        if (m[4] == 0x09) barHome(pos, style);
+        else if (g_view != kViewSends) barTemporary(pos, style);
+    } else if (m[4] == 0x17 && m.size() >= 9 && m[5] < 4) {
+        // A V-pot's position in Cubase (0..16383). Taken unless the V-pot is being turned right now.
+        const size_t k = m[5];
+        {
+            // Learn the level curve: this position with the text Cubase sent just before it (SENDS and DAW,
+            // where the V-pots are on the sends; never PLUGIN, whose Quick Controls have other curves).
+            const int v = (int(m[6]) << 7) | int(m[7]);
+            double db = 0;
+            if (g_view != kViewPlugin && nowMs() - g_lastCubaseTextMs[k] < 60 && parseDb(g_lastCubaseText[k], db)) {
+                std::lock_guard<std::mutex> lk(g_levelMx);
+                g_levelText[v] = g_lastCubaseText[k];
+            }
+        }
+        if (nowMs() >= g_vpotOwnUntil[k]) {
+            const int v = (int(m[6]) << 7) | int(m[7]);
+            if (v != g_vpotPos[k]) { g_vpotPos[k] = v; if (g_view == kViewSends) paintSendCells(false); }
+        }
+    } else if (m[4] == 0x15 && m.size() >= 9 && m[5] < 4) {
+        // A send for the SENDS view's cells: pot index, position 0..100, then "name|value" (empty = no send).
+        std::unique_lock<std::mutex> lk(g_cellMx);
+        SendCell& c = g_sendCells[m[5]];
+        std::string t(m.begin() + 7, m.end() - 1);
+        const size_t bar = t.find('|');
+        c.name = bar == std::string::npos ? t : t.substr(0, bar);
+        c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
+        g_lastCubaseText[m[5]] = c.value;
+        g_lastCubaseTextMs[m[5]] = nowMs();
+        c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
+        c.used = !c.name.empty() || !c.value.empty();
+        lk.unlock();
+        // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
+        // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
+        if (g_view == kViewSends) paintSendCells(false);
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
@@ -566,8 +771,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         else { lvL = lv; if (!g_uf1RightSeen) lvR = lv; }
         if (lvL == shownL && lvR == shownR) return;
         shownL = lvL; shownR = lvR;
-        const uint8_t cell[4] = { lvL, lvR, 0x00, 0x00 };
-        g_dev.send(::uf1::buildScreen(0x0009, cell));
+        g_meterL = lvL; g_meterR = lvR;   // the idle cycle carries the meter (startIdleCycle)
         return;
     }
     if (status == 0xE0 && (m[0] & 0x0F) == 0) {   // fader from Cubase
@@ -644,6 +848,8 @@ bool uf1OpenDevice()
         screenText(::uf1::scr::kChNumber, "");
         screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
         paintSoftKeys();   // the four display soft keys: blank and dark until MODE is held
+        paintSendCells(true);  // the V-pot cells: blank outside the SENDS view
+        startIdleCycle();      // the unbroken cycle stream the UF1 wants (see startIdleCycle)
         // The meter's neighbours, as Rea-Sixty writes them: peak indicator (0x000a) and the compressor / gate
         // gain-reduction LEDs (0x0015 / 0x0016), all at rest.
         {
@@ -735,6 +941,8 @@ bool uf1Reopen()
     showScrubLed();
     showStripNumber();
     paintSoftKeys();
+    paintSendCells(true);
+    startIdleCycle();
     std::printf("UF1 reopened.\n");
     return true;
 }

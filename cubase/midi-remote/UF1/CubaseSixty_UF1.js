@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.17.0-dev (MODE: PLUGIN = Quick Controls, DAW = sends)')
+console.log('[CubaseSixty UF1] script loaded, version 0.19.0-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -122,12 +122,77 @@ activatorButton(5, 47, stripMasterFlip)
 
 // Screen feedback for a send V-pot: the value line shows "S1 -6.0dB", the bar under it the level.
 // A V-pot's value line: 'S<n> <level>' for a send, '<name> <value>' for a Quick Control (PLUGIN view).
+// SENDS view: each send's name, level and position also go to the bridge for the display's V-pot cells
+// (SysEx 15: pot index, position 0..100, "name|level"). Sent in every view; the bridge shows them only in SENDS.
+// The send's name is its destination, reported by the send slot itself (the knob's title is only the slot
+// number and "Level"). sendNames holds sends 1-8; the cells show the four on the V-pots' page.
+// The V-pots 1-4 are absolute: the bridge keeps each one's position, adds the turns itself and sends the
+// new position (as Rea-Sixty owns the value in REAPER). So it needs Cubase's position: SysEx 17 <pot>
+// <high 7 bits> <low 7 bits> on every change, and again every second (Cubase drops what is sent while a
+// project loads).
+var vpotPositions = [-1, -1, -1, -1]
+function reportVpotPosition(activeDevice, index, value) {
+	var v = Math.max(0, Math.min(16383, Math.round(value * 16383)))
+	vpotPositions[index] = v
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+}
+var vpotIdleLast = 0
+deviceDriver.mOnIdle = function (activeDevice) {
+	var now = 0
+	try { now = Date.now() } catch (e) { return }
+	if (now - vpotIdleLast < 1000) return
+	vpotIdleLast = now
+	for (var i = 0; i < 4; ++i) {
+		var v = vpotPositions[i]
+		if (v >= 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, i, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+	}
+}
+var sendNames = ['', '', '', '', '', '', '', '']
+var sendCells = []
+// Cubase names a send "1- Reverb Vocal": drop the number, and fit the name into the cell's 9-character label
+// zone the way Rea-Sixty does: first drop vowels that do not start a word (from the end), then cut.
+function cellName(name) {
+	var n = String(name || '').replace(/^\s*\d+\s*-\s*/, '')
+	var max = 9
+	if (n.length <= max) return n
+	var chars = n.split('')
+	for (var i = chars.length - 1; i > 0 && chars.join('').length > max; --i) {
+		if (/[aeiouAEIOU]/.test(chars[i]) && chars[i - 1] !== ' ') chars.splice(i, 1)
+	}
+	n = chars.join('')
+	if (n.length > max) n = n.replace(/ /g, '')
+	return n.substr(0, max)
+}
+function refreshCellNames(activeDevice) {
+	for (var i = 0; i < sendCells.length; ++i) {
+		if (!sendCells[i]) continue
+		sendCells[i].name = cellName(sendNames[sendOffset + i])
+		sendCellInfo(activeDevice, i, sendCells[i])
+	}
+}
+function sendCellInfo(activeDevice, index, cell) {
+	if (qcActive) return
+	var text = cell.value === '' && cell.name === '' ? '' : cell.name + '|' + cell.value
+	var key = cell.pos + '/' + text
+	if (key === cell.sent) return
+	cell.sent = key
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x15, index, cell.pos], toAscii7(text), [0xF7]))
+}
 function attachSendFeedback(surfaceValue, number) {
 	var title = ''
 	var lastText = null
 	var lastPos = null
-	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) { title = valueTitle || objectTitle || '' }
+	var cell = { name: '', value: '', pos: 0, sent: null }
+	sendCells[number - 1] = cell
+	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
+		title = valueTitle || objectTitle || ''
+	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		if (!qcActive) {
+			var v = String(value)
+			cell.value = v === '' ? '' : v + (units ? units : (/^-?[0-9.]+$/.test(v) ? 'dB' : ''))
+			sendCellInfo(activeDevice, number - 1, cell)
+		}
 		var text
 		if (qcActive) {
 			var v = String(value) + (units ? units : '')
@@ -141,6 +206,8 @@ function attachSendFeedback(surfaceValue, number) {
 		sendValueLine(activeDevice, text, false)
 	}
 	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		reportVpotPosition(activeDevice, number - 1, value)
+		if (!qcActive) { cell.pos = Math.max(0, Math.min(100, Math.round(value * 100))); sendCellInfo(activeDevice, number - 1, cell) }
 		if (value === lastPos) return
 		lastPos = value
 		sendBar(activeDevice, value, 0x02, false)
@@ -203,8 +270,8 @@ var qc14 = sendArea.makeSubPage('Quick Controls 1-4')
 var qc58 = sendArea.makeSubPage('Quick Controls 5-8')
 var sendOffset = 0
 var qcActive = false
-sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false }
-sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false }
+sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false; refreshCellNames(activeDevice) }
+sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false; refreshCellNames(activeDevice) }
 qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true }
 qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true }
 activatorButton(2, 53, sends14)
@@ -219,8 +286,8 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendKnob = surface.makeKnob(6 + sendIndex * 2, 2, 2, 2)
 	sendKnob.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput)
-		.bindToControlChange(0, 17 + sendIndex)
-		.setTypeRelativeSignedBit()
+		.bindToControlChange14Bit(0, 17 + sendIndex)   // absolute, 14 bit (CC 17-20 + 49-52): the bridge owns the turn
+		.setTypeAbsolute()
 	var sendPush = surface.makeButton(6 + sendIndex * 2, 4, 2, 1)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
 	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
@@ -236,6 +303,12 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	for (var bk = 0; bk < banks.length; ++bk) {
 		try {
 			var send = selectedChannel.mSends.getByIndex(banks[bk].index)
+			;(function (slot) {
+				send.mOnTitleChange = function (activeDevice, activeMapping, name) {
+					sendNames[slot] = name || ''
+					if (!qcActive && slot >= sendOffset && slot < sendOffset + 4) refreshCellNames(activeDevice)
+				}
+			})(banks[bk].index)
 			page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
 			page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
 		} catch (e) {
@@ -328,6 +401,7 @@ function showStrip(activeDevice) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new strip: show its pan
 }
 
+var trackNumberForTitle = function () {}   // set by the track-number block
 var selected = page.mHostAccess.mTrackSelection.mMixerChannel
 selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
 	dbg('selected color: ' + r + ' ' + g + ' ' + b + ' a=' + a)
@@ -340,6 +414,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	if (masterActive) return
 	sendName(activeDevice, title)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
+	trackNumberForTitle(activeDevice, title)
 }
 if (mainOut) {
 	mainOut.mOnTitleChange = function (activeDevice, activeMapping, title) {
@@ -576,6 +651,17 @@ try {
 	var CHANNELS = 256
 	var selectedIndex = -1
 	var sentNumber = -1
+	// Found by the selected track's name in the hidden bank's names: a value binding per channel (its
+	// selected state) made Cubase pause for up to 0.7 s at a time while a send was turned (traced).
+	var numberTitles = []
+	var currentTitle = ''
+	function findNumber(activeDevice) {
+		var found = -1
+		for (var i = 0; i < CHANNELS; ++i) if (currentTitle && numberTitles[i] === currentTitle) { found = i; break }
+		selectedIndex = found
+		sendNumber(activeDevice)
+	}
+	trackNumberForTitle = function (activeDevice, title) { currentTitle = title; findNumber(activeDevice) }
 	function sendNumber(activeDevice) {
 		var n = selectedIndex + 1
 		if (n === sentNumber) return
@@ -587,15 +673,13 @@ try {
 			.setFollowVisibility(false)   // count hidden tracks too, so the numbers match the MixConsole's
 		for (var c = 0; c < CHANNELS; ++c) {
 			var ch = zone.makeMixerBankChannel()
-			var sel = surface.makeCustomValueVariable('trackNumberSel' + c)
-			page.makeValueBinding(sel, ch.mValue.mSelected)
-			;(function (index) {
-				sel.mOnProcessValueChange = function (activeDevice, value) {
-					if (value > 0.5) selectedIndex = index
-					else if (selectedIndex === index) selectedIndex = -1
-					sendNumber(activeDevice)
+			;(function (index, ch) {
+				ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+					if (numberTitles[index] === title) return
+					numberTitles[index] = title
+					if (title && title === currentTitle) findNumber(activeDevice)
 				}
-			})(c)
+			})(c, ch)
 		}
 	} catch (e) {
 		console.log('[CubaseSixty UF1] track numbers not available: ' + e)

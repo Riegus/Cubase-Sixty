@@ -55,6 +55,7 @@ add_executable(cubase_sixty_bridge
     ${EXT_SRC}/UF8Device.cpp
     ${EXT_SRC}/UF1Device.cpp
     ${EXT_SRC}/UF1Protocol.cpp
+    ${EXT_SRC}/Uf1Pacer.cpp
     ${EXT_SRC}/Protocol.cpp
     ${EXT_SRC}/Palette.cpp
     ${EXT_SRC}/LogPath.cpp)
