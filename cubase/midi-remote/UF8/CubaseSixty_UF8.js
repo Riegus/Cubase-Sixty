@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.10.5-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.11.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -149,6 +149,13 @@ for (var i = 0; i < STRIPS; ++i) {
 		.setValueTakeOverModeJump().setSubPage(flipFlipped)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(flipFlipped)
 	page.makeValueBinding(strip.select.mSurfaceValue, channel.mValue.mSelected)
+	;(function (index) {
+		// Which strips are selected: tells two tracks with the same name apart (follow selection, below).
+		strip.select.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			stripSelected[index] = value > 0.5
+			followStripSelect(activeDevice)   // another track of the same name has no new name to report
+		}
+	})(i)
 	page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
 		.setTypeToggle()
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute)
@@ -325,19 +332,17 @@ function sendStripColor(activeDevice, index, r, g, b) {
 
 var REC_CHANNELS = 128
 var stripTitles = []
+var stripSelected = []
 // TEST SWITCH: true = the UF8 does not follow the selection itself; the script only logs what Cubase does
 // (selection and bank moves), to see how Cubase's own banking behaves.
 var FOLLOW_OBSERVE_ONLY = false
 var followOnStripTitle = function () {}   // set by the follow-selection block
 var followCurrentTitle = function () {}   // set by the follow-selection block
+var followStripSelect = function () {}    // set by the follow-selection block
+var onAllTitle = function () {}           // set by the follow-selection block
 var recTitles = []
 var armableSent = []
 
-var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Recordable')
-var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels']
-for (var f = 0; f < recFilters.length; ++f) {
-	try { recZone[recFilters[f]]() } catch (e) { console.log('[CubaseSixty] recordable bank: ' + recFilters[f] + ' not available: ' + e) }
-}
 
 function isRecordable(title) {
 	if (!title) return false
@@ -352,20 +357,17 @@ function updateArmable(activeDevice, index) {
 	midiOutput.sendMidi(activeDevice, [0x90, 64 + index, armable ? 0 : 127])
 }
 
+// The recordable tracks' names come from the helper script (SysEx 19 via the bridge, see the end of this
+// script): as a list in this script they made every bank move about 0.25 s slower.
 var recTitleCount = 0
-for (var k = 0; k < REC_CHANNELS; ++k) {
-	var recChannel = recZone.makeMixerBankChannel()
-	// No value binding here (names only): 128 bound values made Cubase pause while a send was turned.
-	;(function (slot) {
-		recChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
-			if (recTitles[slot] === undefined && title) {
-				recTitleCount++
-				if (recTitleCount === 1 || recTitleCount % 16 === 0) console.log('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
-			}
-			recTitles[slot] = title
-			for (var i = 0; i < STRIPS; ++i) updateArmable(activeDevice, i)
-		}
-	})(k)
+function onRecTitle(activeDevice, slot, title) {
+	if (recTitles[slot] === title) return
+	if (!recTitles[slot] && title) {
+		recTitleCount++
+		if (recTitleCount === 1 || recTitleCount % 16 === 0) console.log('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
+	}
+	recTitles[slot] = title
+	for (var i = 0; i < STRIPS; ++i) updateArmable(activeDevice, i)
 }
 
 // ---------------------------------------------------------------------------
@@ -528,18 +530,32 @@ function meterToMidi(value) {
 	}
 	// Several tracks can be selected; follow Cubase's current track (the last one clicked, the one the UF1
 	// shows): the selected channel whose name is the current track's name.
-	var selectedSet = {}
 	var currentTitle = ''
+	// The selected track is found by Cubase's current track name. With several tracks of that name: the one
+	// whose UF8 strip is selected, if it is on the strips (exact); otherwise the one nearest to the previous
+	// selection (or to the bank, if there was none), since selection mostly moves step by step.
 	function pickCurrent(activeDevice) {
-		var pick = -1, any = -1
-		for (var key in selectedSet) {
-			var i = Number(key)
-			if (any < 0 || i < any) any = i
-			if (allTitles[i] === currentTitle && (pick < 0 || i < pick)) pick = i
+		var pick = -1
+		if (currentTitle) {
+			var candidates = []
+			for (var j = 0; j < allTitles.length; ++j) if (allTitles[j] === currentTitle) candidates.push(j)
+			if (candidates.length === 1) pick = candidates[0]
+			else if (candidates.length > 1) {
+				var offset = currentOffset()
+				if (offset >= 0) {
+					for (var s = 0; s < STRIPS; ++s) {
+						if (stripSelected[s] && stripTitles[s] === currentTitle && candidates.indexOf(offset + s) >= 0) { pick = offset + s; break }
+					}
+				}
+				if (pick < 0) {
+					var near = selectedIndex >= 0 ? selectedIndex : Math.max(offset, 0)
+					for (var c = 0; c < candidates.length; ++c) {
+						if (pick < 0 || Math.abs(candidates[c] - near) < Math.abs(pick - near)) pick = candidates[c]
+					}
+				}
+			}
 		}
-		if (pick < 0) pick = any
-		// No selected state known yet (possible at start-up): Cubase's current track, found by its name.
-		if (pick < 0 && currentTitle) for (var j = 0; j < allTitles.length; ++j) if (allTitles[j] === currentTitle) { pick = j; break }
+		sendSameNameRank(activeDevice, pick)
 		// Only a real change may bank: Cubase re-sends the same values after every bank step.
 		if (pick === selectedIndex) return
 		selectedIndex = pick
@@ -551,6 +567,29 @@ function meterToMidi(value) {
 	followCurrentTitle = function (activeDevice, title) {
 		currentTitle = title
 		pickCurrent(activeDevice)
+	}
+	followStripSelect = function (activeDevice) { pickCurrent(activeDevice) }
+	// Tell the UF1 script (via the bridge) which of several same-named tracks is selected: its rank among
+	// them, top to bottom (SysEx 1C <rank> <name, 3 x 7 bits per character>). The UF1 is not told otherwise:
+	// Cubase reports only the name, which does not change between them.
+	var sentRank = -1, sentRankTitle = null
+	function sendSameNameRank(activeDevice, pick) {
+		if (pick < 0 || !currentTitle) return
+		var rank = 0, count = 0
+		for (var j = 0; j < allTitles.length; ++j) {
+			if (allTitles[j] !== currentTitle) continue
+			if (j < pick) ++rank
+			++count
+		}
+		if (count < 2 || (rank === sentRank && currentTitle === sentRankTitle)) return
+		sentRank = rank
+		sentRankTitle = currentTitle
+		var name = []
+		for (var n = 0; n < currentTitle.length && n < 48; ++n) {
+			var c = currentTitle.charCodeAt(n)
+			name.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1C, rank & 0x7F], name, [0xF7]))
 	}
 	function currentOffset() {
 		// The bank position: where the strips' names appear in the full list.
@@ -603,6 +642,7 @@ function meterToMidi(value) {
 	deviceDriver.mOnIdle = function (activeDevice) {
 		var now = nowMs()
 		if (now <= 0) return
+		requestListsIfNeeded(activeDevice, now)
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
 		if (startupUntil === 0) { startupUntil = now + 30000; nextStartupCheck = now + 2500 }
@@ -633,22 +673,44 @@ function meterToMidi(value) {
 	var resetKey = surface.makeButton(36, 14, 1, 1)
 	resetKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 79)
 	page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank)
-	try {
-		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Follow selection').excludeInputChannels().excludeOutputChannels()
-		for (var c = 0; c < CHANNELS; ++c) {
-			var ch = zone.makeMixerBankChannel()
-			// Names only, no value binding per channel (its selected state): 256 bound values made Cubase pause
-			// for up to 0.7 s at a time while a send was turned (traced). The selected track is found by the
-			// current track's name (pickCurrent).
-			;(function (index, ch) {
-				ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
-					allTitles[index] = title
-					reportBank(activeDevice)
-					if (title && title === currentTitle) pickCurrent(activeDevice)
-				}
-			})(c, ch)
-		}
-	} catch (e) {
-		console.log('[CubaseSixty] follow selection not available: ' + e)
+	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script
+	// they made every bank move about 0.25 s slower.
+	onAllTitle = function (activeDevice, index, title) {
+		if (allTitles[index] === title) return
+		allTitles[index] = title
+		reportBank(activeDevice)
+		if (title && title === currentTitle) pickCurrent(activeDevice)
 	}
 })()
+
+// ---------------------------------------------------------------------------
+// Names from the helper script (cubase/midi-remote/Helper), passed on by the bridge as SysEx:
+//   18 <index hi> <index lo> <name>   all channels (follow selection)
+//   19 <slot> <name>                  recordable channels (record-enable keys)
+// Names are 3 x 7 bits per character. Until the first names arrive (Cubase drops what is sent while a
+// project loads), the script asks for them every 2 s (SysEx 1B, passed on to the helper).
+// ---------------------------------------------------------------------------
+var listNamesSeen = 0
+var listRequestAt = 0
+function requestListsIfNeeded(activeDevice, now) {
+	if (listNamesSeen > 0 || now < listRequestAt) return
+	listRequestAt = now + 2000
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1B, 0xF7]))
+}
+function decodeName(m, from) {
+	var s = ''
+	for (var i = from; i + 2 < m.length - 1; i += 3) s += String.fromCharCode((m[i] << 14) | (m[i + 1] << 7) | m[i + 2])
+	return s
+}
+midiInput.mOnSysex = function (activeDevice, message) {
+	var m = []
+	for (var i = 0; i < message.length; ++i) m.push(message[i])
+	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
+	if (m[4] === 0x18 && m.length >= 8) {
+		if (++listNamesSeen === 1) console.log('[CubaseSixty] channel lists from the helper script arriving')
+		onAllTitle(activeDevice, (m[5] << 7) | m[6], decodeName(m, 7))
+	} else if (m[4] === 0x19 && m.length >= 7) {
+		++listNamesSeen
+		onRecTitle(activeDevice, m[5], decodeName(m, 6))
+	}
+}

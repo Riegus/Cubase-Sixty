@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.19.0-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
+console.log('[CubaseSixty UF1] script loaded, version 0.19.2-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -402,6 +402,16 @@ function showStrip(activeDevice) {
 }
 
 var trackNumberForTitle = function () {}   // set by the track-number block
+var sameNameHint = function () {}          // set by the track-number block
+// From the UF8 script, via the bridge: which of several same-named tracks is selected (SysEx 1C).
+midiInput.mOnSysex = function (activeDevice, message) {
+	var m = []
+	for (var i = 0; i < message.length; ++i) m.push(message[i])
+	if (m.length < 7 || m[0] !== 0xF0 || m[4] !== 0x1C) return
+	var name = ''
+	for (var j = 6; j + 2 < m.length - 1; j += 3) name += String.fromCharCode((m[j] << 14) | (m[j + 1] << 7) | m[j + 2])
+	sameNameHint(activeDevice, name, m[5])
+}
 var selected = page.mHostAccess.mTrackSelection.mMixerChannel
 selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
 	dbg('selected color: ' + r + ' ' + g + ' ' + b + ' a=' + a)
@@ -655,11 +665,30 @@ try {
 	// selected state) made Cubase pause for up to 0.7 s at a time while a send was turned (traced).
 	var numberTitles = []
 	var currentTitle = ''
+	// With several tracks of the same name: the UF8 script tells which one is selected (its rank among them,
+	// SysEx 1C via the bridge; it sees the selection on its strips). Without that (no UF8, or no word yet):
+	// the one nearest to the previous selection, since selection mostly moves step by step.
+	var hintTitle = null, hintRank = -1
 	function findNumber(activeDevice) {
 		var found = -1
-		for (var i = 0; i < CHANNELS; ++i) if (currentTitle && numberTitles[i] === currentTitle) { found = i; break }
+		if (currentTitle) {
+			var candidates = []
+			for (var i = 0; i < CHANNELS; ++i) if (numberTitles[i] === currentTitle) candidates.push(i)
+			if (candidates.length > 1 && hintTitle === currentTitle && hintRank >= 0 && hintRank < candidates.length) found = candidates[hintRank]
+			else {
+				for (var c = 0; c < candidates.length; ++c) {
+					var k = candidates[c]
+					if (found < 0 || (selectedIndex >= 0 && Math.abs(k - selectedIndex) < Math.abs(found - selectedIndex))) found = k
+				}
+			}
+		}
 		selectedIndex = found
 		sendNumber(activeDevice)
+	}
+	sameNameHint = function (activeDevice, title, rank) {
+		hintTitle = title
+		hintRank = rank
+		if (title === currentTitle) findNumber(activeDevice)
 	}
 	trackNumberForTitle = function (activeDevice, title) { currentTitle = title; findNumber(activeDevice) }
 	function sendNumber(activeDevice) {

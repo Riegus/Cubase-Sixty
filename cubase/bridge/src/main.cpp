@@ -46,6 +46,16 @@ void onSignal(int) { g_run = false; }
 uf8::UF8Device g_dev;
 MidiOutPort    g_out;
 MidiInPort     g_in;
+// The helper MIDI Remote script (no hardware): it holds the UF8 script's large channel lists, because Cubase
+// re-checks every channel of a script whenever that script's bank moves (with the lists in the UF8 script a
+// bank press took ~0.3 s instead of ~0.07 s). The bridge passes its names (SysEx 18 / 19) on to the UF8
+// script, and the UF8 script's requests for them (SysEx 1B) on to the helper.
+constexpr const char* kHelperTo   = "Cubase-Sixty Helper to Cubase";
+constexpr const char* kHelperFrom = "Cubase-Sixty Helper from Cubase";
+MidiOutPort    g_helperOut;
+MidiInPort     g_helperIn;
+std::atomic<bool> g_helperOpen{false};
+std::mutex     g_helperMx;
 std::mutex     g_outMx;
 uf8frames::Assembler g_asm;
 
@@ -95,10 +105,11 @@ bool userBankRight(bool pressed)
     return true;
 }   // set once Cubase has sent us a name or colour
 
+long long traceMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() % 100000; }
 void sendMidi(std::vector<unsigned char> m)
 {
     if (g_trace8 && !(m.size() && (m[0] & 0xF0) == 0xE0)) {
-        std::printf("[UF8 MIDI out]");
+        std::printf("%lld [UF8 MIDI out]", traceMs());
         for (unsigned char b : m) std::printf(" %02X", b);
         std::printf("\n");
     }
@@ -244,6 +255,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
+    // Trace: when each strip's name arrives (timing of bank changes).
+    if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
+        std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
     {
         // Names / colours / pan / levels by (command, strip); faders by channel; LED notes by note number.
         std::lock_guard<std::mutex> lk(g_uf8CacheMx);
@@ -297,6 +311,16 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+        } else if (m.size() >= 7 && m[4] == 0x1C) {
+            // Which of several same-named tracks the UF8 script found selected: for the UF1 script's track number.
+            cs::uf1SendToScript(std::vector<unsigned char>(m.begin(), m.end()));
+        } else if (m.size() >= 6 && m[4] == 0x1B) {
+            // The UF8 script asks for the helper's channel lists.
+            if (g_helperOpen) {
+                std::vector<unsigned char> copy(m.begin(), m.end());
+                std::lock_guard<std::mutex> lk(g_helperMx);
+                g_helperOut.send(copy);
+            }
         } else if (m.size() >= 7 && m[4] == 0x13) {
             // The script holds the UF8 frozen (01) while it finds the selected track at start-up, which can
             // take several tries while Cubase still ignores bank presses; 00 shows the end state. Released by
@@ -539,6 +563,13 @@ int main(int argc, char** argv)
         } else {
             g_dev.setRawInputHandler(onUsbInput);
             std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
+            // The helper's ports: its channel names go straight on to the UF8 script.
+            g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
+                if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
+                std::lock_guard<std::mutex> lk(g_outMx);
+                try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
+            });
+            if (!g_helperOpen) std::fprintf(stderr, "Helper ports not available: the UF8 does not follow the selection, and its record keys stay dark.\n");
             uf8Ok = true;
             g_uf8Running = true;
             cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
