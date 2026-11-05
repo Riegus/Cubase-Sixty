@@ -32,7 +32,7 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | CUT (mute)        | Note 16 + strip−1                | both         | Cubase → bridge sets the LED. |
 | Top soft key      | Note 48 + strip−1                | both         | Toggles record-enable; Cubase → bridge sets the LED (red). |
 | Cannot record     | Note 64 + strip−1, vel 127 / 0   | Cubase → bridge | From the script: 127 = this strip cannot be armed (key dark, presses ignored), 0 = it can. |
-| Bank left / right | Note 46 / 47                     | bridge → Cubase | A bank-right from the UF8 key or the UF1's BANK stops at the bank where the last track is on strip 8: near the end the bridge sends Page-right notes instead (needs SysEx 12; untested). |
+| Bank left / right | Note 46 / 47                     | bridge → Cubase | A bank-right from the UF8 key or the UF1's BANK stops at the bank where the last track is on strip 8: near the end the bridge sends Page-right notes instead (needs SysEx 12). |
 | Bank reset        | Note 79                          | bridge → Cubase | Bank back to the first channel. Used by the follow-selection jump. |
 | Tick / jump done  | Note 80                          | bridge → Cubase | Answers SysEx 10 and 11. Known issue: it is bound to a dummy bank's reset, and in testing it never ran the script's handler, so the script's corrections do not run (see the MIDI Remote README). |
 | Page left / right | Note 44 / 45                     | bridge → Cubase | Shift the bank by one channel. |
