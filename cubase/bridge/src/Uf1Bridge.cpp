@@ -443,8 +443,10 @@ std::string levelTextFor(int pos)
     if (hi != g_levelText.end() && hi->first == pos) return hi->second;
     if (hi == g_levelText.end() || hi == g_levelText.begin()) return {};
     auto lo = std::prev(hi);
-    // Known on both sides, and close enough (within 3 % of the range) to trust a straight line between.
-    if (hi->first - lo->first > 500) {
+    // Known on both sides: a straight line between them. Up to a quarter of the range apart: falling back
+    // to Cubase's own (lagging) text in a gap made the number jump back and forth (seen on video), and a
+    // rough value for half a second is better; Cubase's exact value follows when the turning stops.
+    if (hi->first - lo->first > 4000) {
         if (pos - lo->first <= 20) return lo->second;
         if (hi->first - pos <= 20) return hi->second;
         return {};
@@ -681,11 +683,11 @@ void onSysex(const std::vector<unsigned char>& m)
         // A V-pot's position in Cubase (0..16383). Taken unless the V-pot is being turned right now.
         const size_t k = m[5];
         {
-            // Learn the level curve: this position with the text Cubase sent just before it (SENDS only, so
-            // never a Quick Control's text).
+            // Learn the level curve: this position with the text Cubase sent just before it (SENDS and DAW,
+            // where the V-pots are on the sends; never PLUGIN, whose Quick Controls have other curves).
             const int v = (int(m[6]) << 7) | int(m[7]);
             double db = 0;
-            if (g_view == kViewSends && nowMs() - g_lastCubaseTextMs[k] < 60 && parseDb(g_lastCubaseText[k], db)) {
+            if (g_view != kViewPlugin && nowMs() - g_lastCubaseTextMs[k] < 60 && parseDb(g_lastCubaseText[k], db)) {
                 std::lock_guard<std::mutex> lk(g_levelMx);
                 g_levelText[v] = g_lastCubaseText[k];
             }
