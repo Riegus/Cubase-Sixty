@@ -124,7 +124,17 @@ activatorButton(5, 47, stripMasterFlip)
 // A V-pot's value line: 'S<n> <level>' for a send, '<name> <value>' for a Quick Control (PLUGIN view).
 // SENDS view: each send's name, level and position also go to the bridge for the display's V-pot cells
 // (SysEx 15: pot index, position 0..100, "name|level"). Sent in every view; the bridge shows them only in SENDS.
-var loggedSendTitles = 0
+// The send's name is its destination, reported by the send slot itself (the knob's title is only the slot
+// number and "Level"). sendNames holds sends 1-8; the cells show the four on the V-pots' page.
+var sendNames = ['', '', '', '', '', '', '', '']
+var sendCells = []
+function refreshCellNames(activeDevice) {
+	for (var i = 0; i < sendCells.length; ++i) {
+		if (!sendCells[i]) continue
+		sendCells[i].name = sendNames[sendOffset + i] || ''
+		sendCellInfo(activeDevice, i, sendCells[i])
+	}
+}
 function sendCellInfo(activeDevice, index, cell) {
 	if (qcActive) return
 	var text = cell.value === '' && cell.name === '' ? '' : cell.name + '|' + cell.value
@@ -138,10 +148,9 @@ function attachSendFeedback(surfaceValue, number) {
 	var lastText = null
 	var lastPos = null
 	var cell = { name: '', value: '', pos: 0, sent: null }
+	sendCells[number - 1] = cell
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
-		if (loggedSendTitles < 8) { ++loggedSendTitles; console.log('[CubaseSixty UF1] V-pot ' + number + ' title: object [' + objectTitle + '] value [' + valueTitle + ']') }
 		title = valueTitle || objectTitle || ''
-		if (!qcActive) { cell.name = objectTitle || valueTitle || ''; sendCellInfo(activeDevice, number - 1, cell) }
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
 		if (!qcActive) {
@@ -225,8 +234,8 @@ var qc14 = sendArea.makeSubPage('Quick Controls 1-4')
 var qc58 = sendArea.makeSubPage('Quick Controls 5-8')
 var sendOffset = 0
 var qcActive = false
-sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false }
-sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false }
+sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false; refreshCellNames(activeDevice) }
+sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false; refreshCellNames(activeDevice) }
 qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true }
 qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true }
 activatorButton(2, 53, sends14)
@@ -258,6 +267,12 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	for (var bk = 0; bk < banks.length; ++bk) {
 		try {
 			var send = selectedChannel.mSends.getByIndex(banks[bk].index)
+			;(function (slot) {
+				send.mOnTitleChange = function (activeDevice, activeMapping, name) {
+					sendNames[slot] = name || ''
+					if (!qcActive && slot >= sendOffset && slot < sendOffset + 4) refreshCellNames(activeDevice)
+				}
+			})(banks[bk].index)
 			page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
 			page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
 		} catch (e) {
