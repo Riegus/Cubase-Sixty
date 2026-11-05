@@ -619,7 +619,13 @@ void onSysex(const std::vector<unsigned char>& m)
         c.used = !c.name.empty() || !c.value.empty();
         if (g_trace) std::printf("%lld cell %d in: pos %d \"%s\"\n", nowMs() % 100000, int(m[5]), int(c.pos), c.value.c_str());
         lk.unlock();
-        if (g_view == kViewSends) scheduleSendCells();
+        // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
+        // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
+        if (g_view == kViewSends) {
+            g_cellsDirty = false;
+            paintSendCells(false);
+            if (g_cellsDirty) scheduleSendCells();   // a held-back wobble step: check it again later
+        }
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
