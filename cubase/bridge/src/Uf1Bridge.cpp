@@ -83,6 +83,8 @@ bool g_modeHeld = false;     // MODE held: the four display soft keys show the v
 enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
 int g_view = kViewDaw;
 void paintSendCells(bool force = false);
+struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
+std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
@@ -228,17 +230,25 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
-            // TEST (temporary): in SENDS, soft key 1 without MODE sweeps V-pot 1's bar by itself, 40 ms per
-            // step, soft key 2 the same at 100 ms: shows how fast the display can draw the V-pot bars.
+            // TEST (temporary): in SENDS, soft key 1 without MODE sweeps V-pot 1's bar by itself (40 ms per
+            // step); soft key 2 the same, but also rewrites V-pot 1's text on every step, as turning does.
             if (ev.pressed && !g_modeHeld && g_view == kViewSends && (ev.id == 0x19 || ev.id == 0x1A)) {
-                const int stepMs = ev.id == 0x19 ? 40 : 100;
-                std::thread([stepMs] {
-                    std::printf("UF1 bar test: sweep, %d ms per step\n", stepMs);
+                const bool withText = ev.id == 0x1A;
+                std::thread([withText] {
+                    std::printf("UF1 bar test: sweep, 40 ms per step%s\n", withText ? ", with text" : "");
                     std::array<uint8_t, 8> bars{0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80};
                     for (int pos = 0; pos <= 100; pos += 2) {
                         bars[0] = uint8_t(pos);
+                        if (withText) {
+                            SendCell c; c.name = "Test"; c.value = std::to_string(pos) + ".0dB";
+                            const std::string line = sendCellLine(c);
+                            std::vector<uint8_t> p;
+                            p.push_back(0);
+                            p.insert(p.end(), line.begin(), line.end());
+                            g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
+                        }
                         g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
-                        std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(40));
                     }
                     paintSendCells(true);
                 }).detach();
@@ -380,7 +390,6 @@ void paintSoftKeys()
 // pot index first, 0x010f bars = position 0..100 + brightness 0x80 per pot, 0x010d styles: 0x01 pointer,
 // 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
 // cells show them only in SENDS and are blank otherwise.
-struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
 std::array<SendCell, 4> g_sendCells;
 std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
 std::string sendCellLine(const SendCell& c)
