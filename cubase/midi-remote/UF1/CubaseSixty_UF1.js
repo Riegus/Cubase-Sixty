@@ -128,10 +128,24 @@ activatorButton(5, 47, stripMasterFlip)
 // number and "Level"). sendNames holds sends 1-8; the cells show the four on the V-pots' page.
 var sendNames = ['', '', '', '', '', '', '', '']
 var sendCells = []
+// Cubase names a send "1- Reverb Vocal": drop the number, and fit the name into the cell's 9-character label
+// zone the way Rea-Sixty does: first drop vowels that do not start a word (from the end), then cut.
+function cellName(name) {
+	var n = String(name || '').replace(/^\s*\d+\s*-\s*/, '')
+	var max = 9
+	if (n.length <= max) return n
+	var chars = n.split('')
+	for (var i = chars.length - 1; i > 0 && chars.join('').length > max; --i) {
+		if (/[aeiouAEIOU]/.test(chars[i]) && chars[i - 1] !== ' ') chars.splice(i, 1)
+	}
+	n = chars.join('')
+	if (n.length > max) n = n.replace(/ /g, '')
+	return n.substr(0, max)
+}
 function refreshCellNames(activeDevice) {
 	for (var i = 0; i < sendCells.length; ++i) {
 		if (!sendCells[i]) continue
-		sendCells[i].name = sendNames[sendOffset + i] || ''
+		sendCells[i].name = cellName(sendNames[sendOffset + i])
 		sendCellInfo(activeDevice, i, sendCells[i])
 	}
 }
