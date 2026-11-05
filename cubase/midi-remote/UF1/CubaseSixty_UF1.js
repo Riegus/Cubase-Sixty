@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.19.0-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
+console.log('[CubaseSixty UF1] script loaded, version 0.19.1-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -655,9 +655,16 @@ try {
 	// selected state) made Cubase pause for up to 0.7 s at a time while a send was turned (traced).
 	var numberTitles = []
 	var currentTitle = ''
+	// With several tracks of the same name: the one nearest to the previous selection, since selection
+	// mostly moves step by step (the UF1 cannot see which one Cubase means).
 	function findNumber(activeDevice) {
 		var found = -1
-		for (var i = 0; i < CHANNELS; ++i) if (currentTitle && numberTitles[i] === currentTitle) { found = i; break }
+		if (currentTitle) {
+			for (var i = 0; i < CHANNELS; ++i) {
+				if (numberTitles[i] !== currentTitle) continue
+				if (found < 0 || (selectedIndex >= 0 && Math.abs(i - selectedIndex) < Math.abs(found - selectedIndex))) found = i
+			}
+		}
 		selectedIndex = found
 		sendNumber(activeDevice)
 	}

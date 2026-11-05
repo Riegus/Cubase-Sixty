@@ -21,7 +21,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.10.5-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.10.6-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) console.log('[CubaseSixty] ' + text)
 }
@@ -149,6 +149,13 @@ for (var i = 0; i < STRIPS; ++i) {
 		.setValueTakeOverModeJump().setSubPage(flipFlipped)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(flipFlipped)
 	page.makeValueBinding(strip.select.mSurfaceValue, channel.mValue.mSelected)
+	;(function (index) {
+		// Which strips are selected: tells two tracks with the same name apart (follow selection, below).
+		strip.select.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			stripSelected[index] = value > 0.5
+			followStripSelect(activeDevice)   // another track of the same name has no new name to report
+		}
+	})(i)
 	page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
 		.setTypeToggle()
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute)
@@ -325,11 +332,13 @@ function sendStripColor(activeDevice, index, r, g, b) {
 
 var REC_CHANNELS = 128
 var stripTitles = []
+var stripSelected = []
 // TEST SWITCH: true = the UF8 does not follow the selection itself; the script only logs what Cubase does
 // (selection and bank moves), to see how Cubase's own banking behaves.
 var FOLLOW_OBSERVE_ONLY = false
 var followOnStripTitle = function () {}   // set by the follow-selection block
 var followCurrentTitle = function () {}   // set by the follow-selection block
+var followStripSelect = function () {}    // set by the follow-selection block
 var recTitles = []
 var armableSent = []
 
@@ -528,18 +537,31 @@ function meterToMidi(value) {
 	}
 	// Several tracks can be selected; follow Cubase's current track (the last one clicked, the one the UF1
 	// shows): the selected channel whose name is the current track's name.
-	var selectedSet = {}
 	var currentTitle = ''
+	// The selected track is found by Cubase's current track name. With several tracks of that name: the one
+	// whose UF8 strip is selected, if it is on the strips (exact); otherwise the one nearest to the previous
+	// selection (or to the bank, if there was none), since selection mostly moves step by step.
 	function pickCurrent(activeDevice) {
-		var pick = -1, any = -1
-		for (var key in selectedSet) {
-			var i = Number(key)
-			if (any < 0 || i < any) any = i
-			if (allTitles[i] === currentTitle && (pick < 0 || i < pick)) pick = i
+		var pick = -1
+		if (currentTitle) {
+			var candidates = []
+			for (var j = 0; j < allTitles.length; ++j) if (allTitles[j] === currentTitle) candidates.push(j)
+			if (candidates.length === 1) pick = candidates[0]
+			else if (candidates.length > 1) {
+				var offset = currentOffset()
+				if (offset >= 0) {
+					for (var s = 0; s < STRIPS; ++s) {
+						if (stripSelected[s] && stripTitles[s] === currentTitle && candidates.indexOf(offset + s) >= 0) { pick = offset + s; break }
+					}
+				}
+				if (pick < 0) {
+					var near = selectedIndex >= 0 ? selectedIndex : Math.max(offset, 0)
+					for (var c = 0; c < candidates.length; ++c) {
+						if (pick < 0 || Math.abs(candidates[c] - near) < Math.abs(pick - near)) pick = candidates[c]
+					}
+				}
+			}
 		}
-		if (pick < 0) pick = any
-		// No selected state known yet (possible at start-up): Cubase's current track, found by its name.
-		if (pick < 0 && currentTitle) for (var j = 0; j < allTitles.length; ++j) if (allTitles[j] === currentTitle) { pick = j; break }
 		// Only a real change may bank: Cubase re-sends the same values after every bank step.
 		if (pick === selectedIndex) return
 		selectedIndex = pick
@@ -552,6 +574,7 @@ function meterToMidi(value) {
 		currentTitle = title
 		pickCurrent(activeDevice)
 	}
+	followStripSelect = function (activeDevice) { pickCurrent(activeDevice) }
 	function currentOffset() {
 		// The bank position: where the strips' names appear in the full list.
 		for (var o = 0; o < CHANNELS; ++o) {
