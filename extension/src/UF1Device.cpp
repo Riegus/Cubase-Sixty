@@ -424,6 +424,12 @@ void UF1Device::send(std::vector<uint8_t> frame)
     pending_->cv.notify_one();
 }
 
+size_t UF1Device::pendingFrames() const
+{
+    std::lock_guard<std::mutex> lk(pending_->mu);
+    return pending_->q.size();
+}
+
 void UF1Device::beginCycle()
 {
     std::lock_guard<std::mutex> lk(pending_->mu);

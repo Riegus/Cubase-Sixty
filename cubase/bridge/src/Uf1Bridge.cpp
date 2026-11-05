@@ -406,6 +406,36 @@ std::string sendCellLine(const SendCell& c)
 // 40 ms (25 per second) with the latest state.
 long long nowMs();
 std::atomic<bool> g_cellsDirty{false};
+// Paced drawing: the first update after a pause is drawn at once, later ones at most every 40 ms with the
+// latest state (the sweep test drew 25 per second smoothly). Drawing every update as it came started smooth
+// and then turned choppy: the frames came faster than the UF1 takes them, and a backlog built up.
+std::mutex g_paceMx;
+long long g_lastCellPaint = 0;
+bool g_paceTimer = false;
+void paintSendCellsPaced()
+{
+    long long wait = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_paceMx);
+        const long long t = nowMs();
+        if (g_paceTimer) return;                 // a paint is already due; it takes the latest state
+        wait = g_lastCellPaint + 40 - t;
+        if (wait > 0) g_paceTimer = true;
+        else g_lastCellPaint = t;
+    }
+    if (wait <= 0) {
+        g_cellsDirty = false;
+        paintSendCells(false);
+        if (g_trace) std::printf("%lld cell paint, UF1 queue %zu\n", nowMs() % 100000, g_dev.pendingFrames());
+        if (g_cellsDirty) { std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); paintSendCellsPaced(); }).detach(); }
+        return;
+    }
+    std::thread([wait] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(wait));
+        { std::lock_guard<std::mutex> lk(g_paceMx); g_paceTimer = false; }
+        paintSendCellsPaced();
+    }).detach();
+}
 std::atomic<bool> g_cellPainterRunning{false};
 void scheduleSendCells()
 {
@@ -621,11 +651,7 @@ void onSysex(const std::vector<unsigned char>& m)
         lk.unlock();
         // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
         // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
-        if (g_view == kViewSends) {
-            g_cellsDirty = false;
-            paintSendCells(false);
-            if (g_cellsDirty) scheduleSendCells();   // a held-back wobble step: check it again later
-        }
+        if (g_view == kViewSends) paintSendCellsPaced();
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();

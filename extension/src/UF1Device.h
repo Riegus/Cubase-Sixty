@@ -75,6 +75,9 @@ public:
     // Raw bulk-IN payloads (for diagnostics / logging). Fires on the worker thread.
     void setRawInputHandler(RawInputHandler h) { rawInputHandler_ = std::move(h); }
 
+    // Frames waiting to go out (diagnostics: shows a backlog building up).
+    size_t pendingFrames() const;
+
     const std::string& lastError() const { return lastError_; }
     const std::string& serial() const { return serial_; }
 
