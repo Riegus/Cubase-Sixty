@@ -366,6 +366,7 @@ void paintSoftKeys()
 // cells show them only in SENDS and are blank otherwise.
 struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
 std::array<SendCell, 4> g_sendCells;
+std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
 std::string sendCellLine(const SendCell& c)
 {
     // Rea-Sixty's value line: the name left (11 characters), the value right-aligned in 19.
@@ -375,11 +376,33 @@ std::string sendCellLine(const SendCell& c)
     line += value;
     return line;
 }
+// Turning a V-pot brings several updates per step (level text, position); drawing each one at once kept
+// the V-pot row behind and choppy. So updates only mark the cells dirty, and a paint goes out at most every
+// 40 ms (25 per second) with the latest state.
+std::atomic<bool> g_cellsDirty{false};
+std::atomic<bool> g_cellPainterRunning{false};
+void scheduleSendCells()
+{
+    g_cellsDirty = true;
+    bool expected = false;
+    if (!g_cellPainterRunning.compare_exchange_strong(expected, true)) return;
+    std::thread([] {
+        for (int idle = 0; idle < 25; ) {   // stops after 1 s without updates
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            if (g_cellsDirty.exchange(false)) { idle = 0; paintSendCells(false); }
+            else ++idle;
+        }
+        g_cellPainterRunning = false;
+        if (g_cellsDirty) scheduleSendCells();
+    }).detach();
+}
+
 // Only what changed goes out (turning one V-pot used to resend all four cells, the bars and the styles for
 // every step, which made the bar slow and choppy). force: send everything (view change, start-up, reopen).
 void paintSendCells(bool force)
 {
     if (!g_open) return;
+    std::lock_guard<std::mutex> lk(g_cellMx);
     static std::array<std::string, 4> shownLine;
     static std::array<uint8_t, 8> shownBars{};
     static std::array<uint8_t, 4> shownStyles{};
@@ -536,6 +559,7 @@ void onSysex(const std::vector<unsigned char>& m)
         else if (g_view != kViewSends) barTemporary(pos, style);
     } else if (m[4] == 0x15 && m.size() >= 9 && m[5] < 4) {
         // A send for the SENDS view's cells: pot index, position 0..100, then "name|value" (empty = no send).
+        std::unique_lock<std::mutex> lk(g_cellMx);
         SendCell& c = g_sendCells[m[5]];
         std::string t(m.begin() + 7, m.end() - 1);
         const size_t bar = t.find('|');
@@ -543,7 +567,8 @@ void onSysex(const std::vector<unsigned char>& m)
         c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
         c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
         c.used = !c.name.empty() || !c.value.empty();
-        if (g_view == kViewSends) paintSendCells();
+        lk.unlock();
+        if (g_view == kViewSends) scheduleSendCells();
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
