@@ -446,7 +446,11 @@ void paintSendCells(bool force)
         bars[size_t(i) * 2 + 1] = 0x80;
         styles[size_t(i)] = on ? 0x01 : 0x03;
     }
-    if (force || bars != shownBars) { shownBars = bars; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars)); }
+    if (force || bars != shownBars) {
+        shownBars = bars;
+        if (g_trace) std::printf("%lld cell bars out: %d %d %d %d\n", nowMs() % 100000, bars[0], bars[2], bars[4], bars[6]);
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
+    }
     for (int i = 0; i < 4; ++i) {
         const SendCell& c = g_sendCells[size_t(i)];
         const bool on = show && c.used;
@@ -594,6 +598,7 @@ void onSysex(const std::vector<unsigned char>& m)
         c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
         c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
         c.used = !c.name.empty() || !c.value.empty();
+        if (g_trace) std::printf("%lld cell %d in: pos %d \"%s\"\n", nowMs() % 100000, int(m[5]), int(c.pos), c.value.c_str());
         lk.unlock();
         if (g_view == kViewSends) scheduleSendCells();
     } else if (m[4] == 0x0E && m.size() >= 8) {
