@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -86,7 +87,18 @@ std::atomic<int> g_view{kViewDaw};
 long long nowMs();
 void paintSendCells(bool force = false);
 void startIdleCycle();
-struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
+void predictVpotStep(int cell, int delta);
+struct SendCell {
+    std::string name, value; uint8_t pos = 0; bool used = false;
+    // Prediction (see predictVpotStep): the bar follows each V-pot step at once instead of waiting for Cubase,
+    // which pauses during continuous send changes (traced: answers only every 0.7-2.5 s for a moment).
+    bool predicting = false;
+    double shown = 0;          // the bar position drawn while predicting
+    double perStep = 0.5;      // bar points per V-pot step, learnt from Cubase's answers
+    int stepsSinceAnswer = 0;  // V-pot steps since Cubase's position last changed
+    int answerPos = -1;        // Cubase's last position
+    long long lastStepMs = 0;
+};
 std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
@@ -183,6 +195,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
+        if (ev.id >= 1 && ev.id <= 4) predictVpotStep(ev.id - 1, ev.delta);
         break;
     case K::Button:
         // SHIFT is a modifier held in the bridge. SHIFT + the transport soft keys and Cycle / Click = the
@@ -444,6 +457,47 @@ void startIdleCycle()
 
 
 
+// A V-pot step (cell 0-3) in the SENDS view: move the bar at once by the learnt step size. Once the turning
+// has stopped and Cubase has answered for the last steps, the bar takes Cubase's own position again.
+std::atomic<bool> g_snapperRunning{false};
+void predictVpotStep(int cell, int delta)
+{
+    if (g_view != kViewSends || cell < 0 || cell > 3) return;
+    {
+        std::lock_guard<std::mutex> lk(g_cellMx);
+        SendCell& c = g_sendCells[size_t(cell)];
+        if (!c.used) return;
+        if (!c.predicting) { c.predicting = true; c.shown = c.pos; }
+        c.shown = std::clamp(c.shown + delta * c.perStep, 0.0, 100.0);
+        c.stepsSinceAnswer += delta;
+        c.lastStepMs = nowMs();
+    }
+    paintSendCells(false);
+    bool expected = false;
+    if (!g_snapperRunning.compare_exchange_strong(expected, true)) return;
+    std::thread([] {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            bool still = false, snapped = false;
+            {
+                std::lock_guard<std::mutex> lk(g_cellMx);
+                const long long t = nowMs();
+                for (auto& c : g_sendCells) {
+                    if (!c.predicting) continue;
+                    // Cubase's answer for the last steps can come late (its pauses): wait for it (its position
+                    // has moved since), at most 1.5 s.
+                    const long long quiet = t - c.lastStepMs;
+                    if (quiet >= 350 && (c.stepsSinceAnswer == 0 || quiet >= 1500)) { c.predicting = false; snapped = true; }
+                    else still = true;
+                }
+            }
+            if (snapped) paintSendCells(false);
+            if (!still) break;
+        }
+        g_snapperRunning = false;
+    }).detach();
+}
+
 // Only what changed goes out (turning one V-pot used to resend all four cells, the bars and the styles for
 // every step, which made the bar slow and choppy). force: send everything (view change, start-up, reopen).
 void paintSendCells(bool force)
@@ -467,26 +521,7 @@ void paintSendCells(bool force)
             p.insert(p.end(), line.begin(), line.end());
             g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
         }
-        // Cubase's position wobbles while a V-pot turns: one way, a point back, on again (traced: 77, 78, 76,
-        // 77, 76 while turning down). Drawn as it comes, the bar jitters. So a step of one point against the
-        // bar's last direction waits: it shows only if it is still the position 300 ms later.
-        static std::array<uint8_t, 4> barPos{};
-        static std::array<int, 4> barDir{};
-        static std::array<long long, 4> backSince{};
-        const long long t = nowMs();
-        uint8_t want = on ? c.pos : 0;
-        const int d = int(want) - int(barPos[size_t(i)]);
-        if (!force && on && (d == 1 || d == -1) && barDir[size_t(i)] != 0 && (d > 0) != (barDir[size_t(i)] > 0)) {
-            if (!backSince[size_t(i)]) backSince[size_t(i)] = t;
-            if (t - backSince[size_t(i)] < 300) { want = barPos[size_t(i)]; }
-        }
-        if (want != barPos[size_t(i)]) {
-            barDir[size_t(i)] = want > barPos[size_t(i)] ? 1 : -1;
-            barPos[size_t(i)] = want;
-            backSince[size_t(i)] = 0;
-        } else if (want == c.pos || !on) {
-            backSince[size_t(i)] = 0;
-        }
+        const uint8_t want = !on ? 0 : c.predicting ? uint8_t(std::lround(std::clamp(c.shown, 0.0, 100.0))) : c.pos;
         bars[size_t(i) * 2] = want;
         bars[size_t(i) * 2 + 1] = 0x80;
         styles[size_t(i)] = on ? 0x01 : 0x03;
@@ -637,6 +672,17 @@ void onSysex(const std::vector<unsigned char>& m)
         c.name = bar == std::string::npos ? t : t.substr(0, bar);
         c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
         c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
+        if (int(c.pos) != c.answerPos) {
+            // Learn the step size from how far Cubase's position moved for the steps sent since its last move.
+            if (c.answerPos >= 0 && c.stepsSinceAnswer != 0) {
+                const double sample = double(int(c.pos) - c.answerPos) / c.stepsSinceAnswer;
+                if (sample > 0.05 && sample < 5.0) c.perStep = 0.7 * c.perStep + 0.3 * sample;
+            }
+            c.answerPos = c.pos;
+            c.stepsSinceAnswer = 0;
+        }
+        // While turning, Cubase's answers lag behind the hand: keep the prediction unless it is clearly off.
+        if (c.predicting && std::abs(c.shown - c.pos) > 8.0) c.shown = c.pos;
         c.used = !c.name.empty() || !c.value.empty();
         if (g_trace) std::printf("%lld cell %d in: pos %d \"%s\"\n", nowMs() % 100000, int(m[5]), int(c.pos), c.value.c_str());
         lk.unlock();
