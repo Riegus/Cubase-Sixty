@@ -10,7 +10,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.18.0-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
+console.log('[CubaseSixty UF1] script loaded, version 0.18.1-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -379,6 +379,7 @@ function showStrip(activeDevice) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new strip: show its pan
 }
 
+var trackNumberForTitle = function () {}   // set by the track-number block
 var selected = page.mHostAccess.mTrackSelection.mMixerChannel
 selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
 	dbg('selected color: ' + r + ' ' + g + ' ' + b + ' a=' + a)
@@ -391,6 +392,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	if (masterActive) return
 	sendName(activeDevice, title)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
+	trackNumberForTitle(activeDevice, title)
 }
 if (mainOut) {
 	mainOut.mOnTitleChange = function (activeDevice, activeMapping, title) {
@@ -627,6 +629,17 @@ try {
 	var CHANNELS = 256
 	var selectedIndex = -1
 	var sentNumber = -1
+	// Found by the selected track's name in the hidden bank's names: a value binding per channel (its
+	// selected state) made Cubase pause for up to 0.7 s at a time while a send was turned (traced).
+	var numberTitles = []
+	var currentTitle = ''
+	function findNumber(activeDevice) {
+		var found = -1
+		for (var i = 0; i < CHANNELS; ++i) if (currentTitle && numberTitles[i] === currentTitle) { found = i; break }
+		selectedIndex = found
+		sendNumber(activeDevice)
+	}
+	trackNumberForTitle = function (activeDevice, title) { currentTitle = title; findNumber(activeDevice) }
 	function sendNumber(activeDevice) {
 		var n = selectedIndex + 1
 		if (n === sentNumber) return
@@ -638,15 +651,13 @@ try {
 			.setFollowVisibility(false)   // count hidden tracks too, so the numbers match the MixConsole's
 		for (var c = 0; c < CHANNELS; ++c) {
 			var ch = zone.makeMixerBankChannel()
-			var sel = surface.makeCustomValueVariable('trackNumberSel' + c)
-			page.makeValueBinding(sel, ch.mValue.mSelected)
-			;(function (index) {
-				sel.mOnProcessValueChange = function (activeDevice, value) {
-					if (value > 0.5) selectedIndex = index
-					else if (selectedIndex === index) selectedIndex = -1
-					sendNumber(activeDevice)
+			;(function (index, ch) {
+				ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+					if (numberTitles[index] === title) return
+					numberTitles[index] = title
+					if (title && title === currentTitle) findNumber(activeDevice)
 				}
-			})(c)
+			})(c, ch)
 		}
 	} catch (e) {
 		console.log('[CubaseSixty UF1] track numbers not available: ' + e)
