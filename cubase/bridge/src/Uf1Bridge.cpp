@@ -430,19 +430,34 @@ void paintSendCells(bool force)
         const SendCell& c = g_sendCells[size_t(i)];
         const bool on = show && c.used;
         const std::string line = on ? sendCellLine(c) : std::string();
-        // The text is held back while it keeps changing (at most every 250 ms, and always once it settles):
-        // the bars alone stay quick. Experiment: is the text the slow part of the V-pot row?
-        static std::array<long long, 4> textAt{};
-        const long long t = nowMs();
-        if (force || (line != shownLine[size_t(i)] && t - textAt[size_t(i)] >= 250)) {
-            textAt[size_t(i)] = t;
+        if (force || line != shownLine[size_t(i)]) {
             shownLine[size_t(i)] = line;
             std::vector<uint8_t> p;
             p.push_back(uint8_t(i));
             p.insert(p.end(), line.begin(), line.end());
             g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
         }
-        bars[size_t(i) * 2] = on ? c.pos : 0;
+        // Cubase's position wobbles while a V-pot turns: one way, a point back, on again (traced: 77, 78, 76,
+        // 77, 76 while turning down). Drawn as it comes, the bar jitters. So a step of one point against the
+        // bar's last direction waits: it shows only if it is still the position 300 ms later.
+        static std::array<uint8_t, 4> barPos{};
+        static std::array<int, 4> barDir{};
+        static std::array<long long, 4> backSince{};
+        const long long t = nowMs();
+        uint8_t want = on ? c.pos : 0;
+        const int d = int(want) - int(barPos[size_t(i)]);
+        if (!force && on && (d == 1 || d == -1) && barDir[size_t(i)] != 0 && (d > 0) != (barDir[size_t(i)] > 0)) {
+            if (!backSince[size_t(i)]) backSince[size_t(i)] = t;
+            if (t - backSince[size_t(i)] < 300) { want = barPos[size_t(i)]; g_cellsDirty = true; }
+        }
+        if (want != barPos[size_t(i)]) {
+            barDir[size_t(i)] = want > barPos[size_t(i)] ? 1 : -1;
+            barPos[size_t(i)] = want;
+            backSince[size_t(i)] = 0;
+        } else if (want == c.pos || !on) {
+            backSince[size_t(i)] = 0;
+        }
+        bars[size_t(i) * 2] = want;
         bars[size_t(i) * 2 + 1] = 0x80;
         styles[size_t(i)] = on ? 0x01 : 0x03;
     }
@@ -450,11 +465,6 @@ void paintSendCells(bool force)
         shownBars = bars;
         if (g_trace) std::printf("%lld cell bars out: %d %d %d %d\n", nowMs() % 100000, bars[0], bars[2], bars[4], bars[6]);
         g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
-    }
-    for (int i = 0; i < 4; ++i) {
-        const SendCell& c = g_sendCells[size_t(i)];
-        const bool on = show && c.used;
-        if ((on ? sendCellLine(c) : std::string()) != shownLine[size_t(i)]) g_cellsDirty = true;   // text still due
     }
     if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
 }
