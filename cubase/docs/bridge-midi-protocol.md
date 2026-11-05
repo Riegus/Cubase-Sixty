@@ -34,7 +34,7 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Cannot record     | Note 64 + strip−1, vel 127 / 0   | Cubase → bridge | From the script: 127 = this strip cannot be armed (key dark, presses ignored), 0 = it can. |
 | Bank left / right | Note 46 / 47                     | bridge → Cubase | A bank-right from the UF8 key or the UF1's BANK stops at the bank where the last track is on strip 8: near the end the bridge sends Page-right notes instead (needs SysEx 12). |
 | Bank reset        | Note 79                          | bridge → Cubase | Bank back to the first channel. Used by the follow-selection jump. |
-| Tick / jump done  | Note 80                          | bridge → Cubase | Answers SysEx 10 and 11. Known issue: it is bound to a dummy bank's reset, and in testing it never ran the script's handler, so the script's corrections do not run (see the MIDI Remote README). |
+| Tick / jump done  | Note 80                          | bridge → Cubase | Sent after SysEx 10 and 11. Not used by the scripts: notes from the bridge cannot run script code (see the MIDI Remote README); the script times its checks with Cubase's idle callback instead. |
 | Page left / right | Note 44 / 45                     | bridge → Cubase | Shift the bank by one channel. |
 | Zoom pad          | Notes 72–76                      | bridge → Cubase | Up, left, centre, right, down: vertical zoom in, zoom out, open / close editor, zoom in, vertical zoom out. |
 | Play / Stop / Rec | Note 94 / 93 / 95                | both         | Cubase → bridge sets the LED. |
@@ -95,13 +95,14 @@ The scripts send display data to the bridge as SysEx on the surface's output por
 | UF1 value line, home | `F0 7D 52 36 08 <text…> F7` | Cubase → bridge | Pan, e.g. `Pan L23`. The line's normal content. |
 | UF1 bar, home | `F0 7D 52 36 09 <pos> [<style>] F7` | Cubase → bridge | As 05, for the home view. |
 | UF1 track selected | `F0 7D 52 36 0A F7` | Cubase → bridge | Show the home view now and ignore temporary values for 0.5 s (the new track's sends arrive in a burst). |
-| UF8 bank-right request | `F0 7D 52 36 0B [<count>] F7` | Cubase → bridge | The bridge sends `count` bank-right presses (note 47, default 1, at most 64), 60 ms apart, held until 3 s after Cubase first spoke. |
+| UF8 bank-right request | `F0 7D 52 36 0B [<count>] F7` | Cubase → bridge | The bridge sends `count` bank-right presses (note 47, default 1, at most 64), 100 ms apart, held until 3 s after Cubase first spoke. With more than one press the UF8 is frozen as for a jump (SysEx 10). |
 | UF8 fader level text | `F0 7D 52 36 0C <strip> <text…> F7` | Cubase → bridge | The strip's dB readout (6 characters + `dB`). |
 | UF1 transport position | `F0 7D 52 36 0D <text…> F7` | Cubase → bridge | Cubase's time text, e.g. `  1. 1. 1.   0` or `0:00:47.691`, for the 7-segment time field. The seconds format is shown as blank-separated groups, hours and minutes only when not zero: `47 691`, `3 47 691`, `1 03 47 69`. |
 | UF1 track number | `F0 7D 52 36 0E <high 7 bits> <low 7 bits> F7` | Cubase → bridge | The selected track's number, counted like the MixConsole (hidden tracks included), for the channel-number box. 0 = not known: the box shows the UF8 strip instead. |
 | UF8 bank-left request | `F0 7D 52 36 0F [<count>] F7` | Cubase → bridge | As 0B, with bank-left presses (note 46). |
-| UF8 jump | `F0 7D 52 36 10 <count> F7` | Cubase → bridge | Bank reset (note 79), then `count` bank-rights 100 ms apart, then note 80 250 ms later. Held until 5 s after Cubase first spoke. Used to follow the selection. |
-| UF8 tick | `F0 7D 52 36 11 F7` | Cubase → bridge | The bridge sends note 80 after 300 ms (the script has no timer of its own). |
+| UF8 jump | `F0 7D 52 36 10 <count> F7` | Cubase → bridge | Bank reset (note 79), then `count` bank-rights 100 ms apart, then note 80 250 ms later. Held until 5 s after Cubase first spoke. The UF8 is frozen meanwhile: what Cubase sends for the banks passed is only cached, and 400 ms after the last press the end state is shown once. Used to follow the selection. |
+| UF8 tick | `F0 7D 52 36 11 F7` | Cubase → bridge | The bridge sends note 80 after 300 ms. Not used any more (see note 80). |
+| UF8 freeze | `F0 7D 52 36 13 <01 / 00> F7` | Cubase → bridge | 01: hold the UF8 frozen (display, faders, LEDs, meters: cached, not shown) across several jumps; 00: release and show the end state. Used while the script looks for the selected track at start-up. Released by itself after 30 s. |
 | UF8 bank size | `F0 7D 52 36 12 <total hi> <total lo> <offset hi> <offset lo> F7` | Cubase → bridge | The number of channels in the UF8 bank and where the bank starts (0 = first); `7F 7F` = not known. Sent when either changes; the bridge uses it to stop bank-right at the last full bank. |
 
 Names and colours are sent whenever the bank changes or the track's name or colour changes. An empty name clears the strip. For the UF1, strip is always 0.
