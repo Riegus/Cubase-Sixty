@@ -228,6 +228,22 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
+            // TEST (temporary): in SENDS, soft key 1 without MODE sweeps V-pot 1's bar by itself, 40 ms per
+            // step, soft key 2 the same at 100 ms: shows how fast the display can draw the V-pot bars.
+            if (ev.pressed && !g_modeHeld && g_view == kViewSends && (ev.id == 0x19 || ev.id == 0x1A)) {
+                const int stepMs = ev.id == 0x19 ? 40 : 100;
+                std::thread([stepMs] {
+                    std::printf("UF1 bar test: sweep, %d ms per step\n", stepMs);
+                    std::array<uint8_t, 8> bars{0, 0x80, 0, 0x80, 0, 0x80, 0, 0x80};
+                    for (int pos = 0; pos <= 100; pos += 2) {
+                        bars[0] = uint8_t(pos);
+                        g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
+                        std::this_thread::sleep_for(std::chrono::milliseconds(stepMs));
+                    }
+                    paintSendCells(true);
+                }).detach();
+                break;
+            }
             if (!ev.pressed || !g_modeHeld) break;
             if (ev.id == 0x19 || ev.id == 0x1A || ev.id == 0x1C) {
                 const int view = ev.id - 0x19;
