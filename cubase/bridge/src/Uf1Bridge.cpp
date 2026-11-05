@@ -417,6 +417,46 @@ void paintSoftKeys()
 // cells show them only in SENDS and are blank otherwise.
 std::array<SendCell, 4> g_sendCells;
 std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
+// ---------------------------------------------------------------------------
+// The send level text while turning. The bar follows the bridge's own position at once, but the dB text
+// comes from Cubase and trails behind. Cubase's level curve is the same for every send, so the bridge learns
+// it: each position Cubase reports (SysEx 17) is paired with the text Cubase sent just before it (SysEx 15)
+// and kept. While a V-pot turns, the text for the bridge's own position is looked up: the text Cubase gave
+// for that exact position, or interpolated between two known positions close by (formatted like Cubase:
+// two decimals below 10 dB, one above). Where nothing is known nearby, Cubase's own text is shown.
+// ---------------------------------------------------------------------------
+std::mutex g_levelMx;
+std::map<int, std::string> g_levelText;       // position 0..16383 -> Cubase's text for it
+std::array<std::string, 4> g_lastCubaseText;  // per pot: Cubase's latest text and when it came
+std::array<long long, 4> g_lastCubaseTextMs{};
+bool parseDb(const std::string& t, double& db)
+{
+    char* end = nullptr;
+    db = std::strtod(t.c_str(), &end);
+    return end != t.c_str() && std::string(end).rfind("dB", 0) == 0;
+}
+std::string levelTextFor(int pos)
+{
+    std::lock_guard<std::mutex> lk(g_levelMx);
+    if (g_levelText.empty()) return {};
+    auto hi = g_levelText.lower_bound(pos);
+    if (hi != g_levelText.end() && hi->first == pos) return hi->second;
+    if (hi == g_levelText.end() || hi == g_levelText.begin()) return {};
+    auto lo = std::prev(hi);
+    // Known on both sides, and close enough (within 3 % of the range) to trust a straight line between.
+    if (hi->first - lo->first > 500) {
+        if (pos - lo->first <= 20) return lo->second;
+        if (hi->first - pos <= 20) return hi->second;
+        return {};
+    }
+    double a = 0, b = 0;
+    if (!parseDb(lo->second, a) || !parseDb(hi->second, b)) return {};
+    const double db = a + (b - a) * double(pos - lo->first) / double(hi->first - lo->first);
+    char buf[16];
+    std::snprintf(buf, sizeof buf, std::fabs(db) < 10.0 ? "%.2fdB" : "%.1fdB", db);
+    return buf;
+}
+
 std::string sendCellLine(const SendCell& c)
 {
     // Rea-Sixty's value line: the name left (11 characters), the value right-aligned in 19.
@@ -426,8 +466,7 @@ std::string sendCellLine(const SendCell& c)
     line += value;
     return line;
 }
-// Turning a V-pot brings several updates per step (level text, position); drawing each one at once kept
-// the V-pot row behind and choppy. So updates only mark the cells dirty, and a paint goes out at most every
+// (Earlier pacing note, no longer used:) turning a V-pot brings several updates per step; a paint went out at most every
 // 40 ms (25 per second) with the latest state.
 // ---------------------------------------------------------------------------
 // The idle cycle. Rea-Sixty found (uf1CyclePacerLoop_, cap84 / cap101) that the UF1 draws its big display
@@ -481,7 +520,12 @@ void paintSendCells(bool force)
     for (int i = 0; i < 4; ++i) {
         const SendCell& c = g_sendCells[size_t(i)];
         const bool on = show && c.used;
-        const std::string line = on ? sendCellLine(c) : std::string();
+        SendCell shownCell = c;
+        if (on && g_vpotPos[size_t(i)] >= 0 && nowMs() < g_vpotOwnUntil[size_t(i)]) {
+            const std::string t = levelTextFor(g_vpotPos[size_t(i)]);   // turning: the text for our own position
+            if (!t.empty()) shownCell.value = t;
+        }
+        const std::string line = on ? sendCellLine(shownCell) : std::string();
         if (force || line != shownLine[size_t(i)]) {
             shownLine[size_t(i)] = line;
             std::vector<uint8_t> p;
@@ -636,6 +680,16 @@ void onSysex(const std::vector<unsigned char>& m)
     } else if (m[4] == 0x17 && m.size() >= 9 && m[5] < 4) {
         // A V-pot's position in Cubase (0..16383). Taken unless the V-pot is being turned right now.
         const size_t k = m[5];
+        {
+            // Learn the level curve: this position with the text Cubase sent just before it (SENDS only, so
+            // never a Quick Control's text).
+            const int v = (int(m[6]) << 7) | int(m[7]);
+            double db = 0;
+            if (g_view == kViewSends && nowMs() - g_lastCubaseTextMs[k] < 60 && parseDb(g_lastCubaseText[k], db)) {
+                std::lock_guard<std::mutex> lk(g_levelMx);
+                g_levelText[v] = g_lastCubaseText[k];
+            }
+        }
         if (nowMs() >= g_vpotOwnUntil[k]) {
             const int v = (int(m[6]) << 7) | int(m[7]);
             if (v != g_vpotPos[k]) { g_vpotPos[k] = v; if (g_view == kViewSends) paintSendCells(false); }
@@ -648,6 +702,8 @@ void onSysex(const std::vector<unsigned char>& m)
         const size_t bar = t.find('|');
         c.name = bar == std::string::npos ? t : t.substr(0, bar);
         c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
+        g_lastCubaseText[m[5]] = c.value;
+        g_lastCubaseTextMs[m[5]] = nowMs();
         c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
         c.used = !c.name.empty() || !c.value.empty();
         if (g_trace) std::printf("%lld cell %d in: pos %d \"%s\"\n", nowMs() % 100000, int(m[5]), int(c.pos), c.value.c_str());
