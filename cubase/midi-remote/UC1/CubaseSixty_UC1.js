@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.10.0-dev'
+var SCRIPT_VERSION = '0.10.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -788,6 +788,7 @@ function reportRouting(activeDevice) {
 	} catch (e) {}
 	if (routingShown === vals.join(',')) return
 	routingShown = vals.join(',')
+	if (vals[0] !== 0x7F) log('routing switches (filters to input, filters to S/C, EQ to S/C, dyn pre EQ, ext S/C): ' + vals.join(' '))
 	sysex(activeDevice, [0x3F].concat(vals))
 }
 function setRouting(activeDevice, message) {
