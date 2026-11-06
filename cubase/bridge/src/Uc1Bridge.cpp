@@ -19,6 +19,8 @@
 //                   SysEx 37 <hi> <lo>                    the 7-segment number (0..999; 7F 7F = blank)
 //                   SysEx 38 <prev> 7F 7F 7F <curr> 7F 7F 7F <next>   the Bus Comp name row (tracks with a bus comp)
 //                   SysEx 39 <header>                     show the Bus Comp scroll header (e.g. "BUS COMP 2") for 1.5 s
+//                   SysEx 3A <cc> <value>                 send CC <cc> <value> (channel 1) back to Cubase: lets the script
+//                                                         set a host value it has bound to a CC (a strip module's on switch)
 // The two encoders send one step per detent (Rea-Sixty's accumulator: 3 ticks per step, reset after a 100 ms
 // pause or a change of direction): CHANNEL as notes 100 / 101, the Bus Comp encoder as SysEx 20 15 <64 + steps>.
 //                   note <id> (velocity > 0 = on)         LEDs of the note-bound buttons (Solo, Cut, Polarity)
@@ -493,6 +495,7 @@ void onSysex(const std::vector<unsigned char>& m)
         break;
     }
     case 0x39: showHeader(decodeName(m, 5)); break;
+    case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
     default: break;
     }
 }
@@ -506,7 +509,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }

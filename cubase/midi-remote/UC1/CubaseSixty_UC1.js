@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.4.4-dev'
+var SCRIPT_VERSION = '0.7.3-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -355,9 +355,12 @@ var RX = {
 }
 var stripLogs = 0
 function cubaseStrip(objects) {
-	var inputFilter = null, eq = null, gate = null, comp = null
+	var inputFilter = null, eq = null, gate = null, comp = null, gateSlot = null, compSlot = null, compTitle = ''
+	var emptySlots = []   // strip slots with no module in them (a gate or compressor can be loaded there)
 	for (var i = 0; i < objects.length; ++i) {
 		var o = objects[i]
+		if (o.type === 'Slot' && o.parent >= 0 && objects[o.parent].type === 'Strips'
+			&& (i + 1 >= objects.length || objects[i + 1].parent !== i)) emptySlots.push(o.id)
 		if (o.type === 'InputFilter') inputFilter = o.id
 		else if (o.type === 'EQ') eq = o.id
 		else if (o.type !== 'Slot' && o.parent >= 0 && objects[o.parent].type === 'Slot') {
@@ -365,12 +368,16 @@ function cubaseStrip(objects) {
 			var folder = objects[o.parent].parent
 			if (folder < 0 || objects[folder].type !== 'Strips') continue
 			var title = info(da, o.id).title
-			if (/gate/i.test(title) && !gate) gate = o.id
-			else if (/comp/i.test(title) && !comp) comp = o.id
+			var kind = /gate/i.test(title) ? 'gate' : /comp/i.test(title) ? 'comp' : null
+			if (kind === 'gate' && !gate) { gate = o.id; gateSlot = objects[o.parent].id }
+			else if (kind === 'comp' && !comp) { comp = o.id; compSlot = objects[o.parent].id; compTitle = title }
+			if (kind) rememberModule(kind, o.id, title, info(da, objects[o.parent].id).title)
 		}
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
-	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', knobs: {}, buttons: {}, bypass: null, objs: {} }
+	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', emptySlots: emptySlots,
+		compSlot: compSlot, compTitle: compTitle, gateSlot: gateSlot,
+		noGate: !gate, noComp: !comp, knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
 	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
 		var p = obj ? findParam(list, patterns, exclude) : null
@@ -405,10 +412,34 @@ function cubaseStrip(objects) {
 		knob(bands[b][2], 'band ' + n + ' freq', eq, eqList, [bx, RX.freq], null, on)
 		if (bands[b][3] !== null) knob(bands[b][3], 'band ' + n + ' Q', eq, eqList, [bx, RX.q], null, on)
 	}
-	knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
-	knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio])
-	// "Auto Release" (a switch) must not be taken for the release time.
-	knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
+	// LF BELL / HF BELL: bands 1 and 4 between their shelf (as they come: "Low / High Shelf II") and a bell
+	// ("Parametric II", the top of the type list). Lit while a bell. Switching also switches the band on.
+	var bells = [[B.LfBell, 1], [B.HfBell, 4]]
+	for (var bb = 0; bb < bells.length; ++bb) {
+		var typ = sw(eq, eqList, [band(bells[bb][1]), /type/i])
+		if (!typ) continue
+		typ.eqType = true
+		typ.enable = sw(eq, eqList, [band(bells[bb][1]), RX.on])
+		t.buttons[bells[bb][0]] = typ
+		t.objs[eq] = true
+		found.push((bells[bb][1] === 1 ? 'LF' : 'HF') + ' bell="' + typ.title + '"')
+	}
+	// Each compressor type by the controls it shows in the strip (exact parameter names, from the log). The Tube and
+	// Vintage Compressors have no threshold and no ratio on their strip panel: Input Gain (drives them into
+	// compression) goes on the Ratio knob and Output Gain on the Threshold knob, as the Ratio knob sits left of the
+	// Threshold knob on the UC1 (input left, output right, as on the panel).
+	var layout = comp ? COMP_LAYOUTS[info(da, comp).title] : null
+	function exact(name) { return new RegExp('^' + name + '$', 'i') }
+	if (layout) {
+		knob(K.CompThreshold, 'comp threshold', comp, compList, [exact(layout.thresh)])
+		knob(K.CompRatio, 'comp ratio', comp, compList, [exact(layout.ratio)])
+		knob(K.CompRelease, 'comp release', comp, compList, [exact(layout.release)])
+	} else {
+		knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
+		knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio], [/high/i])
+		// "Auto Release" (a switch) must not be taken for the release time.
+		knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
+	}
 	knob(K.GateThreshold, 'gate threshold', gate, gateList, [RX.thresh])
 	knob(K.GateRange, 'gate range', gate, gateList, [RX.range])
 	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release], [RX.auto])
@@ -416,28 +447,152 @@ function cubaseStrip(objects) {
 	// The UC1 has no attack knobs: the F.ATT keys switch their section's Release knob between release and attack
 	// (lit = attack). The choice stays when you change tracks.
 	t.flip = {}
-	function attackFlip(key, mode, releaseKnob, obj, list) {
-		var p = obj ? findParam(list, [RX.attack], [RX.auto]) : null
+	function attackFlip(key, mode, releaseKnob, obj, list, attackName) {
+		var p = obj ? findParam(list, attackName ? [exact(attackName)] : [RX.attack], [RX.auto]) : null
 		if (!p || !t.knobs[releaseKnob]) return
 		t.flip[key] = { mode: mode, knob: releaseKnob, release: t.knobs[releaseKnob],
 			attack: { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16) } }
 		found.push(mode + ' attack="' + p.title + '"')
 		if (state.attack[mode]) t.knobs[releaseKnob] = t.flip[key].attack
 	}
-	attackFlip(B.FastAttComp, 'comp', K.CompRelease, comp, compList)
+	attackFlip(B.FastAttComp, 'comp', K.CompRelease, comp, compList, layout ? layout.attack : null)
 	attackFlip(B.FastAttGate, 'gate', K.GateRelease, gate, gateList)
 	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
 	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
 	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
-	var compBypass = sw(comp, compList, [RX.bypass])
-	if (compBypass) { compBypass.invert = true; t.buttons[B.DynIn] = compBypass; t.objs[comp] = true }
+	// DYN IN: the compressor's bypass; EXP (Cubase's Noise Gate has no expander mode): the gate's bypass. Each lit
+	// while its module is in. SC LISTEN: the gate's side-chain monitor.
+	var compBypass = sw(comp, compList, [RX.bypass]), gateBypass = sw(gate, gateList, [RX.bypass])
+	t.dynBypass = []
+	if (compBypass) { compBypass.invert = true; t.dynBypass.push(compBypass); t.objs[comp] = true }
+	if (gateBypass) { gateBypass.invert = true; t.buttons[B.Expand] = gateBypass; t.objs[gate] = true }
+	var scMonitor = sw(gate, gateList, [/^sc\s*monitor$/i])
+	if (scMonitor) { t.buttons[B.ScListen] = scMonitor; t.objs[gate] = true }
 	if (++stripLogs <= 5) {
 		log('Cubase strip:' + (missing.length ? ' not found: ' + missing.join(', ') : ' everything found')
-			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none'))
+			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none') + ', EXP ' + (gateBypass ? '"' + gateBypass.title + '"' : 'none') + ', SC LISTEN ' + (scMonitor ? '"' + scMonitor.title + '"' : 'none'))
 		for (var f = 0; f < found.length; ++f) log('Cubase strip:   ' + found[f])
 	}
 	indexKnobs(t)
 	return t
+}
+
+// Cubase's strip modules are switched on, not loaded: a strip slot without a module has nothing in it until its
+// module is switched on (the Direct Access plug-in manager lists no plug-ins for strip slots). The script cannot
+// set a host value by itself, so the on switches of the selected track's Gate and Compressor are bound to CC 40 /
+// 41 (channel 1), and the script asks the bridge to send that CC (SysEx 3A <cc> 127). Turning a Gate or Dyn knob
+// whose module is missing or off switches it on; the knobs work once the track has been looked at again.
+var COMP_LAYOUTS = {
+	'Standard Compressor': { thresh: 'Threshold', ratio: 'Ratio', release: 'Release', attack: 'Attack' },
+	'Tube Compressor': { thresh: 'Output Gain', ratio: 'Input Gain', release: 'Release Time', attack: 'Attack Time' },
+	'VintageCompressor': { thresh: 'Output Gain', ratio: 'Input Gain', release: 'Release Time', attack: 'Attack Time' }
+}
+var GATE_KNOBS = [K.GateThreshold, K.GateRange, K.GateRelease, K.GateHold]
+var COMP_KNOBS = [K.CompThreshold, K.CompRatio, K.CompRelease]
+var CC_GATE_ON = 40, CC_COMP_ON = 41
+var stripOn = { gate: -1, comp: -1 }   // the modules' on switches as Cubase reports them (-1 = not known)
+try {
+	var stripFx = selected.mInsertAndStripEffects.mStripEffects
+	var bindOn = function (x, cc, kind, hostValue) {
+		var k = surface.makeKnob(x, 3, 1, 1)
+		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
+		page.makeValueBinding(k.mSurfaceValue, hostValue)
+		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			if (stripOn[kind] !== value) log('strip ' + kind + ' on switch: ' + value)
+			stripOn[kind] = value
+		}
+	}
+	bindOn(0, CC_GATE_ON, 'gate', stripFx.mGate.mOn)
+	bindOn(1, CC_COMP_ON, 'comp', stripFx.mCompressor.mOn)
+} catch (e) { log('strip module switches could not be bound: ' + e) }
+// Strip modules by kind: name and plug-in class id (the unique name without its "-<instance>" ending), which is what
+// an empty strip slot is loaded with (Direct Access trySetSlotPlugin). Known ones are listed; any other module seen
+// in a track's strip is added (and logged with its id, to be listed here).
+var STRIP_MODULES = {
+	gate: [{ name: 'Noise Gate', uid: 'C3B0615A2A444991B423673DEE2379A7', slot: '1' }],
+	comp: [
+		{ name: 'Standard Compressor', short: 'Standard Comp', uid: 'E022B5972163463CBA2036708D5AF5A5', slot: '2' },
+		{ name: 'Tube Compressor', short: 'Tube Comp', uid: '7186B3CC877647BAADD5EAC0785001DF', slot: '2' },
+		{ name: 'VintageCompressor', short: 'Vintage Comp', uid: '2CA7A4D872A14FDD99B4932F2FD98854', slot: '2' }
+	]
+}
+function rememberModule(kind, obj, title, slotTitle) {
+	var list = STRIP_MODULES[kind]
+	for (var i = 0; i < list.length; ++i) if (list[i].name === title) return
+	var uname = ''
+	try { uname = da.getObjectUniqueName(am, obj) } catch (e) {}
+	if (!uname) return
+	list.push({ name: title, uid: uname.replace(/-\d+$/, ''), slot: slotTitle })
+	log('strip ' + kind + ' seen: "' + title + '" in slot "' + slotTitle + '", class id ' + uname.replace(/-\d+$/, ''))
+}
+function loadModule(activeDevice, target, kind, module, intoSlot) {
+	// Replacing: the slot given. Else the slot it sits in by default if that one is free, else the first free one.
+	var slot = intoSlot || target.emptySlots[0]
+	if (!intoSlot) for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === module.slot) slot = target.emptySlots[e]
+	if (!slot) { log('no free strip slot for "' + module.name + '"'); return }
+	var ok = false
+	try { ok = da.mPluginManager.trySetSlotPlugin(am, slot, module.uid, true) } catch (err) { log('trySetSlotPlugin failed: ' + err) }
+	log('loading "' + module.name + '" into strip slot "' + info(da, slot).title + '": ' + (ok ? 'done' : 'refused'))
+	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
+	readout(activeDevice, ZONE_CS, module.short || module.name, ok ? 'ON' : 'FAILED')
+	state.rescanAt = Date.now() + 300
+}
+
+// The compressor picker: a Dyn knob turned on a track without a compressor (and more than one compressor type
+// known) shows the types in the readout; turning any Dyn knob steps through them, CONFIRM or DYN IN loads the one
+// shown, BACK (or 8 s without a turn, or another track) cancels.
+var picker = null   // { kind, index, until, target }
+function showPicker(activeDevice) {
+	var list = STRIP_MODULES[picker.kind]
+	readout(activeDevice, ZONE_CS, list[picker.index].short || list[picker.index].name, (picker.index + 1) + '/' + list.length)
+}
+function closePicker(activeDevice, why) {
+	if (!picker) return
+	picker = null
+	if (why) readout(activeDevice, ZONE_CS, why, '')
+}
+
+var dynPressedAt = 0
+function openCompPicker(activeDevice, target) {
+	var list = STRIP_MODULES.comp
+	var index = 0
+	for (var i = 0; i < list.length; ++i) if (list[i].name === target.compTitle) index = i
+	picker = { kind: 'comp', index: index, acc: 0, until: Date.now() + 8000, target: target,
+		replaceSlot: target.noComp ? null : target.compSlot }
+	showPicker(activeDevice)
+}
+var switchTried = {}
+function switchOnModuleFor(activeDevice, target, knob, clicks) {
+	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
+	if (!kind) return false
+	var missing = kind === 'gate' ? target.noGate : target.noComp
+	if (picker && picker.kind === kind) {   // (the track may have been looked at again meanwhile: a new target)
+		// One type per 4 clicks (a click per type went by too fast to stop on one).
+		picker.until = Date.now() + 8000
+		if ((clicks > 0) !== (picker.acc > 0)) picker.acc = 0
+		picker.acc += clicks
+		if (Math.abs(picker.acc) < 4) return true
+		var n = STRIP_MODULES[kind].length
+		picker.index = ((picker.index + (picker.acc > 0 ? 1 : -1)) % n + n) % n
+		picker.acc = 0
+		showPicker(activeDevice)
+		return true
+	}
+	if (!missing && stripOn[kind] !== 0) return false
+	if (missing && target.emptySlots.length && STRIP_MODULES[kind].length > 1) {
+		picker = { kind: kind, index: 0, acc: 0, until: Date.now() + 8000, target: target }
+		showPicker(activeDevice)
+		return true
+	}
+	var key = numberBase + ':' + kind
+	if (switchTried[key] && Date.now() - switchTried[key] < 2000) return true
+	switchTried[key] = Date.now()
+	log('switching on the strip ' + (kind === 'gate' ? 'gate' : 'compressor') + ' (was ' + (missing ? 'not there' : 'off') + ')')
+	if (missing && target.emptySlots.length) { loadModule(activeDevice, target, kind, STRIP_MODULES[kind][0]); return true }
+	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
+	readout(activeDevice, ZONE_CS, kind === 'gate' ? 'Gate' : 'Compressor', 'ON')
+	state.rescanAt = Date.now() + 300
+	return true
 }
 
 // The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
@@ -585,19 +740,64 @@ function dumpParams(acc, obj, name) {
 }
 
 function paramValue(target, rf) { return target.da.getParameterProcessValue(am, rf.obj, rf.tag) }
+// The shelf type each bell key goes back to (by EQ object and tag), learnt when it switches to a bell.
+var shelfBefore = {}
+// The value of a band's bell type. The outer bands' type lists differ from the mid bands' (the top of band 4's
+// list is "High Shelf IV"), so the list is read once: each value is set for a moment and its name read back, and
+// the type goes back to what it was (all within one callback, so nothing is heard). Prefers "Parametric II".
+var bellValues = {}
+function bellValue(target, rf) {
+	var key = rf.title
+	if (bellValues[key] !== undefined) return bellValues[key]
+	var acc = target.da, before = paramValue(target, rf)
+	var names = [], seen = {}, found = null, foundAny = null
+	for (var i = 0; i <= 32; ++i) {
+		var v = i / 32
+		acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
+		var name = acc.getParameterDisplayValue(am, rf.obj, rf.tag)
+		if (seen[name]) continue
+		seen[name] = true
+		var exact = acc.getParameterProcessValue(am, rf.obj, rf.tag)
+		names.push(name + ' (' + exact.toFixed(3) + ')')
+		if (/parametric\s*ii$/i.test(name) && found === null) found = exact
+		if (/param|bell|peak/i.test(name) && foundAny === null) foundAny = exact
+	}
+	acc.setParameterProcessValue(am, rf.obj, rf.tag, before)
+	log(rf.title + ' types: ' + names.join(', '))
+	bellValues[key] = found !== null ? found : foundAny
+	return bellValues[key]
+}
+function isBell(target, rf) { return /param|bell|peak/i.test(target.da.getParameterDisplayValue(am, rf.obj, rf.tag)) }
 function toggleParam(target, rf) {
 	if (!rf) return
+	if (rf.eqType) {
+		var key = rf.obj + ':' + rf.tag
+		if (isBell(target, rf)) target.da.setParameterProcessValue(am, rf.obj, rf.tag, shelfBefore[key] !== undefined ? shelfBefore[key] : 5 / 7)
+		else {
+			shelfBefore[key] = paramValue(target, rf)
+			var bell = bellValue(target, rf)
+			if (bell === null) { log('no bell type found for ' + rf.title); return }
+			target.da.setParameterProcessValue(am, rf.obj, rf.tag, bell)
+		}
+		if (rf.enable && paramValue(target, rf.enable) < 0.5) target.da.setParameterProcessValue(am, rf.enable.obj, rf.enable.tag, 1)
+		log('EQ type now "' + target.da.getParameterDisplayValue(am, rf.obj, rf.tag) + '"')
+		return
+	}
 	var v = paramValue(target, rf)
 	target.da.setParameterProcessValue(am, rf.obj, rf.tag, v >= 0.5 ? 0 : 1)
 }
 // A switch's LED: lit when the parameter is on (or, for refs marked invert, off: a bypass lights IN when 0).
-function lit(target, rf) { return (paramValue(target, rf) >= 0.5) !== rf.invert }
+function lit(target, rf) {
+	if (rf.eqType) return isBell(target, rf)
+	return (paramValue(target, rf) >= 0.5) !== rf.invert
+}
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
 var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen]
 function paintLeds(activeDevice) {
 	for (var i = 0; i < CS_BUTTONS.length; ++i) {
 		var b = CS_BUTTONS[i]
+		if (b === B.DynIn && state.cs && state.cs.dynBypass) continue   // painted below
 		var on = false
 		if (state.cs && state.cs.flip && state.cs.flip[b]) on = state.attack[state.cs.flip[b].mode]
 		else if (state.cs && state.cs.buttons[b]) {
@@ -610,6 +810,11 @@ function paintLeds(activeDevice) {
 	try { if (state.cs && state.cs.bypass) csIn = lit(state.cs, state.cs.bypass) } catch (e) {}
 	try { if (bc && bc.bypass) bcIn = lit(bc, bc.bypass) } catch (e) {}
 	setLed(activeDevice, B.ChannelIn, csIn ? 1 : 0)
+	if (state.cs && state.cs.dynBypass) {
+		var dynIn = false
+		try { for (var d = 0; d < state.cs.dynBypass.length; ++d) if (lit(state.cs, state.cs.dynBypass[d])) dynIn = true } catch (e) {}
+		setLed(activeDevice, B.DynIn, dynIn ? 1 : 0)
+	}
 	setLed(activeDevice, B.BusCompIn, bcIn ? 1 : 0)
 	setLed(activeDevice, B.Fine, state.fine ? 1 : 0)
 }
@@ -619,13 +824,19 @@ function onKnob(activeDevice, id, clicks) {
 	var target = targetFor(id)
 	if (!target) return
 	var rf = target.knobs[id]
+	if (target.emptySlots && switchOnModuleFor(activeDevice, target, id, clicks)) return
 	if (!rf) return
 	var acc = target.da
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
 	if (rf.invert) step = -step
-	var v = acc.getParameterProcessValue(am, rf.obj, rf.tag) + step
-	v = Math.max(0, Math.min(1, v))
+	// A parameter with a few steps (a ratio) snaps each small change back to where it was, so while the knob is
+	// being turned (clicks less than 1 s apart) the turn is added up here, not read back from the parameter.
+	var now = Date.now()
+	var base = rf.wanted !== undefined && now - rf.turnedAt < 1000 ? rf.wanted : acc.getParameterProcessValue(am, rf.obj, rf.tag)
+	var v = Math.max(0, Math.min(1, base + step))
 	acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
+	rf.wanted = v
+	rf.turnedAt = now
 	// Turning a knob whose section is switched off switches it on (a Cubase EQ band, a cut filter); a cut filter
 	// turned to the end of its range switches off.
 	if (rf.enable) {
@@ -642,6 +853,36 @@ function onKnob(activeDevice, id, clicks) {
 }
 
 function onButton(activeDevice, id) {
+	if (picker) {
+		if (id === B.Confirm || id === B.DynIn) {
+			var p = picker
+			picker = null
+			var chosen = STRIP_MODULES[p.kind][p.index]
+			var tgt = state.cs && state.cs.emptySlots ? state.cs : p.target
+			if (p.replaceSlot && chosen.name === tgt.compTitle) { readout(activeDevice, ZONE_CS, chosen.short || chosen.name, 'KEPT'); return }
+			loadModule(activeDevice, tgt, p.kind, chosen, p.replaceSlot)
+			return
+		}
+		if (id === B.Back) { closePicker(activeDevice, 'Cancelled'); return }
+	}
+	// DYN IN on Cubase's strip without a compressor: load the Standard Compressor straight away.
+	if (id === B.DynIn && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
+		loadModule(activeDevice, state.cs, 'comp', STRIP_MODULES.comp[0])
+		return
+	}
+	// EXP on Cubase's strip without a gate: load the Noise Gate (as DYN IN loads a compressor).
+	if (id === B.Expand && state.cs && state.cs.emptySlots && state.cs.noGate && state.cs.emptySlots.length) {
+		loadModule(activeDevice, state.cs, 'gate', STRIP_MODULES.gate[0])
+		return
+	}
+	if (id === B.DynIn && state.cs && state.cs.dynBypass && state.cs.dynBypass.length) {
+		var anyIn = false
+		for (var d = 0; d < state.cs.dynBypass.length; ++d) if (lit(state.cs, state.cs.dynBypass[d])) anyIn = true
+		for (var d2 = 0; d2 < state.cs.dynBypass.length; ++d2)
+			state.cs.da.setParameterProcessValue(am, state.cs.dynBypass[d2].obj, state.cs.dynBypass[d2].tag, anyIn ? 1 : 0)
+		paintLeds(activeDevice)
+		return
+	}
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
 	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.bypass); paintLeds(activeDevice); return }
@@ -673,6 +914,16 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (!am) { if (++sysexErrors <= 3) log('UC1 event before the page was active; ignored'); return }
 	try {
 		if (cmd === 0x20) onKnob(activeDevice, message[5], message[6] - 64)
+		else if (message[5] === B.DynIn && state.cs && state.cs.emptySlots && !picker) {
+			// Cubase's strip: DYN IN acts on release; held for 0.6 s it opens the compressor picker instead
+			// (to load a type other than Standard, or to change the loaded one).
+			if (message[6] === 1) { dynPressedAt = Date.now(); return }
+			if (!dynPressedAt) return
+			var held = Date.now() - dynPressedAt
+			dynPressedAt = 0
+			if (held >= 600) openCompPicker(activeDevice, state.cs)
+			else onButton(activeDevice, B.DynIn)
+		}
 		else if (message[6] === 1) onButton(activeDevice, message[5])
 	} catch (e) {
 		if (++sysexErrors <= 10) log('event 0x' + cmd.toString(16) + ' id 0x' + message[5].toString(16) + ' failed: ' + e)
@@ -715,6 +966,7 @@ if (daMix) {
 
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	am = activeMapping
+	picker = null
 	sysex(activeDevice, [0x30].concat(encodeName(title)))
 	state.rescanAt = Date.now() + 100
 }
@@ -736,6 +988,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
 	flushLog(activeDevice)
 	var now = Date.now()
+	if (picker && now > picker.until) closePicker(activeDevice, 'Cancelled')
 	if (numberBase >= 0 && now >= numberCheckAt) {
 		numberCheckAt = now + 1000
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
