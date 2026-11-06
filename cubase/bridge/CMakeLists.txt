@@ -54,6 +54,7 @@ add_executable(cubase_sixty_bridge
     src/Uf1Bridge.h
     src/Uc1Bridge.cpp
     src/ScriptLog.cpp
+    src/NetInit.cpp
     src/ScriptLog.h
     src/Uc1Bridge.h
     ${EXT_SRC}/UF8Device.cpp

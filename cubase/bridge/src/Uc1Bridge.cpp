@@ -62,6 +62,7 @@
 #include "SslCoreImpersonator.h"
 
 namespace cs {
+bool netInit();   // NetInit.cpp
 namespace {
 
 constexpr const char* kPortTo   = "Cubase-Sixty UC1 to Cubase";
@@ -1095,6 +1096,7 @@ bool uc1Start()
     }
     std::printf("UC1 open (serial %s).\n", g_dev.serial().c_str());
     // The SSL 360 Core stand-in, for the gain-reduction meters (SSL 360 must not be running).
+    if (!netInit()) std::fprintf(stderr, "Windows sockets could not be started.\n");
     if (sslcore::start()) std::printf("SSL 360 Core stand-in running (gain reduction).\n");
     else std::fprintf(stderr, "SSL 360 Core stand-in could not start (is SSL 360 running?); no gain reduction.\n");
     if (!g_grThread.joinable()) { g_grRun = true; g_grThread = std::thread(grLoop); }
