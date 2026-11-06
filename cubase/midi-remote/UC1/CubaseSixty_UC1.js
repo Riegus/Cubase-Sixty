@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.11.0-dev'
+var SCRIPT_VERSION = '0.11.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -311,7 +311,7 @@ function rescan(activeDevice) {
 	state.cs = null
 	state.bcSelected = null
 	var list = []
-	var sslCount = 0
+	var sslCount = 0, bcCount = 0
 	var base
 	try { base = da.getBaseObjectID(am) } catch (e) { log('getBaseObjectID failed: ' + e); return }
 	var objects = walk(da, base, 4, 400, SKIP_TYPES_TRACK)
@@ -325,7 +325,8 @@ function rescan(activeDevice) {
 		// SSL 360 Core in, which is how the bridge finds their gain-reduction streams.
 		var csMatch = bc ? null : findMap(CHANNEL_STRIPS, o.title)
 		var sslOrd = bc || (csMatch && csMatch.label) ? sslCount++ : -1
-		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); state.bcSelected.sslOrd = sslOrd; dumpParams(da, id, o.title); continue }
+		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); state.bcSelected.sslOrd = bcCount; dumpParams(da, id, o.title) }
+		if (bc) { ++bcCount; continue }
 		var cs = csMatch
 		if (cs && cs.label) {
 			var t = makeTarget(da, id, cs, o.title)
@@ -732,9 +733,9 @@ function scanMixer(activeDevice) {
 			}
 			p = objects[p].parent
 		}
-		// Its position among the SSL strips / bus comps on that channel (insert order), for the gain reduction.
-		sslOnChannel[channelObj] = (sslOnChannel[channelObj] || 0) + 1
+		// Its position among the bus comps on that channel (insert order): how the bridge finds its gain reduction.
 		if (!map) continue
+		sslOnChannel[channelObj] = (sslOnChannel[channelObj] || 0) + 1
 		var dup = false
 		for (var d = 0; d < list.length; ++d) if (list[d].obj === o.id) dup = true
 		if (!dup) {

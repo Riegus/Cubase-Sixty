@@ -25,6 +25,8 @@
 //                                                         7F = the strip has no routing), for the ROUTING screen
 //   UC1 -> script   SysEx 3E <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc>   set the routing (ROUTING screen)
 //                   SysEx 40 <cs track hi> <lo> <cs ordinal> <bc track hi> <lo> <bc ordinal> <cs model>
+//                                                         (cs ordinal: among the SSL strips / bus comps on the track;
+//                                                         bc ordinal: among the bus comps on its track)
 //                                                         where the gain-reduction meters read from (see "Gain reduction")
 //                   SysEx 3A <cc> <value>                 send CC <cc> <value> (channel 1) back to Cubase: lets the script
 //                                                         set a host value it has bound to a CC (a strip module's on switch)
@@ -1036,7 +1038,8 @@ void grLoop()
         const int compType = int(sslcore::ChannelStripMeter::CompGain), gateType = int(sslcore::ChannelStripMeter::GateGain);
         const float comp = readGr(compType, csT, csO, model);
         const float gate = readGr(gateType, csT, csO, model);
-        const float bc = readGr(compType, bcT, bcO, std::string());
+        float bc = 0.0f;
+        if (bcT > 0 && sslcore::getBusCompGr(bcT, bcO, bc)) bc = std::fabs(bc); else bc = 0.0f;
         g_dev.setGainReduction(bc);
         pushGrStrip(0x5C, comp, g_compStrip);
         pushGrStrip(0x61, gate, g_gateStrip);
@@ -1049,14 +1052,6 @@ void grLoop()
                 const size_t e = sum.find('\n', a);
                 const std::string line = sum.substr(a, e - a);
                 if (line.find("streams:") == std::string::npos) key += line.substr(0, line.find(" comp ")) + "\n";
-                if (e == std::string::npos) break;
-                a = e + 1;
-            }
-            // The bus comp streams (temporary: to find which one carries its gain reduction).
-            for (size_t a = 0; a < sum.size();) {
-                const size_t e = sum.find('\n', a);
-                const std::string line = sum.substr(a, e - a);
-                if (line.find("streams:") != std::string::npos && line.find("=") != std::string::npos) std::printf("BC%s\n", line.c_str());
                 if (e == std::string::npos) break;
                 a = e + 1;
             }

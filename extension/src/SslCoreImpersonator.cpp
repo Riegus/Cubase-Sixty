@@ -3301,20 +3301,35 @@ std::string debugSummary()
                       comp.have && !comp.current.empty() ? std::to_string(comp.current[0]).c_str() : "-",
                       gate.have && !gate.current.empty() ? std::to_string(gate.current[0]).c_str() : "-");
         out += line;
-        // A bus compressor streams none of the strip's meters: list what it does stream (data type: values).
-        if (in.pluginType == int(sslmeter::PluginType::NativeBusComp) || in.pluginType == int(sslmeter::PluginType::GenericBusComp)) {
-            std::string dts = "    streams:";
-            for (size_t dt = 0; dt < in.meter.size(); ++dt) {
-                const Slot& sl = in.meter[dt];
-                if (!sl.have || sl.current.empty()) continue;
-                dts += " dt" + std::to_string(dt) + "=";
-                for (size_t k = 0; k < sl.current.size() && k < 4; ++k) {
-                    char b[24]; std::snprintf(b, sizeof b, "%s%.2f", k ? "," : "", sl.current[k]); dts += b;
-                }
-            }
-            out += dts + "\n";
-        }
     }
     return out;
+}
+} // namespace sslcore
+
+// ── Cubase-Sixty: a bus compressor's gain reduction ──────────────────────────
+// A Bus Compressor streams its gain reduction as data type 0 (its "GainReductionMeter", one value, 0 .. negative
+// dB; traced in Cubase 2026-11-06), the slot a channel strip uses for its input meter. So the instance is picked
+// among the BUS COMPRESSORS on the track only: `ordinal` = its position among them (connect = insert order).
+namespace sslcore {
+bool getBusCompGr(int trackIndex, int ordinal, float& dB)
+{
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    const long long now = nowMs();
+    std::vector<std::pair<uint64_t, uint16_t>> v;
+    for (const auto& kv : g_inst) {
+        const int t = kv.second.pluginType;
+        if (t != int(sslmeter::PluginType::NativeBusComp) && t != int(sslmeter::PluginType::GenericBusComp)) continue;
+        if (now - kv.second.lastMs > 1000) continue;
+        auto pi = g_portIndex.find(kv.first);
+        if (pi == g_portIndex.end() || pi->second != trackIndex) continue;
+        auto sq = g_portSeq.find(kv.first);
+        v.emplace_back(sq == g_portSeq.end() ? UINT64_MAX : sq->second, kv.first);
+    }
+    std::sort(v.begin(), v.end());
+    if (ordinal < 0 || size_t(ordinal) >= v.size()) return false;
+    const Slot& s = g_inst[v[size_t(ordinal)].second].meter[0];
+    if (!s.have || s.current.empty() || !std::isfinite(s.current[0])) return false;
+    dB = s.current[0];
+    return true;
 }
 } // namespace sslcore
