@@ -11,6 +11,8 @@ namespace {
 std::mutex g_mx;
 FILE* g_file = nullptr;
 std::string g_path;
+long g_bytes = 0;
+constexpr long kMaxBytes = 20L * 1024 * 1024;   // past this the file starts again (the old part kept as .old)
 
 std::string stamp()
 {
@@ -53,8 +55,16 @@ void scriptLogLine(const std::string& source, const std::string& text)
 {
     std::lock_guard<std::mutex> lk(g_mx);
     if (!g_file) return;
-    std::fprintf(g_file, "%s [%s] %s\n", stamp().c_str(), source.c_str(), text.c_str());
+    const int n = std::fprintf(g_file, "%s [%s] %s\n", stamp().c_str(), source.c_str(), text.c_str());
     std::fflush(g_file);
+    if (n > 0) g_bytes += n;
+    if (g_bytes > kMaxBytes) {
+        std::fclose(g_file);
+        std::error_code ec;
+        std::filesystem::rename(g_path, g_path + ".old", ec);
+        g_file = std::fopen(g_path.c_str(), "w");
+        g_bytes = 0;
+    }
 }
 
 bool scriptLogSysex(const unsigned char* m, size_t len)
