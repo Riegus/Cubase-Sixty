@@ -3,8 +3,11 @@
 // The UC1 controls the SSL plug-ins on the SELECTED track, like SSL 360 does:
 //   - the Channel Strip knobs and buttons drive the track's channel strip plug-in (Channel Strip 2, 4K E / G / B,
 //     SSL 360 Link),
-//   - the seven Bus Comp knobs and the Bus Comp IN key drive its Bus Compressor 2 (or SSL 360 Link Bus Compressor),
-//   - CHANNEL encoder: previous / next track; SOLO / CUT / polarity: the selected track's.
+//   - the seven Bus Comp knobs and the Bus Comp IN key drive a Bus Compressor 2 (or SSL 360 Link Bus Compressor)
+//     anywhere in the project: the Bus Comp encoder steps through them (the large name row shows their tracks);
+//     until one is picked, the one on an output channel, else the first,
+//   - CHANNEL encoder: previous / next track; SOLO / CUT / polarity: the selected track's,
+//   - the 7-segment display: the selected channel's number in the MixConsole.
 //
 // The plug-ins are found and driven through Cubase's Direct Access API (page.mHostAccess.makeDirectAccess): the
 // selected track's objects are searched for a plug-in whose name contains one of the names below, and its
@@ -18,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.2.0-dev'
+var SCRIPT_VERSION = '0.3.0-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -58,8 +61,8 @@ var ZONE_CS = 0x03, ZONE_BC = 0x05
 // Plug-in maps: UC1 control -> parameter index (Rea-Sixty extension/src/UC1PluginMap.cpp)
 // ---------------------------------------------------------------------------
 
-function pmap(match, label, knobs, buttons, bypass, inverted) {
-	return { match: match, label: label, knobs: knobs, buttons: buttons, bypass: bypass, inverted: inverted || [] }
+function pmap(match, label, knobs, buttons, bypass, inverted, header) {
+	return { match: match, label: label, knobs: knobs, buttons: buttons, bypass: bypass, inverted: inverted || [], header: header || '' }
 }
 function kv(pairs) { var o = {}; for (var i = 0; i < pairs.length; i += 2) o[pairs[i]] = pairs[i + 1]; return o }
 // Knobs whose parameter runs the other way (clockwise = lower value). Rea-Sixty also turns Gate Threshold
@@ -112,10 +115,10 @@ var CHANNEL_STRIPS = [
 var BUS_COMPS = [
 	pmap('SSL 360 Link Bus Compressor', 'L-BC',
 		kv([K.BcThreshold, 1, K.BcMakeup, 2, K.BcAttack, 3, K.BcRelease, 4, K.BcRatio, 5, K.BcScHpf, 6, K.BcMix, 7]),
-		{}, 0),
+		{}, 0, [], '360 LINK BC'),
 	pmap('Bus Compressor 2', 'BC 2',
 		kv([K.BcThreshold, 2, K.BcMakeup, 3, K.BcAttack, 4, K.BcRelease, 5, K.BcRatio, 6, K.BcScHpf, 7, K.BcMix, 8]),
-		{}, 10)
+		{}, 10, [], 'BUS COMP 2')
 ]
 function isBusCompKnob(id) { return id >= K.BcRatio && id <= K.BcMix }
 
@@ -192,64 +195,174 @@ commandButton(0, 100, 'Project', 'Select Track: Next')
 commandButton(1, 101, 'Project', 'Select Track: Prev')
 commandButton(2, B.SoloClear, 'Edit', 'Deactivate All Solo')
 
+// The whole MixConsole, for the Bus Comp section (which stays on its own track, as with SSL 360's Bus Comp
+// encoder). Created in a try: if Cubase refuses, the Bus Comp knobs fall back to the selected track's bus comp.
+var daMix = null
+try { daMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { log('no Direct Access to the MixConsole: ' + e) }
+
 // The mapping Direct Access calls need. Kept from the page's callbacks (the SysEx handler gets none).
 var am = null
+// A target is a found plug-in: { da (the Direct Access it was found through), obj, map, name, track, knobByTag }.
 var state = {
-	cs: null,        // { obj, map, name } the channel strip plug-in on the selected track
-	bc: null,        // the bus compressor
-	rescanAt: 0,     // when to look at the selected track's plug-ins again (0 = not pending)
+	cs: null,          // the channel strip plug-in on the selected track
+	bcSelected: null,  // the bus comp on the selected track (used when the MixConsole cannot be searched)
+	bcList: [],        // every bus comp in the project, in MixConsole order
+	bcAnchor: null,    // object id of the bus comp the Bus Comp section is on (null = not chosen yet)
+	rescanAt: 0,       // when to look at the selected track's plug-ins again (0 = not pending)
+	mixScanAt: 0,      // when to search the MixConsole for bus comps again (0 = not pending)
 	fine: false,
-	dumped: {}       // plug-in names whose parameters were already listed in the log
+	dumped: {}         // plug-in names whose parameters were already listed in the log
 }
 
-// Every object under the selected track, depth first: { id, depth }.
-function walk(base) {
+// Every object under base, depth first: { id, depth, parent index }. Branches of the kinds in skip are not
+// entered (sends, panners, EQ ... cannot hold plug-ins).
+var SKIP_TYPES = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1,
+	Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+function walk(acc, base, maxDepth, limit) {
 	var out = []
-	function rec(id, depth) {
-		out.push({ id: id, depth: depth })
-		if (depth >= 4) return
+	function rec(id, depth, parent) {
+		if (out.length >= limit) return
+		var type = ''
+		try { type = acc.getObjectTypeName(am, id) } catch (e) {}
+		out.push({ id: id, depth: depth, parent: parent, type: type })
+		var me = out.length - 1
+		if (depth >= maxDepth || SKIP_TYPES[type]) return
 		var n = 0
-		try { n = da.getNumberOfChildObjects(am, id) } catch (e) { return }
-		for (var i = 0; i < n && i < 64; ++i) rec(da.getChildObjectID(am, id, i), depth + 1)
+		try { n = acc.getNumberOfChildObjects(am, id) } catch (e) { return }
+		for (var i = 0; i < n && i < 512; ++i) rec(acc.getChildObjectID(am, id, i), depth + 1, me)
 	}
-	rec(base, 0)
+	rec(base, 0, -1)
 	return out
 }
 function findMap(list, name) {
 	for (var i = 0; i < list.length; ++i) if (name.indexOf(list[i].match) >= 0) return list[i]
 	return null
 }
+function info(acc, id) {
+	var r = { title: '', params: 0 }
+	try { r.title = acc.getObjectTitle(am, id) } catch (e) {}
+	try { r.params = acc.getNumberOfParameters(am, id) } catch (e) {}
+	return r
+}
 
 var scans = 0
 function rescan(activeDevice) {
 	if (!am) return
 	state.cs = null
-	state.bc = null
+	state.bcSelected = null
 	var base
 	try { base = da.getBaseObjectID(am) } catch (e) { log('getBaseObjectID failed: ' + e); return }
-	var objects = walk(base)
-	var verbose = ++scans <= 3
-	if (verbose) log('scan ' + scans + ': ' + objects.length + ' objects under the selected track (base ' + base + ')')
+	var objects = walk(da, base, 4, 400)
+	++scans
 	for (var i = 0; i < objects.length; ++i) {
 		var id = objects[i].id
-		var title = '', type = '', params = 0
-		try { title = da.getObjectTitle(am, id) } catch (e) {}
-		try { type = da.getObjectTypeName(am, id) } catch (e) {}
-		try { params = da.getNumberOfParameters(am, id) } catch (e) {}
-		if (verbose) log('  ' + new Array(objects[i].depth + 1).join('  ') + '#' + id + ' [' + type + '] "' + title + '" params ' + params)
-		if (params < 4 || !title) continue
-		var bc = findMap(BUS_COMPS, title)
-		if (bc && !state.bc) { state.bc = { obj: id, map: bc, name: title }; dumpParams(id, title); continue }
-		var cs = findMap(CHANNEL_STRIPS, title)
-		if (cs && cs.label && !state.cs) { state.cs = { obj: id, map: cs, name: title }; dumpParams(id, title) }
+		var o = info(da, id)
+		if (o.params < 4 || !o.title) continue
+		var bc = findMap(BUS_COMPS, o.title)
+		if (bc && !state.bcSelected) { state.bcSelected = { da: da, obj: id, map: bc, name: o.title }; dumpParams(da, id, o.title); continue }
+		var cs = findMap(CHANNEL_STRIPS, o.title)
+		if (cs && cs.label && !state.cs) { state.cs = { da: da, obj: id, map: cs, name: o.title }; dumpParams(da, id, o.title) }
 	}
 	log('selected track: channel strip ' + (state.cs ? '"' + state.cs.name + '"' : 'none')
-		+ ', bus comp ' + (state.bc ? '"' + state.bc.name + '"' : 'none'))
-	setLabel(activeDevice, state.cs ? state.cs.map.label : state.bc ? state.bc.map.label : '')
-	if (!state.cs) sysex(activeDevice, [0x35, ZONE_CS])
-	if (!state.bc) sysex(activeDevice, [0x35, ZONE_BC])
+		+ ', bus comp ' + (state.bcSelected ? '"' + state.bcSelected.name + '" #' + state.bcSelected.obj : 'none'))
 	if (state.cs) state.cs.knobByTag = knobsByTag(state.cs)
-	if (state.bc) state.bc.knobByTag = knobsByTag(state.bc)
+	if (state.bcSelected) state.bcSelected.knobByTag = knobsByTag(state.bcSelected)
+	showNumber(activeDevice, base)
+	paintAll(activeDevice)
+}
+
+// The 7-segment number: the selected channel's position in the MixConsole (Direct Access getMixerChannelIndex).
+var numberLogs = 0
+function showNumber(activeDevice, base) {
+	var index = -1, zone = -1
+	try { index = da.getMixerChannelIndex(am, base) } catch (e) {}
+	try { zone = da.getMixerChannelZone(am, base) } catch (e) {}
+	if (++numberLogs <= 10) log('mixer channel index ' + index + ', zone ' + zone)
+	var v = index >= 0 ? index + 1 : 0x3FFF
+	sysex(activeDevice, [0x37, (v >> 7) & 0x7F, v & 0x7F])
+}
+
+// Every bus comp in the project. Each is listed with the track (channel) it sits on.
+var mixScans = 0
+function scanMixer(activeDevice) {
+	if (!daMix || !am) return
+	var base
+	try { base = daMix.getBaseObjectID(am) } catch (e) { log('MixConsole getBaseObjectID failed: ' + e); daMix = null; return }
+	var objects = walk(daMix, base, 6, 20000)
+	var verbose = ++mixScans <= 1
+	var list = []
+	for (var i = 0; i < objects.length; ++i) {
+		var o = objects[i]
+		if (verbose && o.depth <= 2) log('mix ' + new Array(o.depth + 1).join('  ') + '#' + o.id + ' [' + o.type + '] "' + info(daMix, o.id).title + '"')
+		if (o.depth < 2) continue
+		var inf = info(daMix, o.id)
+		if (inf.params < 4 || !inf.title) continue
+		var map = findMap(BUS_COMPS, inf.title)
+		if (!map) continue
+		// The track: the nearest enclosing object whose kind is a channel.
+		var p = o.parent, track = '', output = false
+		while (p >= 0) {
+			if (/Channel$/.test(objects[p].type)) {
+				track = info(daMix, objects[p].id).title
+				output = /Output/.test(objects[p].type)
+				break
+			}
+			p = objects[p].parent
+		}
+		list.push({ da: daMix, obj: o.id, map: map, name: inf.title, track: track, output: output })
+	}
+	if (verbose || list.length !== state.bcList.length)
+		log('MixConsole: ' + objects.length + ' objects, ' + list.length + ' bus comps'
+			+ (list.length ? ': ' + list.map(function (b) { return '"' + b.track + '" #' + b.obj }).join(', ') : ''))
+	for (var k = 0; k < list.length; ++k) list[k].knobByTag = knobsByTag(list[k])
+	state.bcList = list
+	showBcNames(activeDevice)
+	paintAll(activeDevice)
+}
+
+// The bus comp the Bus Comp section controls: the one picked with the Bus Comp encoder, else one on an output
+// channel, else the first in the project (Rea-Sixty: the master's, else the first track's), else the selected track's.
+function anchorIndex() {
+	var list = state.bcList
+	for (var i = 0; i < list.length; ++i) if (list[i].obj === state.bcAnchor) return i
+	for (var j = 0; j < list.length; ++j) if (list[j].output) return j
+	return list.length ? 0 : -1
+}
+function busComp() {
+	var i = anchorIndex()
+	return i >= 0 ? state.bcList[i] : state.bcSelected
+}
+function showBcNames(activeDevice) {
+	var i = anchorIndex()
+	var list = state.bcList
+	var names = ['', '', '']
+	if (i >= 0) {
+		names[1] = list[i].track
+		if (i > 0) names[0] = list[i - 1].track
+		if (i + 1 < list.length) names[2] = list[i + 1].track
+	}
+	var sep = [0x7F, 0x7F, 0x7F]
+	sysex(activeDevice, [0x38].concat(encodeName(names[0]), sep, encodeName(names[1]), sep, encodeName(names[2])))
+}
+// The Bus Comp encoder: step through the project's bus comps.
+function onBcEncoder(activeDevice, steps) {
+	if (!state.bcList.length) scanMixer(activeDevice)
+	var list = state.bcList
+	if (!list.length) return
+	var i = anchorIndex()
+	var next = Math.max(0, Math.min(list.length - 1, i + steps))
+	state.bcAnchor = list[next].obj
+	showBcNames(activeDevice)
+	sysex(activeDevice, [0x39].concat(encodeName(list[next].map.header)))
+	sysex(activeDevice, [0x35, ZONE_BC])
+	paintAll(activeDevice)
+}
+
+function paintAll(activeDevice) {
+	var bc = busComp()
+	setLabel(activeDevice, state.cs ? state.cs.map.label : bc ? bc.map.label : '')
+	if (!state.cs) sysex(activeDevice, [0x35, ZONE_CS])
+	if (!bc) sysex(activeDevice, [0x35, ZONE_BC])
 	paintLeds(activeDevice)
 	paintRings(activeDevice)
 }
@@ -257,10 +370,10 @@ function rescan(activeDevice) {
 // Which knob drives each parameter tag (for rings that follow changes made elsewhere).
 function knobsByTag(target) {
 	var out = {}
-	for (var k in target.map.knobs) out[da.getParameterTagByIndex(am, target.obj, target.map.knobs[k])] = Number(k)
+	for (var k in target.map.knobs) out[target.da.getParameterTagByIndex(am, target.obj, target.map.knobs[k])] = Number(k)
 	return out
 }
-function targetFor(knob) { return isBusCompKnob(knob) ? state.bc : state.cs }
+function targetFor(knob) { return isBusCompKnob(knob) ? busComp() : state.cs }
 // The ring shows where the knob points: flipped for the knobs whose parameter runs the other way.
 function paintRing(activeDevice, knob) {
 	var target = targetFor(knob)
@@ -278,27 +391,27 @@ function paintRings(activeDevice) {
 }
 
 // The first time a plug-in is found, list its parameters (index, tag, name, value), to check the maps.
-function dumpParams(obj, name) {
+function dumpParams(acc, obj, name) {
 	if (state.dumped[name]) return
 	state.dumped[name] = true
-	var n = da.getNumberOfParameters(am, obj)
+	var n = acc.getNumberOfParameters(am, obj)
 	log('parameters of "' + name + '" (' + n + '):')
 	for (var i = 0; i < n && i < 80; ++i) {
-		var tag = da.getParameterTagByIndex(am, obj, i)
-		log('  ' + i + ' tag ' + tag + ' "' + da.getParameterTitle(am, obj, tag, 32) + '" = '
-			+ da.getParameterDisplayValue(am, obj, tag) + ' ' + da.getParameterDisplayUnits(am, obj, tag)
-			+ ' (' + da.getParameterProcessValue(am, obj, tag).toFixed(3) + ')')
+		var tag = acc.getParameterTagByIndex(am, obj, i)
+		log('  ' + i + ' tag ' + tag + ' "' + acc.getParameterTitle(am, obj, tag, 32) + '" = '
+			+ acc.getParameterDisplayValue(am, obj, tag) + ' ' + acc.getParameterDisplayUnits(am, obj, tag)
+			+ ' (' + acc.getParameterProcessValue(am, obj, tag).toFixed(3) + ')')
 	}
 }
 
 function paramValue(target, index) {
-	var tag = da.getParameterTagByIndex(am, target.obj, index)
-	return da.getParameterProcessValue(am, target.obj, tag)
+	var tag = target.da.getParameterTagByIndex(am, target.obj, index)
+	return target.da.getParameterProcessValue(am, target.obj, tag)
 }
 function toggleParam(target, index) {
-	var tag = da.getParameterTagByIndex(am, target.obj, index)
-	var v = da.getParameterProcessValue(am, target.obj, tag)
-	da.setParameterProcessValue(am, target.obj, tag, v >= 0.5 ? 0 : 1)
+	var tag = target.da.getParameterTagByIndex(am, target.obj, index)
+	var v = target.da.getParameterProcessValue(am, target.obj, tag)
+	target.da.setParameterProcessValue(am, target.obj, tag, v >= 0.5 ? 0 : 1)
 }
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
@@ -313,35 +426,38 @@ function paintLeds(activeDevice) {
 		setLed(activeDevice, b, on ? 1 : 0)
 	}
 	var csIn = false, bcIn = false
+	var bc = busComp()
 	try { if (state.cs) csIn = paramValue(state.cs, state.cs.map.bypass) < 0.5 } catch (e) {}
-	try { if (state.bc) bcIn = paramValue(state.bc, state.bc.map.bypass) < 0.5 } catch (e) {}
+	try { if (bc) bcIn = paramValue(bc, bc.map.bypass) < 0.5 } catch (e) {}
 	setLed(activeDevice, B.ChannelIn, csIn ? 1 : 0)
 	setLed(activeDevice, B.BusCompIn, bcIn ? 1 : 0)
 	setLed(activeDevice, B.Fine, state.fine ? 1 : 0)
 }
 
 function onKnob(activeDevice, id, clicks) {
-	var target = isBusCompKnob(id) ? state.bc : state.cs
+	if (id === 0x15) { onBcEncoder(activeDevice, clicks); return }
+	var target = targetFor(id)
 	if (!target) return
 	var index = target.map.knobs[id]
 	if (index === undefined) return
-	var tag = da.getParameterTagByIndex(am, target.obj, index)
+	var acc = target.da
+	var tag = acc.getParameterTagByIndex(am, target.obj, index)
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
 	if (target.map.inverted.indexOf(id) >= 0) step = -step
-	var v = da.getParameterProcessValue(am, target.obj, tag) + step
+	var v = acc.getParameterProcessValue(am, target.obj, tag) + step
 	v = Math.max(0, Math.min(1, v))
-	da.setParameterProcessValue(am, target.obj, tag, v)
+	acc.setParameterProcessValue(am, target.obj, tag, v)
 	setRing(activeDevice, id, target.map.inverted.indexOf(id) >= 0 ? 1 - v : v, false)
-	var value = da.getParameterDisplayValue(am, target.obj, tag)
-	var units = da.getParameterDisplayUnits(am, target.obj, tag)
-	readout(activeDevice, target === state.bc ? ZONE_BC : ZONE_CS, da.getParameterTitle(am, target.obj, tag, 16),
+	var value = acc.getParameterDisplayValue(am, target.obj, tag)
+	var units = acc.getParameterDisplayUnits(am, target.obj, tag)
+	readout(activeDevice, isBusCompKnob(id) ? ZONE_BC : ZONE_CS, acc.getParameterTitle(am, target.obj, tag, 16),
 		value + (units ? units : ''))
 }
 
 function onButton(activeDevice, id) {
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.map.bypass); paintLeds(activeDevice); return }
-	if (id === B.BusCompIn) { if (state.bc) toggleParam(state.bc, state.bc.map.bypass); paintLeds(activeDevice); return }
+	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.map.bypass); paintLeds(activeDevice); return }
 	if (state.cs && state.cs.map.buttons[id] !== undefined) {
 		toggleParam(state.cs, state.cs.map.buttons[id])
 		paintLeds(activeDevice)
@@ -364,10 +480,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	}
 }
 
-// Parameter changes from anywhere (the plug-in's window, automation): keep the LEDs right.
-da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
-	am = activeMapping
-	var target = state.cs && objectID === state.cs.obj ? state.cs : state.bc && objectID === state.bc.obj ? state.bc : null
+// Parameter changes from anywhere (the plug-in's window, automation): keep rings and LEDs right.
+function onParameterChange(activeDevice, objectID, tag) {
+	var bc = busComp()
+	var target = state.cs && objectID === state.cs.obj ? state.cs : bc && objectID === bc.obj ? bc : null
 	if (!target) return
 	try {
 		var knob = target.knobByTag ? target.knobByTag[tag] : undefined
@@ -375,10 +491,24 @@ da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		else paintLeds(activeDevice)
 	} catch (e) {}
 }
+da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+	am = activeMapping
+	onParameterChange(activeDevice, objectID, tag)
+}
 // Objects added or removed (a plug-in inserted, removed or replaced): look again shortly.
 da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 	am = activeMapping
 	state.rescanAt = Date.now() + 300
+}
+if (daMix) {
+	daMix.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+		am = activeMapping
+		if (!state.cs || objectID !== state.cs.obj) onParameterChange(activeDevice, objectID, tag)
+	}
+	daMix.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
+		am = activeMapping
+		state.mixScanAt = Date.now() + 500
+	}
 }
 
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
@@ -397,11 +527,19 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	labelShown = null
 	log('page active')
 	state.rescanAt = Date.now() + 100
+	state.mixScanAt = Date.now() + 200
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
-	if (state.rescanAt && Date.now() >= state.rescanAt) {
+	var now = Date.now()
+	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0
 		try { rescan(activeDevice) } catch (e) { log('scan failed: ' + e) }
+	}
+	if (state.mixScanAt && now >= state.mixScanAt) {
+		state.mixScanAt = 0
+		var t0 = Date.now()
+		try { scanMixer(activeDevice) } catch (e) { log('MixConsole scan failed: ' + e) }
+		if (mixScans <= 3) log('MixConsole scan took ' + (Date.now() - t0) + ' ms')
 	}
 }

@@ -16,6 +16,11 @@
 //                   SysEx 34 <button id> <0 off / 1 on / 2 dim>   a button LED
 //                   SysEx 35 <zone>                       clear a readout zone
 //                   SysEx 36 <knob id> <hi> <lo> <dim>    a knob's LED ring: position 0..16382 (7F 7F = off)
+//                   SysEx 37 <hi> <lo>                    the 7-segment number (0..999; 7F 7F = blank)
+//                   SysEx 38 <prev> 7F 7F 7F <curr> 7F 7F 7F <next>   the Bus Comp name row (tracks with a bus comp)
+//                   SysEx 39 <header>                     show the Bus Comp scroll header (e.g. "BUS COMP 2") for 1.5 s
+// The two encoders send one step per detent (Rea-Sixty's accumulator: 3 ticks per step, reset after a 100 ms
+// pause or a change of direction): CHANNEL as notes 100 / 101, the Bus Comp encoder as SysEx 20 15 <64 + steps>.
 //                   note <id> (velocity > 0 = on)         LEDs of the note-bound buttons (Solo, Cut, Polarity)
 //
 // Byte maps (knob / button ids, LED cells, frame layouts) are Rea-Sixty's (extension/src/UC1Protocol.h).
@@ -56,6 +61,11 @@ std::atomic<bool> g_trace{false};
 // What the display shows, kept so it can be painted again in SSL 360's order (and after a reopen).
 std::mutex g_stateMx;
 std::string g_name, g_label;
+std::string g_bcNames[3];                            // the Bus Comp name row: previous, current, next
+std::string g_header;                                // the Bus Comp scroll header while it shows
+std::chrono::steady_clock::time_point g_headerUntil; // when it goes again
+int g_headerGen = 0;
+int g_sevenSeg = -1;                                 // the 7-segment number, -1 = blank
 uint8_t g_palette = 0;
 std::map<int, std::vector<unsigned char>> g_cache;   // last message per kind, replayed after a reopen
 
@@ -83,13 +93,16 @@ void sysex(std::initializer_list<unsigned char> body)
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
 // Names arrive as 3 x 7 bits per UTF-16 character; the UC1 shows Latin-1.
-std::string decodeName(const std::vector<unsigned char>& m, size_t from)
+std::string decodeName(const std::vector<unsigned char>& m, size_t from, size_t* end = nullptr)
 {
     std::string out;
-    for (size_t i = from; i + 2 < m.size() && m[i] != 0xF7 && m[i + 1] != 0xF7 && m[i + 2] != 0xF7; i += 3) {
+    size_t i = from;
+    for (; i + 2 < m.size() && m[i] != 0xF7 && m[i + 1] != 0xF7 && m[i + 2] != 0xF7; i += 3) {
+        if (m[i] == 0x7F && m[i + 1] == 0x7F && m[i + 2] == 0x7F) break;   // separator
         const unsigned c = (unsigned(m[i]) << 14) | (unsigned(m[i + 1]) << 7) | m[i + 2];
         out.push_back(c < 256 ? char(c) : '?');
     }
+    if (end) *end = i;
     return out;
 }
 
@@ -97,17 +110,80 @@ void send(std::vector<uint8_t> f) { if (g_open) g_dev.send(std::move(f)); }
 
 // The central display, in SSL 360's order (Rea-Sixty UC1Surface::refresh): layout mode, model field, the large
 // (Bus Comp) name row, the small (Channel Strip) name row, the track colour.
+std::vector<uint8_t> largeRow()
+{
+    std::lock_guard<std::mutex> lk(g_stateMx);
+    auto cut = [](std::string n) { if (n.size() > 12) n.resize(12); return n; };   // the glass shows 12
+    return ::uc1::buildTrackNameTripleLarge(cut(g_bcNames[0]), cut(g_bcNames[1]), cut(g_bcNames[2]));
+}
+// While the Bus Comp scroll header shows, the model field gives way to it (SSL 360: layout 02 + header).
 void paintCentre()
 {
-    std::string name, label;
+    std::string name, label, header;
     uint8_t palette;
-    { std::lock_guard<std::mutex> lk(g_stateMx); name = g_name; label = g_label; palette = g_palette; }
+    bool headerOn;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMx);
+        name = g_name; label = g_label; palette = g_palette; header = g_header;
+        headerOn = !header.empty() && std::chrono::steady_clock::now() < g_headerUntil;
+    }
     if (name.size() > 12) name.resize(12);
-    send(::uc1::buildColourBarEnable(!label.empty()));
-    send(::uc1::buildCentralLabel(label));
-    send(::uc1::buildTrackNameTripleLarge("", "", ""));
+    if (headerOn) {
+        send(::uc1::buildCentralMode(::uc1::CentralMode::Main, 0x02));
+        send(::uc1::buildLcdHeader(header));
+    } else {
+        send(::uc1::buildColourBarEnable(!label.empty()));
+        send(::uc1::buildCentralLabel(label));
+    }
+    send(largeRow());
     send(::uc1::buildTrackNameTripleSmall("", name, ""));
     send(::uc1::buildFocusedColour(palette));
+}
+
+void showHeader(const std::string& text)
+{
+    int gen;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMx);
+        g_header = text;
+        g_headerUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+        gen = ++g_headerGen;
+    }
+    paintCentre();
+    std::thread([gen] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1550));
+        {
+            std::lock_guard<std::mutex> lk(g_stateMx);
+            if (gen != g_headerGen) return;   // turned again: that one reverts
+            g_header.clear();
+        }
+        send(::uc1::buildCentralMode(::uc1::CentralMode::Main, 0x00));
+        paintCentre();
+    }).detach();
+}
+
+// The 7-segment display: three digits (cells 0x10 ones, 0x08 tens, 0x00 hundreds; segments a..g), written
+// like Rea-Sixty's buildSevenSeg but with leading zeros blanked, and all blank for -1.
+void paintSevenSeg()
+{
+    int value;
+    { std::lock_guard<std::mutex> lk(g_stateMx); value = g_sevenSeg; }
+    static const uint8_t kDigit[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+    const int v = std::clamp(value, -1, 999);
+    const uint8_t bases[3] = {0x10, 0x08, 0x00};
+    for (int d = 0; d < 3; ++d) {
+        const int place = d == 0 ? 1 : d == 1 ? 10 : 100;
+        const bool blank = v < 0 || (d > 0 && v < place);
+        const uint8_t segs = blank ? 0 : kDigit[(v / place) % 10];
+        for (int seg = 0; seg < 7; ++seg) {
+            auto f = ::uc1::buildLedWrite(0x01, uint8_t(bases[d] + seg), (segs >> seg) & 1);
+            f[5] = 0x00;   // the 7-segment address space
+            uint8_t sum = 0;
+            for (size_t i = 1; i + 1 < f.size(); ++i) sum = uint8_t(sum + f[i]);
+            f.back() = sum;
+            send(std::move(f));
+        }
+    }
 }
 
 // A button LED (Rea-Sixty UC1Surface::setButtonLed_): the EQ and dynamics buttons need a selection frame
@@ -380,7 +456,7 @@ void onSysex(const std::vector<unsigned char>& m)
             // SSL 360's readout burst: precursor, the large name row, the text.
             const std::string text = decodeName(m, 6);
             send(::uc1::buildReadoutPrecursor(0x00));
-            send(::uc1::buildTrackNameTripleLarge("", "", ""));
+            send(largeRow());
             send(::uc1::buildDisplayText(m[5], text, text.size()));
         }
         break;
@@ -390,8 +466,31 @@ void onSysex(const std::vector<unsigned char>& m)
         if (m.size() >= 10) {
             const int v = (m[6] << 7) | m[7];
             pushRing(m[5], v == 0x3FFF ? -1.0 : v / 16382.0, m[8] == 1);
+            // Some rings share cells with the 7-segment digits (Rea-Sixty: the 7-segment has to be written last).
+            if (m[5] == ::uc1::knob::kBCRelease || m[5] == ::uc1::knob::kBCMix || m[5] == ::uc1::knob::kCSFaderLevel)
+                paintSevenSeg();
         }
         break;
+    case 0x37:
+        if (m.size() >= 8) {
+            const int v = (m[5] << 7) | m[6];
+            { std::lock_guard<std::mutex> lk(g_stateMx); g_sevenSeg = v == 0x3FFF ? -1 : v; }
+            paintSevenSeg();
+        }
+        break;
+    case 0x38: {
+        size_t at = 5;
+        std::string names[3];
+        for (int k = 0; k < 3; ++k) {
+            size_t end = at;
+            names[k] = decodeName(m, at, &end);
+            at = end + 3;   // past the separator
+        }
+        { std::lock_guard<std::mutex> lk(g_stateMx); for (int k = 0; k < 3; ++k) g_bcNames[k] = names[k]; }
+        send(largeRow());
+        break;
+    }
+    case 0x39: showHeader(decodeName(m, 5)); break;
     default: break;
     }
 }
@@ -405,7 +504,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
@@ -414,13 +513,40 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (status == 0x90 || status == 0x80) setLed(m[1], (status == 0x90 && m[2] > 0) ? 1 : 0);
 }
 
+// Rea-Sixty's encoder accumulator (UC1Surface stepFromAccumulator): the CHANNEL and Bus Comp encoders send 3 or 4
+// ticks per detent; 3 ticks make a step, the rest is dropped after a 100 ms pause or a change of direction.
+struct Accumulator {
+    int acc = 0;
+    std::chrono::steady_clock::time_point last{};
+    int step(int delta)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (last.time_since_epoch().count() != 0 && now - last > std::chrono::milliseconds(100)) acc = 0;
+        last = now;
+        if ((delta > 0 && acc < 0) || (delta < 0 && acc > 0)) acc = 0;
+        acc += delta;
+        const int s = acc / 3;
+        acc -= s * 3;
+        return s;
+    }
+};
+Accumulator g_channelAcc, g_bcAcc;
+
 void onKnob(const ::uc1::KnobEvent& ev)
 {
     if (g_trace) std::printf("[UC1] knob 0x%02X %+d\n", ev.id, ev.delta);
     if (ev.id == ::uc1::knob::kChannelEncoder) {
-        const uint8_t n = ev.delta > 0 ? kNoteNextTrack : kNotePrevTrack;
-        note(n, true);
-        note(n, false);
+        const int steps = g_channelAcc.step(ev.delta);
+        for (int k = 0; k < std::abs(steps); ++k) {
+            const uint8_t n = steps > 0 ? kNoteNextTrack : kNotePrevTrack;
+            note(n, true);
+            note(n, false);
+        }
+        return;
+    }
+    if (ev.id == ::uc1::knob::kBcEncoder) {
+        const int steps = g_bcAcc.step(ev.delta);
+        if (steps != 0) sysex({0x20, ev.id, uint8_t(std::clamp(64 + steps, 1, 127))});
         return;
     }
     const int d = std::clamp(64 + int(ev.delta), 1, 127);
@@ -455,6 +581,7 @@ bool openDevice()
     send(::uc1::buildDisplayInvalidate(::uc1::zone::kChannelStripReadout));
     send(::uc1::buildDisplayInvalidate(::uc1::zone::kBusCompReadout));
     paintCentre();
+    paintSevenSeg();
     return true;
 }
 
