@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.6.3-dev'
+var SCRIPT_VERSION = '0.6.4-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -411,15 +411,21 @@ function cubaseStrip(objects) {
 		knob(bands[b][2], 'band ' + n + ' freq', eq, eqList, [bx, RX.freq], null, on)
 		if (bands[b][3] !== null) knob(bands[b][3], 'band ' + n + ' Q', eq, eqList, [bx, RX.q], null, on)
 	}
-	knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
-	// The Vintage Compressor has no threshold: its Input Gain drives it into compression instead.
-	if (!t.knobs[K.CompThreshold] && comp) {
-		missing.pop()
-		knob(K.CompThreshold, 'comp threshold (input gain)', comp, compList, [/input\s*gain/i])
+	// Each compressor type by the controls it shows in the strip (exact parameter names, from the log). The Tube and
+	// Vintage Compressors have no threshold and no ratio on their strip panel: Input Gain drives them into
+	// compression (on the Threshold knob), Output Gain makes up (on the Ratio knob).
+	var layout = comp ? COMP_LAYOUTS[info(da, comp).title] : null
+	function exact(name) { return new RegExp('^' + name + '$', 'i') }
+	if (layout) {
+		knob(K.CompThreshold, 'comp threshold', comp, compList, [exact(layout.thresh)])
+		knob(K.CompRatio, 'comp ratio', comp, compList, [exact(layout.ratio)])
+		knob(K.CompRelease, 'comp release', comp, compList, [exact(layout.release)])
+	} else {
+		knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
+		knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio], [/high/i])
+		// "Auto Release" (a switch) must not be taken for the release time.
+		knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
 	}
-	knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio])
-	// "Auto Release" (a switch) must not be taken for the release time.
-	knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
 	knob(K.GateThreshold, 'gate threshold', gate, gateList, [RX.thresh])
 	knob(K.GateRange, 'gate range', gate, gateList, [RX.range])
 	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release], [RX.auto])
@@ -427,15 +433,15 @@ function cubaseStrip(objects) {
 	// The UC1 has no attack knobs: the F.ATT keys switch their section's Release knob between release and attack
 	// (lit = attack). The choice stays when you change tracks.
 	t.flip = {}
-	function attackFlip(key, mode, releaseKnob, obj, list) {
-		var p = obj ? findParam(list, [RX.attack], [RX.auto]) : null
+	function attackFlip(key, mode, releaseKnob, obj, list, attackName) {
+		var p = obj ? findParam(list, attackName ? [exact(attackName)] : [RX.attack], [RX.auto]) : null
 		if (!p || !t.knobs[releaseKnob]) return
 		t.flip[key] = { mode: mode, knob: releaseKnob, release: t.knobs[releaseKnob],
 			attack: { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16) } }
 		found.push(mode + ' attack="' + p.title + '"')
 		if (state.attack[mode]) t.knobs[releaseKnob] = t.flip[key].attack
 	}
-	attackFlip(B.FastAttComp, 'comp', K.CompRelease, comp, compList)
+	attackFlip(B.FastAttComp, 'comp', K.CompRelease, comp, compList, layout ? layout.attack : null)
 	attackFlip(B.FastAttGate, 'gate', K.GateRelease, gate, gateList)
 	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
 	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
@@ -456,6 +462,11 @@ function cubaseStrip(objects) {
 // set a host value by itself, so the on switches of the selected track's Gate and Compressor are bound to CC 40 /
 // 41 (channel 1), and the script asks the bridge to send that CC (SysEx 3A <cc> 127). Turning a Gate or Dyn knob
 // whose module is missing or off switches it on; the knobs work once the track has been looked at again.
+var COMP_LAYOUTS = {
+	'Standard Compressor': { thresh: 'Threshold', ratio: 'Ratio', release: 'Release', attack: 'Attack' },
+	'Tube Compressor': { thresh: 'Input Gain', ratio: 'Output Gain', release: 'Release Time', attack: 'Attack Time' },
+	'VintageCompressor': { thresh: 'Input Gain', ratio: 'Output Gain', release: 'Release Time', attack: 'Attack Time' }
+}
 var GATE_KNOBS = [K.GateThreshold, K.GateRange, K.GateRelease, K.GateHold]
 var COMP_KNOBS = [K.CompThreshold, K.CompRatio, K.CompRelease]
 var CC_GATE_ON = 40, CC_COMP_ON = 41
