@@ -28,6 +28,7 @@
 #include "UF1Device.h"
 #include "UF1Protocol.h"
 #include "Uf1Pacer.h"
+#include "ScriptLog.h"
 
 namespace cs {
 namespace {
@@ -617,6 +618,7 @@ void showStripNumber()
 void onSysex(const std::vector<unsigned char>& m)
 {
     if (!isOurSysex(m)) return;
+    if (scriptLogSysex(m.data(), m.size())) return;
     if (auto n = parseName(m)) {
         if (n->strip != 0) return;
         std::string t(n->text.begin(), n->text.end());

@@ -11,6 +11,29 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
+// Log lines also go to the bridge (SysEx 7E <source>), which writes them to cubase\logs\scripts.log, so they can
+// be read without Cubase's script console. They are queued and sent from the idle callback (sending needs the
+// active device).
+var LOG_SOURCE = 1
+var logQueue = []
+function out(text) {
+	console.log(text)
+	if (logQueue.length < 1000) logQueue.push(String(text))
+}
+// At most 20 lines per idle tick (~10 a second), so a long parameter list does not arrive as one big burst.
+function flushLog(activeDevice) {
+	for (var sent = 0; logQueue.length && sent < 20; ++sent) {
+		var t = logQueue.shift()
+		var body = [0xF0, 0x7D, 0x52, 0x36, 0x7E, LOG_SOURCE]
+		for (var n = 0; n < t.length && n < 400; ++n) {
+			var c = t.charCodeAt(n)
+			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		body.push(0xF7)
+		midiOutput.sendMidi(activeDevice, body)
+	}
+}
+
 // SysEx constants live at the top: the name/colour callbacks fire while the
 // mapping below is still being built, before later `var` lines have run.
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
@@ -23,9 +46,9 @@ var MAX_NAME_BYTES = 32
 var DEBUG = false
 var SCRIPT_VERSION = '0.11.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
-	if (DEBUG) console.log('[CubaseSixty] ' + text)
+	if (DEBUG) out('[CubaseSixty] ' + text)
 }
-console.log('[CubaseSixty] script loaded, version ' + SCRIPT_VERSION)
+out('[CubaseSixty] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF8', 'Riegus')
 
@@ -181,8 +204,8 @@ for (var i = 0; i < STRIPS; ++i) {
 			meterSide('meterL', ch.mValue.getVUChannelMeterByChannelIndex(0), 80 + index)
 			meterSide('meterR', ch.mValue.getVUChannelMeterByChannelIndex(1), 88 + index)
 		} catch (e) {
-			if (index === 0) console.log('[CubaseSixty] stereo meters not available (' + e + '), using one meter per strip')
-			try { meterSide('meter', ch.mValue.mVUMeter, 80 + index) } catch (e2) { if (index === 0) console.log('[CubaseSixty] meters not available: ' + e2) }
+			if (index === 0) out('[CubaseSixty] stereo meters not available (' + e + '), using one meter per strip')
+			try { meterSide('meter', ch.mValue.mVUMeter, 80 + index) } catch (e2) { if (index === 0) out('[CubaseSixty] meters not available: ' + e2) }
 		}
 	})(i, channel)
 	// V-pot push = open the channel editor for the track.
@@ -364,7 +387,7 @@ function onRecTitle(activeDevice, slot, title) {
 	if (recTitles[slot] === title) return
 	if (!recTitles[slot] && title) {
 		recTitleCount++
-		if (recTitleCount === 1 || recTitleCount % 16 === 0) console.log('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
+		if (recTitleCount === 1 || recTitleCount % 16 === 0) out('[CubaseSixty] recordable tracks seen: ' + recTitleCount + ' (latest: ' + title + ')')
 	}
 	recTitles[slot] = title
 	for (var i = 0; i < STRIPS; ++i) updateArmable(activeDevice, i)
@@ -390,7 +413,7 @@ function selectedIsVisible() {
 
 function seekCheck(activeDevice) {
 	if (!seek.active || !seek.selectedTitle) return
-	if (selectedIsVisible()) { seek.active = false; console.log('[CubaseSixty] banked to the selected track (' + seek.selectedTitle + ')'); return }
+	if (selectedIsVisible()) { seek.active = false; out('[CubaseSixty] banked to the selected track (' + seek.selectedTitle + ')'); return }
 	// Wait until the current bank has reported all its names before stepping again, or the bank that
 	// holds the selected track could be skipped.
 	// Cubase answers a bank key first by re-sending the SAME eight names, and only then with the new
@@ -401,11 +424,11 @@ function seekCheck(activeDevice) {
 	} else {
 		for (var c = 0; c < STRIPS; ++c) if (stripTitles[c] === seek.snapshot[c]) return
 	}
-	if (seek.steps >= SEEK_MAX_STEPS) { seek.active = false; console.log('[CubaseSixty] selected track not found within ' + SEEK_MAX_STEPS + ' banks'); return }
+	if (seek.steps >= SEEK_MAX_STEPS) { seek.active = false; out('[CubaseSixty] selected track not found within ' + SEEK_MAX_STEPS + ' banks'); return }
 	seek.steps++
 	seek.titlesSinceStep = 0
 	seek.snapshot = stripTitles.slice()
-	console.log('[CubaseSixty] seeking the selected track (' + seek.selectedTitle + '): next bank, step ' + seek.steps)
+	out('[CubaseSixty] seeking the selected track (' + seek.selectedTitle + '): next bank, step ' + seek.steps)
 	// Setting a hidden control from the script did not move the bank, so ask the bridge to send a
 	// bank-right key press (SysEx 0B), exactly as if the key had been pressed.
 	seek.ownPresses++
@@ -428,7 +451,7 @@ page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (active
 function stopSeekOnPress(button) {
 	button.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 		if (value > 0 && seek.ownPresses > 0) { seek.ownPresses--; return }   // our own step, sent by the bridge
-		if (seek.active && value > 0) { seek.active = false; console.log('[CubaseSixty] bank key pressed: start-up search stopped') }
+		if (seek.active && value > 0) { seek.active = false; out('[CubaseSixty] bank key pressed: start-up search stopped') }
 	}
 }
 stopSeekOnPress(bankLeft)
@@ -559,7 +582,7 @@ function meterToMidi(value) {
 		// Only a real change may bank: Cubase re-sends the same values after every bank step.
 		if (pick === selectedIndex) return
 		selectedIndex = pick
-		if (FOLLOW_OBSERVE_ONLY) { console.log('[CubaseSixty] observe: selected #' + (pick + 1) + ' [' + allTitles[pick] + '], bank starts at #' + (currentOffset() + 1)); return }
+		if (FOLLOW_OBSERVE_ONLY) { out('[CubaseSixty] observe: selected #' + (pick + 1) + ' [' + allTitles[pick] + '], bank starts at #' + (currentOffset() + 1)); return }
 		followTries = 0
 		if (pick < 0) { dueMs = 0; return }
 		dueMs = nowMs() + 300   // let Cubase move the bank first
@@ -611,22 +634,22 @@ function meterToMidi(value) {
 		if (offset < 0) { followTries = 0; return }
 		var delta = selectedIndex - offset
 		if (delta >= 0 && delta < STRIPS) {   // on a strip: done
-			if (followTries > 0) console.log('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' is on strip ' + (delta + 1))
-			if (startupUntil > 0) { startupUntil = -1; startupFreeze(activeDevice, false); console.log('[CubaseSixty] follow: start-up done') }
+			if (followTries > 0) out('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' is on strip ' + (delta + 1))
+			if (startupUntil > 0) { startupUntil = -1; startupFreeze(activeDevice, false); out('[CubaseSixty] follow: start-up done') }
 			followTries = 0
 			return
 		}
-		if (followTries >= 12) { console.log('[CubaseSixty] follow: gave up'); followTries = 0; return }
+		if (followTries >= 12) { out('[CubaseSixty] follow: gave up'); followTries = 0; return }
 		var now = nowMs()
 		if (startupUntil > 0) startupFreeze(activeDevice, true)
 		var jump = followTries === 0 || offset === lastTryOffset
 		++followTries
 		lastTryOffset = offset
-		console.log('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' [' + allTitles[selectedIndex] + '], bank starts at #' + (offset + 1) + ', try ' + followTries)
+		out('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' [' + allTitles[selectedIndex] + '], bank starts at #' + (offset + 1) + ', try ' + followTries)
 		if (jump) {
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
-			console.log('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps')
+			out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps')
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x10, banks, 0xF7]))
 			dueMs = now + banks * 100 + 1000   // the bridge spaces the presses 100 ms apart and shows the end 400 ms later
 			return
@@ -635,11 +658,12 @@ function meterToMidi(value) {
 		// a jump right after loading lost most of its presses.
 		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
 		steps = Math.max(1, Math.min(steps, 64))
-		console.log('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right'))
+		out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right'))
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
 		dueMs = now + steps * 100 + 800
 	}
 	deviceDriver.mOnIdle = function (activeDevice) {
+		flushLog(activeDevice)
 		var now = nowMs()
 		if (now <= 0) return
 		requestListsIfNeeded(activeDevice, now)
@@ -648,7 +672,7 @@ function meterToMidi(value) {
 		if (startupUntil === 0) { startupUntil = now + 30000; nextStartupCheck = now + 2500 }
 		if (dueMs > 0 && now >= dueMs) { dueMs = 0; follow(activeDevice); return }
 		if (startupUntil > 0) {
-			if (now > startupUntil) { startupUntil = -1; startupFreeze(activeDevice, false); console.log('[CubaseSixty] follow: start-up checks ended'); return }
+			if (now > startupUntil) { startupUntil = -1; startupFreeze(activeDevice, false); out('[CubaseSixty] follow: start-up checks ended'); return }
 			if (now >= nextStartupCheck && dueMs === 0) {
 				nextStartupCheck = now + 1000
 				followTries = 0
@@ -707,7 +731,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
 	if (m[4] === 0x18 && m.length >= 8) {
-		if (++listNamesSeen === 1) console.log('[CubaseSixty] channel lists from the helper script arriving')
+		if (++listNamesSeen === 1) out('[CubaseSixty] channel lists from the helper script arriving')
 		onAllTitle(activeDevice, (m[5] << 7) | m[6], decodeName(m, 7))
 	} else if (m[4] === 0x19 && m.length >= 7) {
 		++listNamesSeen

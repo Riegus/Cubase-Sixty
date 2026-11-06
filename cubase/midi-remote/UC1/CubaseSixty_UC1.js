@@ -21,9 +21,32 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.3.4-dev'
-console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
-function log(text) { console.log('[CubaseSixty UC1] ' + text) }
+// Log lines also go to the bridge (SysEx 7E <source>), which writes them to cubase\logs\scripts.log, so they can
+// be read without Cubase's script console. They are queued and sent from the idle callback (sending needs the
+// active device).
+var LOG_SOURCE = 3
+var logQueue = []
+function out(text) {
+	console.log(text)
+	if (logQueue.length < 1000) logQueue.push(String(text))
+}
+// At most 20 lines per idle tick (~10 a second), so a long parameter list does not arrive as one big burst.
+function flushLog(activeDevice) {
+	for (var sent = 0; logQueue.length && sent < 20; ++sent) {
+		var t = logQueue.shift()
+		var body = [0xF0, 0x7D, 0x52, 0x36, 0x7E, LOG_SOURCE]
+		for (var n = 0; n < t.length && n < 400; ++n) {
+			var c = t.charCodeAt(n)
+			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		body.push(0xF7)
+		midiOutput.sendMidi(activeDevice, body)
+	}
+}
+
+var SCRIPT_VERSION = '0.4.4-dev'
+out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
+function log(text) { out('[CubaseSixty UC1] ' + text) }
 
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 
@@ -202,7 +225,26 @@ try { daMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } 
 
 // The mapping Direct Access calls need. Kept from the page's callbacks (the SysEx handler gets none).
 var am = null
-// A target is a found plug-in: { da (the Direct Access it was found through), obj, map, name, track, knobByTag }.
+// A target is what one section of the UC1 drives: { da (the Direct Access it was found through), label, header,
+// knobs: knob id -> ref, buttons: button id -> ref, bypass: ref (the IN key; lit while the ref reads "on"),
+// objs: the object ids involved, knobByKey: "obj:tag" -> knob id }. A ref is one parameter:
+// { obj, tag, invert (true: flipped, for knobs that run the other way / LEDs lit at 0), enable (a ref switched on
+// when the knob is turned, e.g. an EQ band's on switch) }. SSL plug-ins: built from the maps above; Cubase's own
+// channel strip: built from the parameters' names (cubaseStrip below).
+function ref(acc, obj, tag, invert) { return { obj: obj, tag: tag, invert: !!invert } }
+function makeTarget(acc, obj, map, name) {
+	var t = { da: acc, obj: obj, map: map, name: name, label: map.label, header: map.header, knobs: {}, buttons: {}, bypass: null, objs: {} }
+	t.objs[obj] = true
+	for (var k in map.knobs) t.knobs[k] = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.knobs[k]), map.inverted.indexOf(Number(k)) >= 0)
+	for (var b in map.buttons) t.buttons[b] = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.buttons[b]), false)
+	if (map.bypass >= 0) t.bypass = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.bypass), true)
+	indexKnobs(t)
+	return t
+}
+function indexKnobs(t) {
+	t.knobByKey = {}
+	for (var k in t.knobs) t.knobByKey[t.knobs[k].obj + ':' + t.knobs[k].tag] = Number(k)
+}
 var state = {
 	cs: null,          // the channel strip plug-in on the selected track
 	bcSelected: null,  // the bus comp on the selected track (used when the MixConsole cannot be searched)
@@ -211,6 +253,7 @@ var state = {
 	rescanAt: 0,       // when to look at the selected track's plug-ins again (0 = not pending)
 	mixScanAt: 0,      // when to search the MixConsole for bus comps again (0 = not pending)
 	fine: false,
+	attack: { comp: false, gate: false },   // Cubase strip: the Release knob is on attack (F.ATT)
 	dumped: {}         // plug-in names whose parameters were already listed in the log
 }
 
@@ -219,7 +262,10 @@ var state = {
 // (the MixConsole's output channels may sit under an "Outputs" object). Each object is listed once.
 var SKIP_TYPES = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1,
 	Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
-function walk(acc, base, maxDepth, limit) {
+// Inside the selected track the channel strip and input filter are wanted, so only these are skipped there.
+var SKIP_TYPES_TRACK = { QuickControls: 1, Panner: 1, Modulators: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+function walk(acc, base, maxDepth, limit, skip) {
+	skip = skip || SKIP_TYPES
 	var out = []
 	var seen = {}
 	function rec(id, depth, parent) {
@@ -230,7 +276,7 @@ function walk(acc, base, maxDepth, limit) {
 		out.push({ id: id, depth: depth, parent: parent, type: type })
 		var me = out.length - 1
 		var inChannel = parent >= 0 && /Channel$/.test(out[parent].type)
-		if (depth >= maxDepth || (inChannel && SKIP_TYPES[type])) return
+		if (depth >= maxDepth || (inChannel && skip[type])) return
 		var n = 0
 		try { n = acc.getNumberOfChildObjects(am, id) } catch (e) { return }
 		for (var i = 0; i < n && i < 512; ++i) rec(acc.getChildObjectID(am, id, i), depth + 1, me)
@@ -256,23 +302,142 @@ function rescan(activeDevice) {
 	state.bcSelected = null
 	var base
 	try { base = da.getBaseObjectID(am) } catch (e) { log('getBaseObjectID failed: ' + e); return }
-	var objects = walk(da, base, 4, 400)
+	var objects = walk(da, base, 4, 400, SKIP_TYPES_TRACK)
 	++scans
 	for (var i = 0; i < objects.length; ++i) {
 		var id = objects[i].id
 		var o = info(da, id)
 		if (o.params < 4 || !o.title) continue
 		var bc = findMap(BUS_COMPS, o.title)
-		if (bc && !state.bcSelected) { state.bcSelected = { da: da, obj: id, map: bc, name: o.title }; dumpParams(da, id, o.title); continue }
+		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); dumpParams(da, id, o.title); continue }
 		var cs = findMap(CHANNEL_STRIPS, o.title)
-		if (cs && cs.label && !state.cs) { state.cs = { da: da, obj: id, map: cs, name: o.title }; dumpParams(da, id, o.title) }
+		if (cs && cs.label && !state.cs) { state.cs = makeTarget(da, id, cs, o.title); dumpParams(da, id, o.title) }
 	}
+	// No SSL channel strip: Cubase's own (input filter, EQ, the strip's gate and compressor).
+	if (!state.cs) state.cs = cubaseStrip(objects)
 	log('selected track: channel strip ' + (state.cs ? '"' + state.cs.name + '"' : 'none')
 		+ ', bus comp ' + (state.bcSelected ? '"' + state.bcSelected.name + '" #' + state.bcSelected.obj : 'none'))
-	if (state.cs) state.cs.knobByTag = knobsByTag(state.cs)
-	if (state.bcSelected) state.bcSelected.knobByTag = knobsByTag(state.bcSelected)
 	showNumber(activeDevice, base)
 	paintAll(activeDevice)
+}
+
+// ---------------------------------------------------------------------------
+// Cubase's own channel strip, for tracks without an SSL channel strip: the input filter (gain, low / high cut), the
+// channel EQ (LF = band 1, LMF = 2, HMF = 3, HF = 4) and the strip's gate and compressor modules (when loaded).
+// Their parameters are found by name; the first time each is seen its parameter list goes to the log.
+// ---------------------------------------------------------------------------
+function paramList(obj) {
+	var out = []
+	var n = 0
+	try { n = da.getNumberOfParameters(am, obj) } catch (e) {}
+	for (var i = 0; i < n && i < 200; ++i) {
+		var tag = da.getParameterTagByIndex(am, obj, i)
+		out.push({ tag: tag, title: da.getParameterTitle(am, obj, tag, 40) })
+	}
+	return out
+}
+// The first parameter whose name matches every pattern (and none of the excluded ones).
+function findParam(list, patterns, exclude) {
+	for (var i = 0; i < list.length; ++i) {
+		var ok = true
+		for (var p = 0; p < patterns.length && ok; ++p) if (!patterns[p].test(list[i].title)) ok = false
+		for (var x = 0; exclude && x < exclude.length && ok; ++x) if (exclude[x].test(list[i].title)) ok = false
+		if (ok) return list[i]
+	}
+	return null
+}
+function band(n) { return new RegExp('(^|\\D)' + n + '(\\D|$)') }
+var RX = {
+	gain: /gain/i, freq: /freq/i, q: /(^|\W)q(\W|$)|quality/i, on: /(^|\W)on(\W|$)|enable|active/i,
+	bypass: /bypass/i, lowCut: /low\s*cut|lo\s*cut|(^|\W)lc(\W|$)|high\s*pass|(^|\W)hp/i,
+	highCut: /high\s*cut|hi\s*cut|(^|\W)hc(\W|$)|low\s*pass|(^|\W)lp/i,
+	thresh: /thresh/i, ratio: /ratio/i, release: /release/i, range: /range/i, hold: /(^|\W)hold/i, attack: /attack/i, digit: /\d/, auto: /auto|mode/i
+}
+var stripLogs = 0
+function cubaseStrip(objects) {
+	var inputFilter = null, eq = null, gate = null, comp = null
+	for (var i = 0; i < objects.length; ++i) {
+		var o = objects[i]
+		if (o.type === 'InputFilter') inputFilter = o.id
+		else if (o.type === 'EQ') eq = o.id
+		else if (o.type !== 'Slot' && o.parent >= 0 && objects[o.parent].type === 'Slot') {
+			// A strip module sits in a slot under the track's "Strip"; insert plug-ins sit in slots under "Inserts".
+			var folder = objects[o.parent].parent
+			if (folder < 0 || objects[folder].type !== 'Strips') continue
+			var title = info(da, o.id).title
+			if (/gate/i.test(title) && !gate) gate = o.id
+			else if (/comp/i.test(title) && !comp) comp = o.id
+		}
+	}
+	if (!inputFilter && !eq && !gate && !comp) return null
+	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', knobs: {}, buttons: {}, bypass: null, objs: {} }
+	var found = [], missing = []
+	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
+		var p = obj ? findParam(list, patterns, exclude) : null
+		if (!p) { missing.push(name); return }
+		t.knobs[id] = { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16), enable: enable, offAt: offAt }
+		t.objs[obj] = true
+		found.push(name + '="' + p.title + '"')
+	}
+	function sw(obj, list, patterns, exclude) {
+		var p = obj ? findParam(list, patterns, exclude) : null
+		return p ? { obj: obj, tag: p.tag, invert: false, title: p.title } : null
+	}
+	var inList = inputFilter ? paramList(inputFilter) : []
+	var eqList = eq ? paramList(eq) : []
+	var gateList = gate ? paramList(gate) : []
+	var compList = comp ? paramList(comp) : []
+	if (inputFilter) dumpParams(da, inputFilter, 'Cubase input filter')
+	if (eq) dumpParams(da, eq, 'Cubase channel EQ')
+	if (gate) dumpParams(da, gate, 'Cubase strip gate: ' + info(da, gate).title)
+	if (comp) dumpParams(da, comp, 'Cubase strip compressor: ' + info(da, comp).title)
+
+	knob(K.InputTrim, 'trim', inputFilter, inList, [RX.gain])
+	var lcOn = sw(inputFilter, inList, [RX.lowCut, RX.on]), hcOn = sw(inputFilter, inList, [RX.highCut, RX.on])
+	// The cut filters switch off at the end of their range, as on an SSL strip (low cut fully left, high cut fully right).
+	knob(K.HighPass, 'low cut', inputFilter, inList, [RX.lowCut, RX.freq], null, lcOn, 0)
+	knob(K.LowPass, 'high cut', inputFilter, inList, [RX.highCut, RX.freq], null, hcOn, 1)
+	var bands = [[1, K.LfGain, K.LfFreq, null], [2, K.LmfGain, K.LmfFreq, K.LmfQ], [3, K.HmfGain, K.HmfFreq, K.HmfQ], [4, K.HfGain, K.HfFreq, null]]
+	for (var b = 0; b < bands.length; ++b) {
+		var n = bands[b][0], bx = band(n)
+		var on = sw(eq, eqList, [bx, RX.on])
+		knob(bands[b][1], 'band ' + n + ' gain', eq, eqList, [bx, RX.gain], null, on)
+		knob(bands[b][2], 'band ' + n + ' freq', eq, eqList, [bx, RX.freq], null, on)
+		if (bands[b][3] !== null) knob(bands[b][3], 'band ' + n + ' Q', eq, eqList, [bx, RX.q], null, on)
+	}
+	knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
+	knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio])
+	// "Auto Release" (a switch) must not be taken for the release time.
+	knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
+	knob(K.GateThreshold, 'gate threshold', gate, gateList, [RX.thresh])
+	knob(K.GateRange, 'gate range', gate, gateList, [RX.range])
+	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release], [RX.auto])
+	knob(K.GateHold, 'gate hold', gate, gateList, [RX.hold], [RX.thresh])
+	// The UC1 has no attack knobs: the F.ATT keys switch their section's Release knob between release and attack
+	// (lit = attack). The choice stays when you change tracks.
+	t.flip = {}
+	function attackFlip(key, mode, releaseKnob, obj, list) {
+		var p = obj ? findParam(list, [RX.attack], [RX.auto]) : null
+		if (!p || !t.knobs[releaseKnob]) return
+		t.flip[key] = { mode: mode, knob: releaseKnob, release: t.knobs[releaseKnob],
+			attack: { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16) } }
+		found.push(mode + ' attack="' + p.title + '"')
+		if (state.attack[mode]) t.knobs[releaseKnob] = t.flip[key].attack
+	}
+	attackFlip(B.FastAttComp, 'comp', K.CompRelease, comp, compList)
+	attackFlip(B.FastAttGate, 'gate', K.GateRelease, gate, gateList)
+	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
+	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
+	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
+	var compBypass = sw(comp, compList, [RX.bypass])
+	if (compBypass) { compBypass.invert = true; t.buttons[B.DynIn] = compBypass; t.objs[comp] = true }
+	if (++stripLogs <= 5) {
+		log('Cubase strip:' + (missing.length ? ' not found: ' + missing.join(', ') : ' everything found')
+			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none'))
+		for (var f = 0; f < found.length; ++f) log('Cubase strip:   ' + found[f])
+	}
+	indexKnobs(t)
+	return t
 }
 
 // The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
@@ -324,12 +489,16 @@ function scanMixer(activeDevice) {
 		}
 		var dup = false
 		for (var d = 0; d < list.length; ++d) if (list[d].obj === o.id) dup = true
-		if (!dup) list.push({ da: daMix, obj: o.id, map: map, name: inf.title, track: track, output: output })
+		if (!dup) {
+			var t = makeTarget(daMix, o.id, map, inf.title)
+			t.track = track
+			t.output = output
+			list.push(t)
+		}
 	}
 	if (verbose || list.length !== state.bcList.length)
 		log('MixConsole: ' + objects.length + ' objects, ' + list.length + ' bus comps'
 			+ (list.length ? ': ' + list.map(function (b) { return '"' + b.track + '" #' + b.obj }).join(', ') : ''))
-	for (var k = 0; k < list.length; ++k) list[k].knobByTag = knobsByTag(list[k])
 	state.bcList = list
 	showBcNames(activeDevice)
 	paintAll(activeDevice)
@@ -370,34 +539,28 @@ function onBcEncoder(activeDevice, steps) {
 	var next = Math.max(0, Math.min(list.length - 1, i + steps))
 	state.bcAnchor = list[next].obj
 	showBcNames(activeDevice)
-	sysex(activeDevice, [0x39].concat(encodeName(list[next].map.header)))
+	sysex(activeDevice, [0x39].concat(encodeName(list[next].header)))
 	sysex(activeDevice, [0x35, ZONE_BC])
 	paintAll(activeDevice)
 }
 
 function paintAll(activeDevice) {
 	var bc = busComp()
-	setLabel(activeDevice, state.cs ? state.cs.map.label : bc ? bc.map.label : '')
+	setLabel(activeDevice, state.cs ? state.cs.label : bc ? bc.label : '')
 	if (!state.cs) sysex(activeDevice, [0x35, ZONE_CS])
 	if (!bc) sysex(activeDevice, [0x35, ZONE_BC])
 	paintLeds(activeDevice)
 	paintRings(activeDevice)
 }
 
-// Which knob drives each parameter tag (for rings that follow changes made elsewhere).
-function knobsByTag(target) {
-	var out = {}
-	for (var k in target.map.knobs) out[target.da.getParameterTagByIndex(am, target.obj, target.map.knobs[k])] = Number(k)
-	return out
-}
 function targetFor(knob) { return isBusCompKnob(knob) ? busComp() : state.cs }
 // The ring shows where the knob points: flipped for the knobs whose parameter runs the other way.
 function paintRing(activeDevice, knob) {
 	var target = targetFor(knob)
-	var index = target ? target.map.knobs[knob] : undefined
-	if (index === undefined) { setRing(activeDevice, knob, null, false); return }
-	var v = paramValue(target, index)
-	if (target.map.inverted.indexOf(knob) >= 0) v = 1 - v
+	var rf = target ? target.knobs[knob] : undefined
+	if (!rf) { setRing(activeDevice, knob, null, false); return }
+	var v = paramValue(target, rf)
+	if (rf.invert) v = 1 - v
 	setRing(activeDevice, knob, v, false)
 }
 function paintRings(activeDevice) {
@@ -421,15 +584,14 @@ function dumpParams(acc, obj, name) {
 	}
 }
 
-function paramValue(target, index) {
-	var tag = target.da.getParameterTagByIndex(am, target.obj, index)
-	return target.da.getParameterProcessValue(am, target.obj, tag)
+function paramValue(target, rf) { return target.da.getParameterProcessValue(am, rf.obj, rf.tag) }
+function toggleParam(target, rf) {
+	if (!rf) return
+	var v = paramValue(target, rf)
+	target.da.setParameterProcessValue(am, rf.obj, rf.tag, v >= 0.5 ? 0 : 1)
 }
-function toggleParam(target, index) {
-	var tag = target.da.getParameterTagByIndex(am, target.obj, index)
-	var v = target.da.getParameterProcessValue(am, target.obj, tag)
-	target.da.setParameterProcessValue(am, target.obj, tag, v >= 0.5 ? 0 : 1)
-}
+// A switch's LED: lit when the parameter is on (or, for refs marked invert, off: a bypass lights IN when 0).
+function lit(target, rf) { return (paramValue(target, rf) >= 0.5) !== rf.invert }
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
 var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen]
@@ -437,15 +599,16 @@ function paintLeds(activeDevice) {
 	for (var i = 0; i < CS_BUTTONS.length; ++i) {
 		var b = CS_BUTTONS[i]
 		var on = false
-		if (state.cs && state.cs.map.buttons[b] !== undefined) {
-			try { on = paramValue(state.cs, state.cs.map.buttons[b]) >= 0.5 } catch (e) {}
+		if (state.cs && state.cs.flip && state.cs.flip[b]) on = state.attack[state.cs.flip[b].mode]
+		else if (state.cs && state.cs.buttons[b]) {
+			try { on = lit(state.cs, state.cs.buttons[b]) } catch (e) {}
 		}
 		setLed(activeDevice, b, on ? 1 : 0)
 	}
 	var csIn = false, bcIn = false
 	var bc = busComp()
-	try { if (state.cs) csIn = paramValue(state.cs, state.cs.map.bypass) < 0.5 } catch (e) {}
-	try { if (bc) bcIn = paramValue(bc, bc.map.bypass) < 0.5 } catch (e) {}
+	try { if (state.cs && state.cs.bypass) csIn = lit(state.cs, state.cs.bypass) } catch (e) {}
+	try { if (bc && bc.bypass) bcIn = lit(bc, bc.bypass) } catch (e) {}
 	setLed(activeDevice, B.ChannelIn, csIn ? 1 : 0)
 	setLed(activeDevice, B.BusCompIn, bcIn ? 1 : 0)
 	setLed(activeDevice, B.Fine, state.fine ? 1 : 0)
@@ -455,28 +618,47 @@ function onKnob(activeDevice, id, clicks) {
 	if (id === 0x15) { onBcEncoder(activeDevice, clicks); return }
 	var target = targetFor(id)
 	if (!target) return
-	var index = target.map.knobs[id]
-	if (index === undefined) return
+	var rf = target.knobs[id]
+	if (!rf) return
 	var acc = target.da
-	var tag = acc.getParameterTagByIndex(am, target.obj, index)
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
-	if (target.map.inverted.indexOf(id) >= 0) step = -step
-	var v = acc.getParameterProcessValue(am, target.obj, tag) + step
+	if (rf.invert) step = -step
+	var v = acc.getParameterProcessValue(am, rf.obj, rf.tag) + step
 	v = Math.max(0, Math.min(1, v))
-	acc.setParameterProcessValue(am, target.obj, tag, v)
-	setRing(activeDevice, id, target.map.inverted.indexOf(id) >= 0 ? 1 - v : v, false)
-	var value = acc.getParameterDisplayValue(am, target.obj, tag)
-	var units = acc.getParameterDisplayUnits(am, target.obj, tag)
-	readout(activeDevice, isBusCompKnob(id) ? ZONE_BC : ZONE_CS, acc.getParameterTitle(am, target.obj, tag, 16),
+	acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
+	// Turning a knob whose section is switched off switches it on (a Cubase EQ band, a cut filter); a cut filter
+	// turned to the end of its range switches off.
+	if (rf.enable) {
+		var want = rf.offAt === undefined || Math.abs(v - rf.offAt) > 0.0001 ? 1 : 0
+		var isOn = acc.getParameterProcessValue(am, rf.enable.obj, rf.enable.tag) >= 0.5 ? 1 : 0
+		if (want !== isOn) acc.setParameterProcessValue(am, rf.enable.obj, rf.enable.tag, want)
+	}
+	setRing(activeDevice, id, rf.invert ? 1 - v : v, false)
+	var value = acc.getParameterDisplayValue(am, rf.obj, rf.tag)
+	var units = acc.getParameterDisplayUnits(am, rf.obj, rf.tag)
+	if (rf.enable && rf.offAt !== undefined && Math.abs(v - rf.offAt) <= 0.0001) { value = 'OFF'; units = '' }
+	readout(activeDevice, isBusCompKnob(id) ? ZONE_BC : ZONE_CS, rf.title || acc.getParameterTitle(am, rf.obj, rf.tag, 16),
 		value + (units ? units : ''))
 }
 
 function onButton(activeDevice, id) {
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
-	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.map.bypass); paintLeds(activeDevice); return }
-	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.map.bypass); paintLeds(activeDevice); return }
-	if (state.cs && state.cs.map.buttons[id] !== undefined) {
-		toggleParam(state.cs, state.cs.map.buttons[id])
+	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
+	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.bypass); paintLeds(activeDevice); return }
+	if (state.cs && state.cs.flip && state.cs.flip[id]) {
+		var f = state.cs.flip[id]
+		state.attack[f.mode] = !state.attack[f.mode]
+		var rf = state.attack[f.mode] ? f.attack : f.release
+		state.cs.knobs[f.knob] = rf
+		indexKnobs(state.cs)
+		paintLeds(activeDevice)
+		paintRing(activeDevice, f.knob)
+		var units = state.cs.da.getParameterDisplayUnits(am, rf.obj, rf.tag)
+		readout(activeDevice, ZONE_CS, rf.title, state.cs.da.getParameterDisplayValue(am, rf.obj, rf.tag) + (units || ''))
+		return
+	}
+	if (state.cs && state.cs.buttons[id]) {
+		toggleParam(state.cs, state.cs.buttons[id])
 		paintLeds(activeDevice)
 		return
 	}
@@ -500,10 +682,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 // Parameter changes from anywhere (the plug-in's window, automation): keep rings and LEDs right.
 function onParameterChange(activeDevice, objectID, tag) {
 	var bc = busComp()
-	var target = state.cs && objectID === state.cs.obj ? state.cs : bc && objectID === bc.obj ? bc : null
+	var target = state.cs && state.cs.objs[objectID] ? state.cs : bc && bc.objs[objectID] ? bc : null
 	if (!target) return
 	try {
-		var knob = target.knobByTag ? target.knobByTag[tag] : undefined
+		var knob = target.knobByKey[objectID + ':' + tag]
 		if (knob !== undefined) paintRing(activeDevice, knob)
 		else paintLeds(activeDevice)
 	} catch (e) {}
@@ -521,7 +703,7 @@ da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 if (daMix) {
 	daMix.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		am = activeMapping
-		if (!state.cs || objectID !== state.cs.obj) onParameterChange(activeDevice, objectID, tag)
+		if (!state.cs || !state.cs.objs[objectID]) onParameterChange(activeDevice, objectID, tag)
 	}
 	var mixChanges = 0
 	daMix.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
@@ -552,6 +734,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
+	flushLog(activeDevice)
 	var now = Date.now()
 	if (numberBase >= 0 && now >= numberCheckAt) {
 		numberCheckAt = now + 1000

@@ -147,6 +147,12 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 | Bus Comp name row | `F0 7D 52 36 38 <prev> 7F 7F 7F <curr> 7F 7F 7F <next> F7` | Cubase → bridge | The tracks of the previous, current and next bus comp (the large name row, 12 characters each). |
 | Bus Comp header | `F0 7D 52 36 39 <text> F7` | Cubase → bridge | Shown for 1.5 s in place of the model field ("BUS COMP 2"), as SSL 360 does while the Bus Comp encoder turns. |
 
+## Script log
+
+| Item | Message | Direction | Notes |
+|------|---------|-----------|-------|
+| Log line | `F0 7D 52 36 7E <source> <text> F7` | Cubase → bridge (any script's port) | Source 1 UF8, 2 UF1, 3 UC1, 4 Helper; text 3 × 7 bits per character. Written to `cubase\logs\scripts.log` (dropped with `--no-script-log`). At most 20 per idle tick. |
+
 ## Not yet covered
 
 - The UF1 MODE view METER (soft key 3).

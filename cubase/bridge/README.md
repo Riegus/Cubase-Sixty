@@ -51,6 +51,16 @@ Options:
 | `--trace` | Prints UF1 events, the MIDI the UF8 and UF1 send to Cubase (not fader positions), every UF1 LED change, UF1 value-line updates, and the UF8 record-enable state per strip. |
 | `--loopmidi` | Use ports made in loopMIDI (the old way) instead of creating them. The bridge does this by itself if loopMIDI's driver library (`teVirtualMIDI64.dll`) is missing or cannot create a port. |
 | `--lamptest` | Lights each UF1 LED in turn about 6 seconds after start-up. |
+| `--no-script-log` | Do not write the scripts' log lines to `cubase\logs\scripts.log` (see Logs). |
+
+### Logs
+
+The bridge writes two files to `cubase\logs\` (ignored by git):
+
+- `bridge.log`: everything the bridge window shows (with `--trace`, the trace too), each line with a timestamp.
+- `scripts.log`: the MIDI Remote scripts' log lines (what Cubase's script console shows), sent to the bridge as SysEx 7E; each line with a timestamp and the script (UF8, UF1, UC1, Helper). Off with `--no-script-log` (`dev-restart.ps1 -NoScriptLog`).
+
+Each start begins new files and keeps the last run's as `*.previous.log`; a file that passes 20 MB starts again, keeping the older part as `*.log.old`.
 
 ## Behaviour to know about
 

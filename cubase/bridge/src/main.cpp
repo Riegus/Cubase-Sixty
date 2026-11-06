@@ -33,6 +33,7 @@
 #include "Uf8Frames.h"
 #include "Uf1Bridge.h"
 #include "Uc1Bridge.h"
+#include "ScriptLog.h"
 
 using namespace cs;
 
@@ -256,6 +257,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
+    if (cs::scriptLogSysex(m.data(), m.size())) return;
     // Trace: when each strip's name arrives (timing of bank changes).
     if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
         std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
@@ -537,6 +539,12 @@ bool cs::uf8BankPress(bool right)
 
 int main(int argc, char** argv)
 {
+    cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
+    // --no-script-log: the scripts' log lines (SysEx 7E) are dropped instead of written to cubase\logs\scripts.log.
+    bool scriptLog = true;
+    for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--no-script-log") scriptLog = false;
+    if (scriptLog) cs::scriptLogInit(argc > 0 ? argv[0] : nullptr);
+    else std::printf("Script log off (--no-script-log).\n");
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); cs::uc1SetTrace(true); g_trace8 = true; cs::midiPortsTrace(true); }
         else if (std::string(argv[i]) == "--loopmidi") cs::midiPortsPreferLoopMidi(true);
@@ -566,6 +574,7 @@ int main(int argc, char** argv)
             std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
             // The helper's ports: its channel names go straight on to the UF8 script.
             g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
+                if (cs::scriptLogSysex(msg.data(), msg.size())) return;
                 if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
                 std::lock_guard<std::mutex> lk(g_outMx);
                 try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }

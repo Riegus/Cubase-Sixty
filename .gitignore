@@ -88,3 +88,6 @@ analysis/*.lua
 # would be silently skipped by `git add`. On a main -> website merge, drop
 # this block on the website side.
 /web/
+
+# Cubase-Sixty script logs (written by the bridge)
+cubase/logs/

@@ -11,6 +11,7 @@
 #   -CubaseExe <path>     Cubase's executable. Default: the newest Cubase*.exe under Program Files\Steinberg.
 #   -Build                Rebuild the bridge first (cmake --build, Release).
 #   -Trace                Start the bridge with --trace.
+#   -NoScriptLog          Start the bridge with --no-script-log (the scripts' lines are not written to cubase\logs\scripts.log).
 #   -Force                If Cubase does not close within 60 seconds, kill it. Unsaved changes are LOST.
 #   -NoStartCubase        Do everything except start Cubase.
 
@@ -19,6 +20,7 @@ param(
     [string]$CubaseExe,
     [switch]$Build,
     [switch]$Trace,
+    [switch]$NoScriptLog,
     [switch]$Force,
     [switch]$NoStartCubase
 )
@@ -105,6 +107,7 @@ if (-not (Test-Path $bridgeExe)) { throw "Bridge not found: $bridgeExe (build it
 # --- 5. Start the bridge in its own window --------------------------------------------------------------
 $bridgeArgs = @()
 if ($Trace) { $bridgeArgs += '--trace' }
+if ($NoScriptLog) { $bridgeArgs += '--no-script-log' }
 # Start it in its own window. Now and then it exits straight away when started right after the previous one
 # (a surface or a port not released yet), so give it up to three starts before giving up.
 $bridgeUp = $false
