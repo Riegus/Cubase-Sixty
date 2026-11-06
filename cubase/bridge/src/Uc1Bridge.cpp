@@ -66,6 +66,7 @@
 
 namespace cs {
 bool netInit();   // NetInit.cpp
+int stopSslCore(); // SslCoreGuard.cpp
 namespace {
 
 constexpr const char* kPortTo   = "Cubase-Sixty UC1 to Cubase";
@@ -1046,6 +1047,7 @@ void grLoop()
         pushGrStrip(0x61, gate, g_gateStrip);
         if (steady_clock::now() >= nextLog) {
             nextLog = steady_clock::now() + seconds(3);
+            stopSslCore();   // the plug-ins start it again when they cannot find a Core
             std::string sum = sslcore::debugSummary();
             // Only when the set of instances or their tracks change (the GR values move all the time).
             std::string key;

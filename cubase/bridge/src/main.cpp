@@ -34,6 +34,7 @@
 #include "Uf1Bridge.h"
 #include "Uc1Bridge.h"
 #include "ScriptLog.h"
+namespace cs { int stopSslCore(); }
 
 using namespace cs;
 
@@ -541,6 +542,7 @@ int main(int argc, char** argv)
 {
     cs::redirectTempToLogs(argc > 0 ? argv[0] : nullptr);
     cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
+    cs::stopSslCore();   // SSL360Core.exe takes the devices and the SSL plug-ins (SslCoreGuard.cpp)
     // --no-script-log: the scripts' log lines (SysEx 7E) are dropped instead of written to cubase\logs\scripts.log.
     bool scriptLog = true;
     for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--no-script-log") scriptLog = false;

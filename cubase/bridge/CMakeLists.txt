@@ -55,6 +55,7 @@ add_executable(cubase_sixty_bridge
     src/Uc1Bridge.cpp
     src/ScriptLog.cpp
     src/NetInit.cpp
+    src/SslCoreGuard.cpp
     src/ScriptLog.h
     src/Uc1Bridge.h
     ${EXT_SRC}/UF8Device.cpp
