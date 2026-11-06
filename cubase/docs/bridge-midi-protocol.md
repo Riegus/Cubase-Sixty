@@ -133,7 +133,8 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 |------|---------|-----------|-------|
 | Knob | `F0 7D 52 36 20 <knob id> <64 + clicks> F7` | bridge → Cubase | Clicks signed (usually ±1..3). |
 | Button | `F0 7D 52 36 21 <button id> <1 pressed / 0 released> F7` | bridge → Cubase | All buttons except the note-bound ones below. |
-| CHANNEL encoder | Note 100 (next) / 101 (previous), press + release | bridge → Cubase | `Project / Select Track: Next / Prev`. |
+| CHANNEL encoder | Note 100 (next) / 101 (previous), press + release | bridge → Cubase | `Project / Select Track: Next / Prev`. One step per detent: the bridge counts 3 ticks per step (Rea-Sixty's accumulator, reset after 100 ms or a change of direction). |
+| Bus Comp encoder | `F0 7D 52 36 20 15 <64 + steps> F7` | bridge → Cubase | Steps counted like the CHANNEL encoder. |
 | Polarity / Solo Clear / Solo / Cut | Notes 0x19 / 0x1B / 0x1C / 0x1D | both | Bound in the script (phase switch, `Edit / Deactivate All Solo`, solo, mute of the selected track); Cubase → bridge lights the LED. |
 | Track name | `F0 7D 52 36 30 <name> F7` | Cubase → bridge | The small (Channel Strip) name row, 12 characters. |
 | Track colour | `F0 7D 52 36 31 <r> <g> <b> F7` | Cubase → bridge | 0–127 each; the bridge quantises to the UC1 palette. |
@@ -142,6 +143,9 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 | Button LED | `F0 7D 52 36 34 <button id> <0 off / 1 on / 2 dim> F7` | Cubase → bridge | |
 | Clear readout | `F0 7D 52 36 35 <zone> F7` | Cubase → bridge | |
 | Knob ring | `F0 7D 52 36 36 <knob id> <hi> <lo> <dim> F7` | Cubase → bridge | Position 0–16382 (already flipped for knobs whose parameter runs the other way), 7F 7F = ring off. The bridge draws it with Rea-Sixty's cell maps (dot, or a dot fading into the next cell on the bipolar knobs). |
+| 7-segment | `F0 7D 52 36 37 <hi> <lo> F7` | Cubase → bridge | 0–999, leading zeros blank; 7F 7F = blank. Written again after the rings that share its cells (Bus Comp Release / Mix, Fader Level). |
+| Bus Comp name row | `F0 7D 52 36 38 <prev> 7F 7F 7F <curr> 7F 7F 7F <next> F7` | Cubase → bridge | The tracks of the previous, current and next bus comp (the large name row, 12 characters each). |
+| Bus Comp header | `F0 7D 52 36 39 <text> F7` | Cubase → bridge | Shown for 1.5 s in place of the model field ("BUS COMP 2"), as SSL 360 does while the Bus Comp encoder turns. |
 
 ## Not yet covered
 
