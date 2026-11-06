@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.6.6-dev'
+var SCRIPT_VERSION = '0.7.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -355,7 +355,7 @@ var RX = {
 }
 var stripLogs = 0
 function cubaseStrip(objects) {
-	var inputFilter = null, eq = null, gate = null, comp = null
+	var inputFilter = null, eq = null, gate = null, comp = null, gateSlot = null, compSlot = null, compTitle = ''
 	var emptySlots = []   // strip slots with no module in them (a gate or compressor can be loaded there)
 	for (var i = 0; i < objects.length; ++i) {
 		var o = objects[i]
@@ -369,13 +369,14 @@ function cubaseStrip(objects) {
 			if (folder < 0 || objects[folder].type !== 'Strips') continue
 			var title = info(da, o.id).title
 			var kind = /gate/i.test(title) ? 'gate' : /comp/i.test(title) ? 'comp' : null
-			if (kind === 'gate' && !gate) gate = o.id
-			else if (kind === 'comp' && !comp) comp = o.id
+			if (kind === 'gate' && !gate) { gate = o.id; gateSlot = objects[o.parent].id }
+			else if (kind === 'comp' && !comp) { comp = o.id; compSlot = objects[o.parent].id; compTitle = title }
 			if (kind) rememberModule(kind, o.id, title, info(da, objects[o.parent].id).title)
 		}
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
 	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', emptySlots: emptySlots,
+		compSlot: compSlot, compTitle: compTitle, gateSlot: gateSlot,
 		noGate: !gate, noComp: !comp, knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
 	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
@@ -447,11 +448,15 @@ function cubaseStrip(objects) {
 	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
 	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
 	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
-	var compBypass = sw(comp, compList, [RX.bypass])
-	if (compBypass) { compBypass.invert = true; t.buttons[B.DynIn] = compBypass; t.objs[comp] = true }
+	// DYN IN: the compressor's and the gate's bypass together, as DYN IN switches an SSL strip's whole dynamics
+	// section (lit while either is in).
+	var compBypass = sw(comp, compList, [RX.bypass]), gateBypass = sw(gate, gateList, [RX.bypass])
+	t.dynBypass = []
+	if (compBypass) { compBypass.invert = true; t.dynBypass.push(compBypass); t.objs[comp] = true }
+	if (gateBypass) { gateBypass.invert = true; t.dynBypass.push(gateBypass); t.objs[gate] = true }
 	if (++stripLogs <= 5) {
 		log('Cubase strip:' + (missing.length ? ' not found: ' + missing.join(', ') : ' everything found')
-			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none'))
+			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (t.dynBypass.length ? t.dynBypass.map(function (b) { return '"' + b.title + '"' }).join(' + ') : 'none'))
 		for (var f = 0; f < found.length; ++f) log('Cubase strip:   ' + found[f])
 	}
 	indexKnobs(t)
@@ -506,10 +511,11 @@ function rememberModule(kind, obj, title, slotTitle) {
 	list.push({ name: title, uid: uname.replace(/-\d+$/, ''), slot: slotTitle })
 	log('strip ' + kind + ' seen: "' + title + '" in slot "' + slotTitle + '", class id ' + uname.replace(/-\d+$/, ''))
 }
-function loadModule(activeDevice, target, kind, module) {
-	// The slot it sits in by default if that one is free, else the first free one.
-	var slot = target.emptySlots[0]
-	for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === module.slot) slot = target.emptySlots[e]
+function loadModule(activeDevice, target, kind, module, intoSlot) {
+	// Replacing: the slot given. Else the slot it sits in by default if that one is free, else the first free one.
+	var slot = intoSlot || target.emptySlots[0]
+	if (!intoSlot) for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === module.slot) slot = target.emptySlots[e]
+	if (!slot) { log('no free strip slot for "' + module.name + '"'); return }
 	var ok = false
 	try { ok = da.mPluginManager.trySetSlotPlugin(am, slot, module.uid, true) } catch (err) { log('trySetSlotPlugin failed: ' + err) }
 	log('loading "' + module.name + '" into strip slot "' + info(da, slot).title + '": ' + (ok ? 'done' : 'refused'))
@@ -532,12 +538,21 @@ function closePicker(activeDevice, why) {
 	if (why) readout(activeDevice, ZONE_CS, why, '')
 }
 
+var dynPressedAt = 0
+function openCompPicker(activeDevice, target) {
+	var list = STRIP_MODULES.comp
+	var index = 0
+	for (var i = 0; i < list.length; ++i) if (list[i].name === target.compTitle) index = i
+	picker = { kind: 'comp', index: index, acc: 0, until: Date.now() + 8000, target: target,
+		replaceSlot: target.noComp ? null : target.compSlot }
+	showPicker(activeDevice)
+}
 var switchTried = {}
 function switchOnModuleFor(activeDevice, target, knob, clicks) {
 	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
 	if (!kind) return false
 	var missing = kind === 'gate' ? target.noGate : target.noComp
-	if (picker && picker.kind === kind && picker.target === target) {
+	if (picker && picker.kind === kind) {   // (the track may have been looked at again meanwhile: a new target)
 		// One type per 4 clicks (a click per type went by too fast to stop on one).
 		picker.until = Date.now() + 8000
 		if ((clicks > 0) !== (picker.acc > 0)) picker.acc = 0
@@ -724,6 +739,7 @@ var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B
 function paintLeds(activeDevice) {
 	for (var i = 0; i < CS_BUTTONS.length; ++i) {
 		var b = CS_BUTTONS[i]
+		if (b === B.DynIn && state.cs && state.cs.dynBypass) continue   // painted below
 		var on = false
 		if (state.cs && state.cs.flip && state.cs.flip[b]) on = state.attack[state.cs.flip[b].mode]
 		else if (state.cs && state.cs.buttons[b]) {
@@ -736,6 +752,11 @@ function paintLeds(activeDevice) {
 	try { if (state.cs && state.cs.bypass) csIn = lit(state.cs, state.cs.bypass) } catch (e) {}
 	try { if (bc && bc.bypass) bcIn = lit(bc, bc.bypass) } catch (e) {}
 	setLed(activeDevice, B.ChannelIn, csIn ? 1 : 0)
+	if (state.cs && state.cs.dynBypass) {
+		var dynIn = false
+		try { for (var d = 0; d < state.cs.dynBypass.length; ++d) if (lit(state.cs, state.cs.dynBypass[d])) dynIn = true } catch (e) {}
+		setLed(activeDevice, B.DynIn, dynIn ? 1 : 0)
+	}
 	setLed(activeDevice, B.BusCompIn, bcIn ? 1 : 0)
 	setLed(activeDevice, B.Fine, state.fine ? 1 : 0)
 }
@@ -778,7 +799,10 @@ function onButton(activeDevice, id) {
 		if (id === B.Confirm || id === B.DynIn) {
 			var p = picker
 			picker = null
-			loadModule(activeDevice, p.target, p.kind, STRIP_MODULES[p.kind][p.index])
+			var chosen = STRIP_MODULES[p.kind][p.index]
+			var tgt = state.cs && state.cs.emptySlots ? state.cs : p.target
+			if (p.replaceSlot && chosen.name === tgt.compTitle) { readout(activeDevice, ZONE_CS, chosen.short || chosen.name, 'KEPT'); return }
+			loadModule(activeDevice, tgt, p.kind, chosen, p.replaceSlot)
 			return
 		}
 		if (id === B.Back) { closePicker(activeDevice, 'Cancelled'); return }
@@ -786,6 +810,14 @@ function onButton(activeDevice, id) {
 	// DYN IN on Cubase's strip without a compressor: load the Standard Compressor straight away.
 	if (id === B.DynIn && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
 		loadModule(activeDevice, state.cs, 'comp', STRIP_MODULES.comp[0])
+		return
+	}
+	if (id === B.DynIn && state.cs && state.cs.dynBypass && state.cs.dynBypass.length) {
+		var anyIn = false
+		for (var d = 0; d < state.cs.dynBypass.length; ++d) if (lit(state.cs, state.cs.dynBypass[d])) anyIn = true
+		for (var d2 = 0; d2 < state.cs.dynBypass.length; ++d2)
+			state.cs.da.setParameterProcessValue(am, state.cs.dynBypass[d2].obj, state.cs.dynBypass[d2].tag, anyIn ? 1 : 0)
+		paintLeds(activeDevice)
 		return
 	}
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
@@ -819,6 +851,16 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (!am) { if (++sysexErrors <= 3) log('UC1 event before the page was active; ignored'); return }
 	try {
 		if (cmd === 0x20) onKnob(activeDevice, message[5], message[6] - 64)
+		else if (message[5] === B.DynIn && state.cs && state.cs.emptySlots && !picker) {
+			// Cubase's strip: DYN IN acts on release; held for 0.6 s it opens the compressor picker instead
+			// (to load a type other than Standard, or to change the loaded one).
+			if (message[6] === 1) { dynPressedAt = Date.now(); return }
+			if (!dynPressedAt) return
+			var held = Date.now() - dynPressedAt
+			dynPressedAt = 0
+			if (held >= 600) openCompPicker(activeDevice, state.cs)
+			else onButton(activeDevice, B.DynIn)
+		}
 		else if (message[6] === 1) onButton(activeDevice, message[5])
 	} catch (e) {
 		if (++sysexErrors <= 10) log('event 0x' + cmd.toString(16) + ' id 0x' + message[5].toString(16) + ' failed: ' + e)
