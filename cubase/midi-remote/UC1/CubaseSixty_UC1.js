@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.7.3-dev'
+var SCRIPT_VERSION = '0.8.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -253,6 +253,11 @@ var state = {
 	rescanAt: 0,       // when to look at the selected track's plug-ins again (0 = not pending)
 	mixScanAt: 0,      // when to search the MixConsole for bus comps again (0 = not pending)
 	fine: false,
+	csList: [],        // the selected track's channel strips (SSL ones in insert order, then Cubase's own)
+	csChoice: {},      // per track (base object id): the key of the strip picked with the magnifier key
+	csBase: -1,
+	trackName: '',
+	restoreBcAt: 0,    // when to put the Bus Comp name row back after the strip carousel
 	attack: { comp: false, gate: false },   // Cubase strip: the Release knob is on attack (F.ATT)
 	dumped: {}         // plug-in names whose parameters were already listed in the log
 }
@@ -300,6 +305,7 @@ function rescan(activeDevice) {
 	if (!am) return
 	state.cs = null
 	state.bcSelected = null
+	var list = []
 	var base
 	try { base = da.getBaseObjectID(am) } catch (e) { log('getBaseObjectID failed: ' + e); return }
 	var objects = walk(da, base, 4, 400, SKIP_TYPES_TRACK)
@@ -311,10 +317,26 @@ function rescan(activeDevice) {
 		var bc = findMap(BUS_COMPS, o.title)
 		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); dumpParams(da, id, o.title); continue }
 		var cs = findMap(CHANNEL_STRIPS, o.title)
-		if (cs && cs.label && !state.cs) { state.cs = makeTarget(da, id, cs, o.title); dumpParams(da, id, o.title) }
+		if (cs && cs.label) {
+			var t = makeTarget(da, id, cs, o.title)
+			// The insert slot it sits in (slots are titled "1".."16"), for opening its window (360 key).
+			var slotAt = objects[i].parent
+			if (slotAt >= 0 && objects[slotAt].type === 'Slot') t.insertIndex = parseInt(info(da, objects[slotAt].id).title, 10) - 1
+			t.key = 'obj' + id
+			t.short = cs.label + (t.insertIndex >= 0 ? ' (' + (t.insertIndex + 1) + ')' : '')
+			list.push(t)
+			dumpParams(da, id, o.title)
+		}
 	}
-	// No SSL channel strip: Cubase's own (input filter, EQ, the strip's gate and compressor).
-	if (!state.cs) state.cs = cubaseStrip(objects)
+	// Cubase's own strip (input filter, EQ, the strip's gate and compressor) is always there: the only one on a track
+	// without an SSL channel strip, else the last choice for the magnifier key.
+	var cubase = cubaseStrip(objects)
+	if (cubase) { cubase.key = 'cubase'; cubase.short = 'Cubase'; list.push(cubase) }
+	state.csList = list
+	state.csBase = base
+	var choice = state.csChoice[base]
+	state.cs = list.length ? list[0] : null
+	for (var c = 0; c < list.length; ++c) if (list[c].key === choice) state.cs = list[c]
 	log('selected track: channel strip ' + (state.cs ? '"' + state.cs.name + '"' : 'none')
 		+ ', bus comp ' + (state.bcSelected ? '"' + state.bcSelected.name + '" #' + state.bcSelected.obj : 'none'))
 	showNumber(activeDevice, base)
@@ -593,6 +615,59 @@ function switchOnModuleFor(activeDevice, target, knob, clicks) {
 	readout(activeDevice, ZONE_CS, kind === 'gate' ? 'Gate' : 'Compressor', 'ON')
 	state.rescanAt = Date.now() + 300
 	return true
+}
+
+// The magnifier key: the next channel strip on the track (wrapping). The large name row shows the previous / current /
+// next strip under the track's name for a moment (SSL 360's instance carousel), then the Bus Comp names again.
+function nextStrip(activeDevice) {
+	var list = state.csList
+	if (list.length < 2) { readout(activeDevice, ZONE_CS, 'One strip only', ''); return }
+	var i = list.indexOf(state.cs)
+	var next = (i + 1) % list.length
+	state.cs = list[next]
+	state.csChoice[state.csBase] = state.cs.key
+	// The neighbours as they sit in the list (no wrapping in the display: with two strips, wrapping showed the
+	// other one above and below).
+	var sep = [0x7F, 0x7F, 0x7F]
+	var prevName = next > 0 ? list[next - 1].short : ''
+	var nextName = next + 1 < list.length ? list[next + 1].short : ''
+	sysex(activeDevice, [0x38].concat(encodeName(prevName), sep, encodeName(list[next].short), sep, encodeName(nextName)))
+	sysex(activeDevice, [0x39].concat(encodeName(state.trackName)))
+	state.restoreBcAt = Date.now() + 1600
+	sysex(activeDevice, [0x35, ZONE_CS])
+	paintAll(activeDevice)
+}
+
+// The 360 key: open or close the window of the strip the UC1 controls: an SSL plug-in's own window (the insert
+// slot's edit switch), or for Cubase's own strip the track's Channel Settings. The script cannot set these itself,
+// so they are bound to CCs the bridge sends back (SysEx 3A): CC 50 + slot for the inserts, CC 70 for Channel
+// Settings.
+var CC_INSERT_EDIT = 50, CC_CHANNEL_EDIT = 70
+var insertEditOpen = [], channelEditOpen = 0
+try {
+	var bindCc = function (x, y, cc, hostValue, onChange) {
+		var k = surface.makeKnob(x, y, 1, 1)
+		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
+		page.makeValueBinding(k.mSurfaceValue, hostValue)
+		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) { onChange(value) }
+	}
+	for (var slot = 0; slot < 16; ++slot) {
+		;(function (slot) {
+			var viewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('UC1 insert ' + (slot + 1)).accessSlotAtIndex(slot)
+			bindCc(slot, 4, CC_INSERT_EDIT + slot, viewer.mEdit, function (v) { insertEditOpen[slot] = v })
+		})(slot)
+	}
+	bindCc(0, 5, CC_CHANNEL_EDIT, track.mEditorOpen, function (v) { channelEditOpen = v })
+} catch (e) { log('window switches could not be bound: ' + e) }
+function toggleWindow(activeDevice) {
+	var t = state.cs
+	if (!t) return
+	if (t.insertIndex >= 0) {
+		var open = insertEditOpen[t.insertIndex] >= 0.5
+		sysex(activeDevice, [0x3A, CC_INSERT_EDIT + t.insertIndex, open ? 0 : 127])
+	} else {
+		sysex(activeDevice, [0x3A, CC_CHANNEL_EDIT, channelEditOpen >= 0.5 ? 0 : 127])
+	}
 }
 
 // The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
@@ -883,6 +958,8 @@ function onButton(activeDevice, id) {
 		paintLeds(activeDevice)
 		return
 	}
+	if (id === B.Magnifier) { nextStrip(activeDevice); return }
+	if (id === B.Knob360) { toggleWindow(activeDevice); return }
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
 	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.bypass); paintLeds(activeDevice); return }
@@ -966,6 +1043,7 @@ if (daMix) {
 
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	am = activeMapping
+	state.trackName = title
 	picker = null
 	sysex(activeDevice, [0x30].concat(encodeName(title)))
 	state.rescanAt = Date.now() + 100
@@ -989,6 +1067,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	flushLog(activeDevice)
 	var now = Date.now()
 	if (picker && now > picker.until) closePicker(activeDevice, 'Cancelled')
+	if (state.restoreBcAt && now >= state.restoreBcAt) { state.restoreBcAt = 0; showBcNames(activeDevice) }
 	if (numberBase >= 0 && now >= numberCheckAt) {
 		numberCheckAt = now + 1000
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
