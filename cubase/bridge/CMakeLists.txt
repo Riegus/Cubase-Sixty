@@ -75,6 +75,10 @@ endif()
 if(MSVC)
     target_compile_options(cubase_sixty_bridge PRIVATE /utf-8 /permissive-)
 endif()
+if(WIN32)
+    # windows.h's min / max macros break std::max(...) (the SSL 360 Core stand-in uses it).
+    target_compile_definitions(cubase_sixty_bridge PRIVATE NOMINMAX)
+endif()
 
 # Pure mapping logic, testable without hardware or MIDI ports.
 add_executable(test_mapping tests/test_mapping.cpp ${EXT_SRC}/Palette.cpp)
