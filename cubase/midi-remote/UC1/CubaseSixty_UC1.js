@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.6.1-dev'
+var SCRIPT_VERSION = '0.6.3-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -412,6 +412,11 @@ function cubaseStrip(objects) {
 		if (bands[b][3] !== null) knob(bands[b][3], 'band ' + n + ' Q', eq, eqList, [bx, RX.q], null, on)
 	}
 	knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
+	// The Vintage Compressor has no threshold: its Input Gain drives it into compression instead.
+	if (!t.knobs[K.CompThreshold] && comp) {
+		missing.pop()
+		knob(K.CompThreshold, 'comp threshold (input gain)', comp, compList, [/input\s*gain/i])
+	}
 	knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio])
 	// "Auto Release" (a switch) must not be taken for the release time.
 	knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
@@ -521,15 +526,20 @@ function switchOnModuleFor(activeDevice, target, knob, clicks) {
 	if (!kind) return false
 	var missing = kind === 'gate' ? target.noGate : target.noComp
 	if (picker && picker.kind === kind && picker.target === target) {
-		var n = STRIP_MODULES[kind].length
-		picker.index = ((picker.index + (clicks > 0 ? 1 : -1)) % n + n) % n
+		// One type per 4 clicks (a click per type went by too fast to stop on one).
 		picker.until = Date.now() + 8000
+		if ((clicks > 0) !== (picker.acc > 0)) picker.acc = 0
+		picker.acc += clicks
+		if (Math.abs(picker.acc) < 4) return true
+		var n = STRIP_MODULES[kind].length
+		picker.index = ((picker.index + (picker.acc > 0 ? 1 : -1)) % n + n) % n
+		picker.acc = 0
 		showPicker(activeDevice)
 		return true
 	}
 	if (!missing && stripOn[kind] !== 0) return false
 	if (missing && target.emptySlots.length && STRIP_MODULES[kind].length > 1) {
-		picker = { kind: kind, index: 0, until: Date.now() + 8000, target: target }
+		picker = { kind: kind, index: 0, acc: 0, until: Date.now() + 8000, target: target }
 		showPicker(activeDevice)
 		return true
 	}
@@ -728,9 +738,14 @@ function onKnob(activeDevice, id, clicks) {
 	var acc = target.da
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
 	if (rf.invert) step = -step
-	var v = acc.getParameterProcessValue(am, rf.obj, rf.tag) + step
-	v = Math.max(0, Math.min(1, v))
+	// A parameter with a few steps (a ratio) snaps each small change back to where it was, so while the knob is
+	// being turned (clicks less than 1 s apart) the turn is added up here, not read back from the parameter.
+	var now = Date.now()
+	var base = rf.wanted !== undefined && now - rf.turnedAt < 1000 ? rf.wanted : acc.getParameterProcessValue(am, rf.obj, rf.tag)
+	var v = Math.max(0, Math.min(1, base + step))
 	acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
+	rf.wanted = v
+	rf.turnedAt = now
 	// Turning a knob whose section is switched off switches it on (a Cubase EQ band, a cut filter); a cut filter
 	// turned to the end of its range switches off.
 	if (rf.enable) {
