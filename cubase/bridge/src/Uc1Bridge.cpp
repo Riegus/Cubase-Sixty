@@ -1051,10 +1051,11 @@ void grLoop()
                 if (e == std::string::npos) break;
                 a = e + 1;
             }
+            if (sum.empty()) key = sslcore::pluginConnected() ? "connected, no meter data" : "none";
             if (key != lastSummary) {
                 lastSummary = key;
                 std::printf("SSL plug-ins connected (UC1 reads: strip track %d #%d \"%s\", bus comp track %d #%d):\n%s",
-                            csT, csO, model.c_str(), bcT, bcO, sum.empty() ? "  none\n" : sum.c_str());
+                            csT, csO, model.c_str(), bcT, bcO, sum.empty() ? ("  " + key + "\n").c_str() : sum.c_str());
             }
         }
     }

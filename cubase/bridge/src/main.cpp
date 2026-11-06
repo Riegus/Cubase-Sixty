@@ -539,6 +539,7 @@ bool cs::uf8BankPress(bool right)
 
 int main(int argc, char** argv)
 {
+    cs::redirectTempToLogs(argc > 0 ? argv[0] : nullptr);
     cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
     // --no-script-log: the scripts' log lines (SysEx 7E) are dropped instead of written to cubase\logs\scripts.log.
     bool scriptLog = true;
