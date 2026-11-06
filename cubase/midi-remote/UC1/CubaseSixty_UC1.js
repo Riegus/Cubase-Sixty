@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.4.0-dev'
+var SCRIPT_VERSION = '0.4.1-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -348,10 +348,10 @@ function cubaseStrip(objects) {
 	if (!inputFilter && !eq && !gate && !comp) return null
 	var t = { da: da, label: 'CUBASE', header: '', knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
-	function knob(id, name, obj, list, patterns, exclude, enable) {
+	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
 		var p = obj ? findParam(list, patterns, exclude) : null
 		if (!p) { missing.push(name); return }
-		t.knobs[id] = { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16), enable: enable }
+		t.knobs[id] = { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16), enable: enable, offAt: offAt }
 		t.objs[obj] = true
 		found.push(name + '="' + p.title + '"')
 	}
@@ -370,8 +370,9 @@ function cubaseStrip(objects) {
 
 	knob(K.InputTrim, 'trim', inputFilter, inList, [RX.gain])
 	var lcOn = sw(inputFilter, inList, [RX.lowCut, RX.on]), hcOn = sw(inputFilter, inList, [RX.highCut, RX.on])
-	knob(K.HighPass, 'low cut', inputFilter, inList, [RX.lowCut, RX.freq], null, lcOn)
-	knob(K.LowPass, 'high cut', inputFilter, inList, [RX.highCut, RX.freq], null, hcOn)
+	// The cut filters switch off at the end of their range, as on an SSL strip (low cut fully left, high cut fully right).
+	knob(K.HighPass, 'low cut', inputFilter, inList, [RX.lowCut, RX.freq], null, lcOn, 0)
+	knob(K.LowPass, 'high cut', inputFilter, inList, [RX.highCut, RX.freq], null, hcOn, 1)
 	var bands = [[1, K.LfGain, K.LfFreq, null], [2, K.LmfGain, K.LmfFreq, K.LmfQ], [3, K.HmfGain, K.HmfFreq, K.HmfQ], [4, K.HfGain, K.HfFreq, null]]
 	for (var b = 0; b < bands.length; ++b) {
 		var n = bands[b][0], bx = band(n)
@@ -583,12 +584,17 @@ function onKnob(activeDevice, id, clicks) {
 	var v = acc.getParameterProcessValue(am, rf.obj, rf.tag) + step
 	v = Math.max(0, Math.min(1, v))
 	acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
-	// Turning a knob whose section is switched off switches it on (a Cubase EQ band, a cut filter).
-	if (rf.enable && acc.getParameterProcessValue(am, rf.enable.obj, rf.enable.tag) < 0.5)
-		acc.setParameterProcessValue(am, rf.enable.obj, rf.enable.tag, 1)
+	// Turning a knob whose section is switched off switches it on (a Cubase EQ band, a cut filter); a cut filter
+	// turned to the end of its range switches off.
+	if (rf.enable) {
+		var want = rf.offAt === undefined || Math.abs(v - rf.offAt) > 0.0001 ? 1 : 0
+		var isOn = acc.getParameterProcessValue(am, rf.enable.obj, rf.enable.tag) >= 0.5 ? 1 : 0
+		if (want !== isOn) acc.setParameterProcessValue(am, rf.enable.obj, rf.enable.tag, want)
+	}
 	setRing(activeDevice, id, rf.invert ? 1 - v : v, false)
 	var value = acc.getParameterDisplayValue(am, rf.obj, rf.tag)
 	var units = acc.getParameterDisplayUnits(am, rf.obj, rf.tag)
+	if (rf.enable && rf.offAt !== undefined && Math.abs(v - rf.offAt) <= 0.0001) { value = 'OFF'; units = '' }
 	readout(activeDevice, isBusCompKnob(id) ? ZONE_BC : ZONE_CS, rf.title || acc.getParameterTitle(am, rf.obj, rf.tag, 16),
 		value + (units ? units : ''))
 }
