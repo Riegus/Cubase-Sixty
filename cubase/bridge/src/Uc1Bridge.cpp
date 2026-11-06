@@ -793,21 +793,22 @@ void loadPreset(const PresetEntry& e, bool cs)
 
 // ---------------------------------------------------------------------------
 // ROUTING screen (Rea-Sixty UC1Surface: kRoutingPresets, renderRoutingSubscreen_, the ROUTING encoder handler). The
-// SSL channel strips' routing is five switches; SSL 360 steps through ten orders of the first four, each with
-// External S/C off and on (20 positions, wrapping), on the Bus Comp encoder. The screen shows the order number
-// (b-variant = External S/C on). The script reports the switches (SysEx 3F) and sets them (3E).
+// SSL channel strips' routing is five switches; the Bus Comp encoder steps through the ten orders of the first four
+// (wrapping), and the screen shows the order number. Rea-Sixty also stepped External S/C off / on between orders
+// (20 positions, 0x80 in the number), but the UC1 then showed each number twice while the plug-in changed, so
+// External S/C is left as it is. The script reports the switches (SysEx 3F) and sets them (3E).
 // ---------------------------------------------------------------------------
 struct RoutingOrder { uint8_t filtIn, filtSC, eqSC, dynPreEq; };
 constexpr RoutingOrder kRoutingOrders[10] = {
     {1, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 1}, {1, 0, 0, 1}, {1, 1, 0, 1},
     {1, 0, 1, 0}, {1, 1, 0, 0}, {1, 1, 1, 0}, {0, 0, 1, 0}, {0, 1, 1, 1},
 };
-int routingPosition()   // 0..19 (g_presetMx held); a combination set by hand counts as order 1
+int routingPosition()   // 0..9 (g_presetMx held); a combination set by hand counts as order 1
 {
     for (int i = 0; i < 10; ++i) {
         const auto& o = kRoutingOrders[i];
         if (o.filtIn == g_routing[0] && o.filtSC == g_routing[1] && o.eqSC == g_routing[2] && o.dynPreEq == g_routing[3])
-            return i * 2 + (g_routing[4] == 1 ? 1 : 0);
+            return i;
     }
     return 0;
 }
@@ -816,7 +817,7 @@ void renderRouting()   // g_presetMx held
     if (!g_routingOn) return;
     if (g_routing[0] < 0) { send(::uc1::buildLcdHeader("NO ROUTING")); return; }
     const int pos = routingPosition();
-    send(::uc1::buildRoutingOrderIndicator(uint8_t((pos / 2 + 1) | (pos % 2 ? 0x80 : 0x00))));
+    send(::uc1::buildRoutingOrderIndicator(uint8_t(pos + 1)));
 }
 void setRoutingMode(bool on)   // g_presetMx held
 {
@@ -832,10 +833,10 @@ void setRoutingMode(bool on)   // g_presetMx held
 void routingStep(int step)   // g_presetMx held
 {
     if (g_routing[0] < 0) return;
-    int pos = (routingPosition() + step) % 20;
-    if (pos < 0) pos += 20;
-    const auto& o = kRoutingOrders[pos / 2];
-    const uint8_t ext = uint8_t(pos % 2);
+    int pos = (routingPosition() + step) % 10;
+    if (pos < 0) pos += 10;
+    const auto& o = kRoutingOrders[pos];
+    const uint8_t ext = uint8_t(g_routing[4] == 1 ? 1 : 0);   // unchanged
     g_routing[0] = o.filtIn; g_routing[1] = o.filtSC; g_routing[2] = o.eqSC; g_routing[3] = o.dynPreEq; g_routing[4] = ext;
     sysex({0x3E, o.filtIn, o.filtSC, o.eqSC, o.dynPreEq, ext});
     renderRouting();
