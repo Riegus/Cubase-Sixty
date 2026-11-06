@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.4.1-dev'
+var SCRIPT_VERSION = '0.4.2-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -327,7 +327,7 @@ var RX = {
 	gain: /gain/i, freq: /freq/i, q: /(^|\W)q(\W|$)|quality/i, on: /(^|\W)on(\W|$)|enable|active/i,
 	bypass: /bypass/i, lowCut: /low\s*cut|lo\s*cut|(^|\W)lc(\W|$)|high\s*pass|(^|\W)hp/i,
 	highCut: /high\s*cut|hi\s*cut|(^|\W)hc(\W|$)|low\s*pass|(^|\W)lp/i,
-	thresh: /thresh/i, ratio: /ratio/i, release: /release/i, range: /range/i, hold: /hold/i, digit: /\d/
+	thresh: /thresh/i, ratio: /ratio/i, release: /release/i, range: /range/i, hold: /(^|\W)hold/i, attack: /attack/i, digit: /\d/
 }
 var stripLogs = 0
 function cubaseStrip(objects) {
@@ -387,7 +387,11 @@ function cubaseStrip(objects) {
 	knob(K.GateThreshold, 'gate threshold', gate, gateList, [RX.thresh])
 	knob(K.GateRange, 'gate range', gate, gateList, [RX.range])
 	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release])
-	knob(K.GateHold, 'gate hold', gate, gateList, [RX.hold])
+	knob(K.GateHold, 'gate hold', gate, gateList, [RX.hold], [RX.thresh])
+	// F.ATT keys (the UC1 has no attack knobs): fastest attack, and back to the attack it had before.
+	var compAttack = sw(comp, compList, [RX.attack]), gateAttack = sw(gate, gateList, [RX.attack])
+	if (compAttack) { compAttack.fastAttack = true; t.buttons[B.FastAttComp] = compAttack; t.objs[comp] = true; found.push('comp attack="' + compAttack.title + '"') }
+	if (gateAttack) { gateAttack.fastAttack = true; t.buttons[B.FastAttGate] = gateAttack; t.objs[gate] = true; found.push('gate attack="' + gateAttack.title + '"') }
 	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
 	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
 	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
@@ -546,11 +550,21 @@ function dumpParams(acc, obj, name) {
 function paramValue(target, rf) { return target.da.getParameterProcessValue(am, rf.obj, rf.tag) }
 function toggleParam(target, rf) {
 	if (!rf) return
+	if (rf.fastAttack) {
+		var a = paramValue(target, rf)
+		if (a > 0.001) { rf.before = a; target.da.setParameterProcessValue(am, rf.obj, rf.tag, 0) }
+		else target.da.setParameterProcessValue(am, rf.obj, rf.tag, rf.before !== undefined ? rf.before : 0.25)
+		return
+	}
 	var v = paramValue(target, rf)
 	target.da.setParameterProcessValue(am, rf.obj, rf.tag, v >= 0.5 ? 0 : 1)
 }
 // A switch's LED: lit when the parameter is on (or, for refs marked invert, off: a bypass lights IN when 0).
-function lit(target, rf) { return (paramValue(target, rf) >= 0.5) !== rf.invert }
+// An F.ATT key is lit while the attack is at its fastest.
+function lit(target, rf) {
+	if (rf.fastAttack) return paramValue(target, rf) <= 0.001
+	return (paramValue(target, rf) >= 0.5) !== rf.invert
+}
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
 var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen]
