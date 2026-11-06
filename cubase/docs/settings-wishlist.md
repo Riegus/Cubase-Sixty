@@ -23,5 +23,7 @@ Behaviour that is fixed in code today but should become a setting once Cubase-Si
   across tracks. Could be: fastest attack / back (like an SSL fast-attack switch).
 - **Key assignments.** Now: magnifier = next channel strip on the track, 360° = open / close the strip's window.
   Rea-Sixty lets the user bind these keys (and the Bus Comp encoder push) to other actions.
+- **ROUTING order 10 on the UC1.** Now: picture 10 (numbers run 1-10, the picture is slightly off). Could be: picture 8
+  (right path, renumbered to 8); order 10 left out.
 - **Knob step size.** Now: 1/64 of the range per click, Fine = a quarter of that.
 - **7-segment.** Now: the MixConsole number, leading zeros blank. Rea-Sixty shows leading zeros ("007").
