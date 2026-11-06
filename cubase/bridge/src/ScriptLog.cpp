@@ -5,6 +5,24 @@
 #include <ctime>
 #include <filesystem>
 #include <mutex>
+#include <string>
+#include <thread>
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#define CS_PIPE(fds) _pipe(fds, 1 << 16, _O_BINARY)
+#define CS_DUP _dup
+#define CS_DUP2 _dup2
+#define CS_READ _read
+#define CS_WRITE _write
+#else
+#include <unistd.h>
+#define CS_PIPE(fds) pipe(fds)
+#define CS_DUP dup
+#define CS_DUP2 dup2
+#define CS_READ read
+#define CS_WRITE write
+#endif
 
 namespace cs {
 namespace {
@@ -31,17 +49,74 @@ std::string stamp()
 }
 }
 
-void scriptLogInit(const char* argv0)
+// The bridge runs from cubase\bridge\build\Release: the logs go to cubase\logs.
+std::filesystem::path logDir(const char* argv0)
 {
     namespace fs = std::filesystem;
     std::error_code ec;
     fs::path dir = fs::absolute(fs::path(argv0 ? argv0 : ""), ec).parent_path();
-    // The bridge runs from cubase\bridge\build\Release: the logs go to cubase\logs.
     fs::path logs = dir / "logs";
     for (fs::path p = dir; !p.empty() && p != p.parent_path(); p = p.parent_path()) {
         if (p.filename() == "bridge") { logs = p.parent_path() / "logs"; break; }
     }
     fs::create_directories(logs, ec);
+    return logs;
+}
+
+void bridgeLogInit(const char* argv0)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path logs = logDir(argv0);
+    const fs::path file = logs / "bridge.log";
+    if (fs::exists(file, ec)) fs::rename(file, logs / "bridge.previous.log", ec);
+    const std::string path = file.string();
+    FILE* f = std::fopen(path.c_str(), "w");
+    if (!f) { std::fprintf(stderr, "Bridge log could not be opened: %s\n", path.c_str()); return; }
+    // stdout and stderr go into a pipe; a thread copies what comes out to the window and to the file.
+    int fds[2];
+    if (CS_PIPE(fds) != 0) { std::fclose(f); return; }
+    std::fflush(stdout);
+    std::fflush(stderr);
+    const int window = CS_DUP(1);
+    CS_DUP2(fds[1], 1);
+    CS_DUP2(fds[1], 2);
+    std::setvbuf(stdout, nullptr, _IONBF, 0);   // a pipe would otherwise hold lines back
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+    std::thread([f, window, rd = fds[0], path]() mutable {
+        char buf[4096];
+        bool lineStart = true;
+        long bytes = 0;
+        constexpr long kMax = 20L * 1024 * 1024;
+        for (;;) {
+            const int n = CS_READ(rd, buf, sizeof buf);
+            if (n <= 0) break;
+            CS_WRITE(window, buf, n);
+            for (int i = 0; i < n; ++i) {
+                if (lineStart) { bytes += std::fprintf(f, "%s ", stamp().c_str()); lineStart = false; }
+                std::fputc(buf[i], f);
+                ++bytes;
+                if (buf[i] == '\n') lineStart = true;
+            }
+            std::fflush(f);
+            if (bytes > kMax && lineStart) {
+                std::fclose(f);
+                std::error_code e2;
+                std::filesystem::rename(path, path + ".old", e2);
+                f = std::fopen(path.c_str(), "w");
+                bytes = 0;
+                if (!f) break;
+            }
+        }
+    }).detach();
+    std::printf("Bridge log: %s\n", path.c_str());
+}
+
+void scriptLogInit(const char* argv0)
+{
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path logs = logDir(argv0);
     const fs::path file = logs / "scripts.log";
     if (fs::exists(file, ec)) fs::rename(file, logs / "scripts.previous.log", ec);
     std::lock_guard<std::mutex> lk(g_mx);

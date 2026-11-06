@@ -539,6 +539,7 @@ bool cs::uf8BankPress(bool right)
 
 int main(int argc, char** argv)
 {
+    cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
     cs::scriptLogInit(argc > 0 ? argv[0] : nullptr);
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); cs::uc1SetTrace(true); g_trace8 = true; cs::midiPortsTrace(true); }
