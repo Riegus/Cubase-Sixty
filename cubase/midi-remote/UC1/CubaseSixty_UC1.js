@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.9.1-dev'
+var SCRIPT_VERSION = '0.10.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -135,6 +135,10 @@ var CHANNEL_STRIPS = [
 			B.Expand, 33, B.FastAttGate, 34, B.ScListen, 36]),
 		0)
 ]
+// The routing switches (ROUTING screen), by parameter index: filters to input, filters to S/C, EQ to S/C, dynamics
+// pre EQ, external S/C (Rea-Sixty PluginMap.cpp). The 360 Link has none.
+var ROUTING = { 'CS 2': [33, 35, 36, 34, 1], '4K E': [16, 17, 20, 34, 1], '4K B': [12, 13, 15, 29, 1], '4K G': [2, 3, 4, 5, 1] }
+for (var ri = 0; ri < CHANNEL_STRIPS.length; ++ri) if (ROUTING[CHANNEL_STRIPS[ri].label]) CHANNEL_STRIPS[ri].routing = ROUTING[CHANNEL_STRIPS[ri].label]
 var BUS_COMPS = [
 	pmap('SSL 360 Link Bus Compressor', 'L-BC',
 		kv([K.BcThreshold, 1, K.BcMakeup, 2, K.BcAttack, 3, K.BcRelease, 4, K.BcRatio, 5, K.BcScHpf, 6, K.BcMix, 7]),
@@ -238,6 +242,7 @@ function makeTarget(acc, obj, map, name) {
 	for (var k in map.knobs) t.knobs[k] = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.knobs[k]), map.inverted.indexOf(Number(k)) >= 0)
 	for (var b in map.buttons) t.buttons[b] = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.buttons[b]), false)
 	if (map.bypass >= 0) t.bypass = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.bypass), true)
+	if (map.routing) t.routing = map.routing.map(function (i) { return ref(acc, obj, acc.getParameterTagByIndex(am, obj, i), false) })
 	indexKnobs(t)
 	return t
 }
@@ -774,8 +779,25 @@ function onBcEncoder(activeDevice, steps) {
 	paintAll(activeDevice)
 }
 
+// The channel strip's routing switches for the bridge's ROUTING screen (SysEx 3F; 7F = no routing).
+var routingShown = null
+function reportRouting(activeDevice) {
+	var vals = [0x7F, 0x7F, 0x7F, 0x7F, 0x7F]
+	try {
+		if (state.cs && state.cs.routing) vals = state.cs.routing.map(function (rf) { return paramValue(state.cs, rf) >= 0.5 ? 1 : 0 })
+	} catch (e) {}
+	if (routingShown === vals.join(',')) return
+	routingShown = vals.join(',')
+	sysex(activeDevice, [0x3F].concat(vals))
+}
+function setRouting(activeDevice, message) {
+	if (!state.cs || !state.cs.routing) return
+	for (var k = 0; k < 5; ++k) state.cs.da.setParameterProcessValue(am, state.cs.routing[k].obj, state.cs.routing[k].tag, message[5 + k] ? 1 : 0)
+	reportRouting(activeDevice)
+}
 var pluginsShown = null
 function paintAll(activeDevice) {
+	reportRouting(activeDevice)
 	var bc = busComp()
 	// The SSL plug-ins the two sections are on, for the bridge's PRESETS screen.
 	var csName = state.cs && state.cs.key !== 'cubase' ? state.cs.name || '' : ''
@@ -1127,6 +1149,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (message.length < 7 || message[4] === undefined) return
 	var cmd = message[4]
 	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
+	if (cmd === 0x3E && am && message.length >= 11) { try { setRouting(activeDevice, message) } catch (e) { log('routing: ' + e) } return }
 	if (cmd !== 0x20 && cmd !== 0x21) return
 	if (!am) { if (++sysexErrors <= 3) log('UC1 event before the page was active; ignored'); return }
 	try {
@@ -1152,6 +1175,7 @@ function onParameterChange(activeDevice, objectID, tag) {
 	var bc = busComp()
 	var target = state.cs && state.cs.objs[objectID] ? state.cs : bc && bc.objs[objectID] ? bc : null
 	if (!target) return
+	if (target === state.cs && state.cs.routing) reportRouting(activeDevice)
 	try {
 		var knob = target.knobByKey[objectID + ':' + tag]
 		if (knob !== undefined) paintRing(activeDevice, knob)
@@ -1196,6 +1220,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	am = activeMapping
 	ledShown = {}
 	ringShown = {}
+	routingShown = null
 	labelShown = null
 	log('page active')
 	state.rescanAt = Date.now() + 100

@@ -21,6 +21,9 @@
 //                   SysEx 39 <header>                     show the Bus Comp scroll header (e.g. "BUS COMP 2") for 1.5 s
 //                   SysEx 3B <cs plug-in> 7F 7F 7F <bc plug-in>   the SSL plug-ins the two sections are on (names; empty =
 //                                                         none), for the PRESETS screen
+//                   SysEx 3F <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc>   the channel strip's routing switches (0 / 1;
+//                                                         7F = the strip has no routing), for the ROUTING screen
+//   UC1 -> script   SysEx 3E <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc>   set the routing (ROUTING screen)
 //                   SysEx 3A <cc> <value>                 send CC <cc> <value> (channel 1) back to Cubase: lets the script
 //                                                         set a host value it has bound to a CC (a strip module's on switch)
 // The two encoders send one step per detent (Rea-Sixty's accumulator: 3 ticks per step, reset after a 100 ms
@@ -87,6 +90,11 @@ bool g_presetsCs = true;         // which section's plug-in is browsed
 std::string g_presetGroup;       // the folder shown ('/'-separated below the plug-in's folder)
 int g_presetSel = 0;
 std::string g_csPlugin, g_bcPlugin;   // from the script (SysEx 3B)
+std::atomic<bool> g_routingOn{false};   // the ROUTING screen is showing
+// The channel strip's routing switches as the script reports them (SysEx 3F): -1 = the strip has none.
+int g_routing[5] = {-1, -1, -1, -1, -1};   // filters to input, filters to S/C, EQ to S/C, dynamics pre EQ, external S/C
+bool menuOn() { return g_presetsOn || g_routingOn; }
+void renderRouting();   // the ROUTING screen (below)
 
 void traceMidi(const char* dir, const std::vector<unsigned char>& m)
 {
@@ -138,7 +146,7 @@ std::vector<uint8_t> largeRow()
 // While the Bus Comp scroll header shows, the model field gives way to it (SSL 360: layout 02 + header).
 void paintCentre()
 {
-    if (g_presetsOn) return;
+    if (menuOn()) return;
     std::string name, label, header;
     uint8_t palette;
     bool headerOn;
@@ -162,7 +170,7 @@ void paintCentre()
 
 void showHeader(const std::string& text)
 {
-    if (g_presetsOn) return;
+    if (menuOn()) return;
     int gen;
     {
         std::lock_guard<std::mutex> lk(g_stateMx);
@@ -178,7 +186,7 @@ void showHeader(const std::string& text)
             if (gen != g_headerGen) return;   // turned again: that one reverts
             g_header.clear();
         }
-        if (g_presetsOn) return;
+        if (menuOn()) return;
         send(::uc1::buildCentralMode(::uc1::CentralMode::Main, 0x00));
         paintCentre();
     }).detach();
@@ -478,14 +486,14 @@ void onSysex(const std::vector<unsigned char>& m)
         if (m.size() >= 7) {
             // SSL 360's readout burst: precursor, the large name row, the text.
             const std::string text = decodeName(m, 6);
-            if (g_presetsOn) break;
+            if (menuOn()) break;
             send(::uc1::buildReadoutPrecursor(0x00));
             send(largeRow());
             send(::uc1::buildDisplayText(m[5], text, text.size()));
         }
         break;
     case 0x34: if (m.size() >= 8) setLed(m[5], m[6]); break;
-    case 0x35: if (!g_presetsOn) send(::uc1::buildDisplayInvalidate(m[5])); break;
+    case 0x35: if (!menuOn()) send(::uc1::buildDisplayInvalidate(m[5])); break;
     case 0x36:   // knob ring: <knob> <value hi> <value lo> (0..16382; 7F 7F = off) <1 = dim>
         if (m.size() >= 10) {
             const int v = (m[6] << 7) | m[7];
@@ -511,7 +519,7 @@ void onSysex(const std::vector<unsigned char>& m)
             at = end + 3;   // past the separator
         }
         { std::lock_guard<std::mutex> lk(g_stateMx); for (int k = 0; k < 3; ++k) g_bcNames[k] = names[k]; }
-        if (!g_presetsOn) send(largeRow());
+        if (!menuOn()) send(largeRow());
         break;
     }
     case 0x39: showHeader(decodeName(m, 5)); break;
@@ -524,6 +532,13 @@ void onSysex(const std::vector<unsigned char>& m)
         g_bcPlugin = bc;
         break;
     }
+    case 0x3F:
+        if (m.size() >= 11) {
+            std::lock_guard<std::mutex> lk(g_presetMx);
+            for (int k = 0; k < 5; ++k) g_routing[k] = m[5 + k] == 0x7F ? -1 : m[5 + k];
+            renderRouting();
+        }
+        break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
     default: break;
     }
@@ -538,7 +553,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
@@ -776,12 +791,67 @@ void loadPreset(const PresetEntry& e, bool cs)
     std::printf("UC1 presets: \"%s\" sent (%d values)\n", e.name.c_str(), n);
 }
 
+// ---------------------------------------------------------------------------
+// ROUTING screen (Rea-Sixty UC1Surface: kRoutingPresets, renderRoutingSubscreen_, the ROUTING encoder handler). The
+// SSL channel strips' routing is five switches; SSL 360 steps through ten orders of the first four, each with
+// External S/C off and on (20 positions, wrapping), on the Bus Comp encoder. The screen shows the order number
+// (b-variant = External S/C on). The script reports the switches (SysEx 3F) and sets them (3E).
+// ---------------------------------------------------------------------------
+struct RoutingOrder { uint8_t filtIn, filtSC, eqSC, dynPreEq; };
+constexpr RoutingOrder kRoutingOrders[10] = {
+    {1, 0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 1}, {1, 0, 0, 1}, {1, 1, 0, 1},
+    {1, 0, 1, 0}, {1, 1, 0, 0}, {1, 1, 1, 0}, {0, 0, 1, 0}, {0, 1, 1, 1},
+};
+int routingPosition()   // 0..19 (g_presetMx held); a combination set by hand counts as order 1
+{
+    for (int i = 0; i < 10; ++i) {
+        const auto& o = kRoutingOrders[i];
+        if (o.filtIn == g_routing[0] && o.filtSC == g_routing[1] && o.eqSC == g_routing[2] && o.dynPreEq == g_routing[3])
+            return i * 2 + (g_routing[4] == 1 ? 1 : 0);
+    }
+    return 0;
+}
+void renderRouting()   // g_presetMx held
+{
+    if (!g_routingOn) return;
+    if (g_routing[0] < 0) { send(::uc1::buildLcdHeader("NO ROUTING")); return; }
+    const int pos = routingPosition();
+    send(::uc1::buildRoutingOrderIndicator(uint8_t((pos / 2 + 1) | (pos % 2 ? 0x80 : 0x00))));
+}
+void setRoutingMode(bool on)   // g_presetMx held
+{
+    namespace U = ::uc1;
+    if (g_routingOn == on) return;
+    g_routingOn = on;
+    send(U::buildCentralMode(on ? U::CentralMode::Routing : U::CentralMode::Main));
+    send(U::buildBcModeDot(!on));
+    for (auto& f : U::buildMenuDot(U::kCellRoutingDot, on)) send(f);
+    if (on) renderRouting();
+    else { paintCentre(); paintSevenSeg(); }
+}
+void routingStep(int step)   // g_presetMx held
+{
+    if (g_routing[0] < 0) return;
+    int pos = (routingPosition() + step) % 20;
+    if (pos < 0) pos += 20;
+    const auto& o = kRoutingOrders[pos / 2];
+    const uint8_t ext = uint8_t(pos % 2);
+    g_routing[0] = o.filtIn; g_routing[1] = o.filtSC; g_routing[2] = o.eqSC; g_routing[3] = o.dynPreEq; g_routing[4] = ext;
+    sysex({0x3E, o.filtIn, o.filtSC, o.eqSC, o.dynPreEq, ext});
+    renderRouting();
+}
+
 // The PRESETS screen's keys and encoder. Returns true if the event was the screen's.
 bool presetsButton(uint8_t id, bool pressed)
 {
     namespace B = ::uc1::button;
     std::lock_guard<std::mutex> lk(g_presetMx);
-    if (id == B::kPresets) { if (pressed) setPresetsMode(!g_presetsOn); return true; }
+    if (id == B::kPresets) { if (pressed) { setRoutingMode(false); setPresetsMode(!g_presetsOn); } return true; }
+    if (id == B::kRouting) { if (pressed) { setPresetsMode(false); setRoutingMode(!g_routingOn); } return true; }
+    if (g_routingOn) {
+        if (id == B::kBack || id == B::kConfirm || id == B::kSecEncPush) { if (pressed) setRoutingMode(false); return true; }
+        return false;
+    }
     if (!g_presetsOn) return false;
     if (id != B::kBack && id != B::kConfirm && id != B::kSecEncPush) return false;
     if (!pressed) return true;
@@ -819,11 +889,12 @@ bool presetsButton(uint8_t id, bool pressed)
 bool presetsKnob(uint8_t id, int delta)
 {
     std::lock_guard<std::mutex> lk(g_presetMx);
-    if (!g_presetsOn) return false;
+    if (!menuOn()) return false;
     if (id != ::uc1::knob::kBcEncoder) return id == ::uc1::knob::kChannelEncoder;   // CHANNEL does nothing here
     static Accumulator acc;
     const int step = acc.step(delta);
     if (step == 0) return true;
+    if (g_routingOn) { routingStep(step); return true; }
     if (!g_presetsBrowse) { g_presetsCs = !g_presetsCs; renderPresets(); return true; }
     const int n = int(presetRows().size());
     if (n > 0) g_presetSel = std::clamp(g_presetSel + step, 0, n - 1);
