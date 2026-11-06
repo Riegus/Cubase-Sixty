@@ -39,6 +39,7 @@
 #include "Uc1Bridge.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cctype>
 #include <cstdlib>
@@ -1054,6 +1055,16 @@ void grLoop()
                 if (line.find("streams:") == std::string::npos) key += line.substr(0, line.find(" comp ")) + "\n";
                 if (e == std::string::npos) break;
                 a = e + 1;
+            }
+            {   // Liveness, every 30 s: how many plug-ins stream, and how long since data / a new connection.
+                static int every = 0;
+                if (++every % 10 == 0) {
+                    int n = 0;
+                    for (char c : sum) if (c == '\n') ++n;
+                    const long long d = sslcore::msSinceLastData(), c = sslcore::msSinceLastNewConn();
+                    std::printf("SSL Core stand-in: %d plug-ins streaming, last data %lld ms ago, last new connection %lld s ago\n",
+                                n, d == INT64_MAX ? -1 : d, c == INT64_MAX ? -1 : c / 1000);
+                }
             }
             if (sum.empty()) key = sslcore::pluginConnected() ? "connected, no meter data" : "none";
             if (key != lastSummary) {
