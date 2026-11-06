@@ -3272,3 +3272,36 @@ long long msSinceLastNewConn() {
 }
 
 } // namespace sslcore
+
+// ── Cubase-Sixty: a one-line-per-instance summary for the bridge log ─────────
+// What each connected SSL plug-in announced (type, track index / name, model) and
+// whether its CompGain / GateGain streams have values, to tie the instances to
+// Cubase's tracks. Thread-safe.
+namespace sslcore {
+std::string debugSummary()
+{
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    std::string out;
+    const long long now = nowMs();
+    for (const auto& kv : g_inst) {
+        const uint16_t port = kv.first;
+        const Instance& in = kv.second;
+        if (now - in.lastMs > 3000) continue;
+        char line[256];
+        auto pn = g_portName.find(port);
+        auto pi = g_portIndex.find(port);
+        auto pm = g_portModel.find(port);
+        const Slot& comp = in.meter[4];
+        const Slot& gate = in.meter[5];
+        std::snprintf(line, sizeof line, "  port %u type %d kind %s track %d \"%s\" model \"%s\" comp %s gate %s\n",
+                      unsigned(port), in.pluginType, kindName_(in.kind),
+                      pi == g_portIndex.end() ? 0 : pi->second,
+                      pn == g_portName.end() ? "" : pn->second.c_str(),
+                      pm == g_portModel.end() ? "" : pm->second.c_str(),
+                      comp.have && !comp.current.empty() ? std::to_string(comp.current[0]).c_str() : "-",
+                      gate.have && !gate.current.empty() ? std::to_string(gate.current[0]).c_str() : "-");
+        out += line;
+    }
+    return out;
+}
+} // namespace sslcore

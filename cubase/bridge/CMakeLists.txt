@@ -64,9 +64,14 @@ add_executable(cubase_sixty_bridge
     ${EXT_SRC}/UC1Protocol.cpp
     ${EXT_SRC}/Protocol.cpp
     ${EXT_SRC}/Palette.cpp
-    ${EXT_SRC}/LogPath.cpp)
+    ${EXT_SRC}/LogPath.cpp
+    ${EXT_SRC}/SslCoreImpersonator.cpp
+    ${EXT_SRC}/SslMeterProtocol.cpp)
 target_include_directories(cubase_sixty_bridge PRIVATE src ${EXT_SRC})
 target_link_libraries(cubase_sixty_bridge PRIVATE cs_libusb rtmidi)
+if(WIN32)
+    target_link_libraries(cubase_sixty_bridge PRIVATE ws2_32)   # the SSL 360 Core stand-in (sockets)
+endif()
 if(MSVC)
     target_compile_options(cubase_sixty_bridge PRIVATE /utf-8 /permissive-)
 endif()

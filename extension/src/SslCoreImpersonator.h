@@ -355,4 +355,7 @@ long long msSinceLastData();
 // each connecting plug-in selects its own track.
 long long msSinceLastNewConn();
 
+// Cubase-Sixty: one line per live instance (type, announced track, model, CompGain / GateGain), for a log.
+std::string debugSummary();
+
 } // namespace sslcore
