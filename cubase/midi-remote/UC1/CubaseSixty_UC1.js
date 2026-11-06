@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.7.0-dev'
+var SCRIPT_VERSION = '0.7.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -448,15 +448,17 @@ function cubaseStrip(objects) {
 	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
 	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
 	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
-	// DYN IN: the compressor's and the gate's bypass together, as DYN IN switches an SSL strip's whole dynamics
-	// section (lit while either is in).
+	// DYN IN: the compressor's bypass; EXP (Cubase's Noise Gate has no expander mode): the gate's bypass. Each lit
+	// while its module is in. SC LISTEN: the gate's side-chain monitor.
 	var compBypass = sw(comp, compList, [RX.bypass]), gateBypass = sw(gate, gateList, [RX.bypass])
 	t.dynBypass = []
 	if (compBypass) { compBypass.invert = true; t.dynBypass.push(compBypass); t.objs[comp] = true }
-	if (gateBypass) { gateBypass.invert = true; t.dynBypass.push(gateBypass); t.objs[gate] = true }
+	if (gateBypass) { gateBypass.invert = true; t.buttons[B.Expand] = gateBypass; t.objs[gate] = true }
+	var scMonitor = sw(gate, gateList, [/^sc\s*monitor$/i])
+	if (scMonitor) { t.buttons[B.ScListen] = scMonitor; t.objs[gate] = true }
 	if (++stripLogs <= 5) {
 		log('Cubase strip:' + (missing.length ? ' not found: ' + missing.join(', ') : ' everything found')
-			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (t.dynBypass.length ? t.dynBypass.map(function (b) { return '"' + b.title + '"' }).join(' + ') : 'none'))
+			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none') + ', EXP ' + (gateBypass ? '"' + gateBypass.title + '"' : 'none') + ', SC LISTEN ' + (scMonitor ? '"' + scMonitor.title + '"' : 'none'))
 		for (var f = 0; f < found.length; ++f) log('Cubase strip:   ' + found[f])
 	}
 	indexKnobs(t)
@@ -810,6 +812,11 @@ function onButton(activeDevice, id) {
 	// DYN IN on Cubase's strip without a compressor: load the Standard Compressor straight away.
 	if (id === B.DynIn && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
 		loadModule(activeDevice, state.cs, 'comp', STRIP_MODULES.comp[0])
+		return
+	}
+	// EXP on Cubase's strip without a gate: load the Noise Gate (as DYN IN loads a compressor).
+	if (id === B.Expand && state.cs && state.cs.emptySlots && state.cs.noGate && state.cs.emptySlots.length) {
+		loadModule(activeDevice, state.cs, 'gate', STRIP_MODULES.gate[0])
 		return
 	}
 	if (id === B.DynIn && state.cs && state.cs.dynBypass && state.cs.dynBypass.length) {
