@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.4.2-dev'
+var SCRIPT_VERSION = '0.4.3-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -230,6 +230,7 @@ var state = {
 	rescanAt: 0,       // when to look at the selected track's plug-ins again (0 = not pending)
 	mixScanAt: 0,      // when to search the MixConsole for bus comps again (0 = not pending)
 	fine: false,
+	attack: { comp: false, gate: false },   // Cubase strip: the Release knob is on attack (F.ATT)
 	dumped: {}         // plug-in names whose parameters were already listed in the log
 }
 
@@ -388,10 +389,19 @@ function cubaseStrip(objects) {
 	knob(K.GateRange, 'gate range', gate, gateList, [RX.range])
 	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release])
 	knob(K.GateHold, 'gate hold', gate, gateList, [RX.hold], [RX.thresh])
-	// F.ATT keys (the UC1 has no attack knobs): fastest attack, and back to the attack it had before.
-	var compAttack = sw(comp, compList, [RX.attack]), gateAttack = sw(gate, gateList, [RX.attack])
-	if (compAttack) { compAttack.fastAttack = true; t.buttons[B.FastAttComp] = compAttack; t.objs[comp] = true; found.push('comp attack="' + compAttack.title + '"') }
-	if (gateAttack) { gateAttack.fastAttack = true; t.buttons[B.FastAttGate] = gateAttack; t.objs[gate] = true; found.push('gate attack="' + gateAttack.title + '"') }
+	// The UC1 has no attack knobs: the F.ATT keys switch their section's Release knob between release and attack
+	// (lit = attack). The choice stays when you change tracks.
+	t.flip = {}
+	function attackFlip(key, mode, releaseKnob, obj, list) {
+		var p = obj ? findParam(list, [RX.attack]) : null
+		if (!p || !t.knobs[releaseKnob]) return
+		t.flip[key] = { mode: mode, knob: releaseKnob, release: t.knobs[releaseKnob],
+			attack: { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16) } }
+		found.push(mode + ' attack="' + p.title + '"')
+		if (state.attack[mode]) t.knobs[releaseKnob] = t.flip[key].attack
+	}
+	attackFlip(B.FastAttComp, 'comp', K.CompRelease, comp, compList)
+	attackFlip(B.FastAttGate, 'gate', K.GateRelease, gate, gateList)
 	// EQ IN: lit while the EQ is not bypassed. DYN IN: the compressor's bypass, if it has one.
 	var eqBypass = sw(eq, eqList, [RX.bypass], [RX.digit])
 	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
@@ -550,21 +560,11 @@ function dumpParams(acc, obj, name) {
 function paramValue(target, rf) { return target.da.getParameterProcessValue(am, rf.obj, rf.tag) }
 function toggleParam(target, rf) {
 	if (!rf) return
-	if (rf.fastAttack) {
-		var a = paramValue(target, rf)
-		if (a > 0.001) { rf.before = a; target.da.setParameterProcessValue(am, rf.obj, rf.tag, 0) }
-		else target.da.setParameterProcessValue(am, rf.obj, rf.tag, rf.before !== undefined ? rf.before : 0.25)
-		return
-	}
 	var v = paramValue(target, rf)
 	target.da.setParameterProcessValue(am, rf.obj, rf.tag, v >= 0.5 ? 0 : 1)
 }
 // A switch's LED: lit when the parameter is on (or, for refs marked invert, off: a bypass lights IN when 0).
-// An F.ATT key is lit while the attack is at its fastest.
-function lit(target, rf) {
-	if (rf.fastAttack) return paramValue(target, rf) <= 0.001
-	return (paramValue(target, rf) >= 0.5) !== rf.invert
-}
+function lit(target, rf) { return (paramValue(target, rf) >= 0.5) !== rf.invert }
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
 var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen]
@@ -572,7 +572,8 @@ function paintLeds(activeDevice) {
 	for (var i = 0; i < CS_BUTTONS.length; ++i) {
 		var b = CS_BUTTONS[i]
 		var on = false
-		if (state.cs && state.cs.buttons[b]) {
+		if (state.cs && state.cs.flip && state.cs.flip[b]) on = state.attack[state.cs.flip[b].mode]
+		else if (state.cs && state.cs.buttons[b]) {
 			try { on = lit(state.cs, state.cs.buttons[b]) } catch (e) {}
 		}
 		setLed(activeDevice, b, on ? 1 : 0)
@@ -617,6 +618,18 @@ function onButton(activeDevice, id) {
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
 	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.bypass); paintLeds(activeDevice); return }
+	if (state.cs && state.cs.flip && state.cs.flip[id]) {
+		var f = state.cs.flip[id]
+		state.attack[f.mode] = !state.attack[f.mode]
+		var rf = state.attack[f.mode] ? f.attack : f.release
+		state.cs.knobs[f.knob] = rf
+		indexKnobs(state.cs)
+		paintLeds(activeDevice)
+		paintRing(activeDevice, f.knob)
+		var units = state.cs.da.getParameterDisplayUnits(am, rf.obj, rf.tag)
+		readout(activeDevice, ZONE_CS, rf.title, state.cs.da.getParameterDisplayValue(am, rf.obj, rf.tag) + (units || ''))
+		return
+	}
 	if (state.cs && state.cs.buttons[id]) {
 		toggleParam(state.cs, state.cs.buttons[id])
 		paintLeds(activeDevice)
