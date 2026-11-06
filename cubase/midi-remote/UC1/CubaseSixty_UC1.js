@@ -18,7 +18,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.1.1-dev'
+var SCRIPT_VERSION = '0.2.0-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -139,6 +139,15 @@ function setLed(activeDevice, button, state) {
 	ledShown[button] = state
 	sysex(activeDevice, [0x34, button, state])
 }
+// A knob's LED ring: value 0..1, or null for off.
+var ringShown = {}
+function setRing(activeDevice, knob, value, dim) {
+	var v = value === null ? 0x3FFF : Math.max(0, Math.min(16382, Math.round(value * 16382)))
+	var key = v * 2 + (dim ? 1 : 0)
+	if (ringShown[knob] === key) return
+	ringShown[knob] = key
+	sysex(activeDevice, [0x36, knob, (v >> 7) & 0x7F, v & 0x7F, dim ? 1 : 0])
+}
 var labelShown = null
 function setLabel(activeDevice, label) {
 	if (labelShown === label) return
@@ -239,7 +248,33 @@ function rescan(activeDevice) {
 	setLabel(activeDevice, state.cs ? state.cs.map.label : state.bc ? state.bc.map.label : '')
 	if (!state.cs) sysex(activeDevice, [0x35, ZONE_CS])
 	if (!state.bc) sysex(activeDevice, [0x35, ZONE_BC])
+	if (state.cs) state.cs.knobByTag = knobsByTag(state.cs)
+	if (state.bc) state.bc.knobByTag = knobsByTag(state.bc)
 	paintLeds(activeDevice)
+	paintRings(activeDevice)
+}
+
+// Which knob drives each parameter tag (for rings that follow changes made elsewhere).
+function knobsByTag(target) {
+	var out = {}
+	for (var k in target.map.knobs) out[da.getParameterTagByIndex(am, target.obj, target.map.knobs[k])] = Number(k)
+	return out
+}
+function targetFor(knob) { return isBusCompKnob(knob) ? state.bc : state.cs }
+// The ring shows where the knob points: flipped for the knobs whose parameter runs the other way.
+function paintRing(activeDevice, knob) {
+	var target = targetFor(knob)
+	var index = target ? target.map.knobs[knob] : undefined
+	if (index === undefined) { setRing(activeDevice, knob, null, false); return }
+	var v = paramValue(target, index)
+	if (target.map.inverted.indexOf(knob) >= 0) v = 1 - v
+	setRing(activeDevice, knob, v, false)
+}
+function paintRings(activeDevice) {
+	for (var knob = 0x00; knob <= 0x1D; ++knob) {
+		if (knob === 0x0D || knob === 0x15) continue   // the CHANNEL and Bus Comp encoders have no ring
+		try { paintRing(activeDevice, knob) } catch (e) { log('ring 0x' + knob.toString(16) + ': ' + e) }
+	}
 }
 
 // The first time a plug-in is found, list its parameters (index, tag, name, value), to check the maps.
@@ -296,6 +331,7 @@ function onKnob(activeDevice, id, clicks) {
 	var v = da.getParameterProcessValue(am, target.obj, tag) + step
 	v = Math.max(0, Math.min(1, v))
 	da.setParameterProcessValue(am, target.obj, tag, v)
+	setRing(activeDevice, id, target.map.inverted.indexOf(id) >= 0 ? 1 - v : v, false)
 	var value = da.getParameterDisplayValue(am, target.obj, tag)
 	var units = da.getParameterDisplayUnits(am, target.obj, tag)
 	readout(activeDevice, target === state.bc ? ZONE_BC : ZONE_CS, da.getParameterTitle(am, target.obj, tag, 16),
@@ -331,7 +367,13 @@ midiInput.mOnSysex = function (activeDevice, message) {
 // Parameter changes from anywhere (the plug-in's window, automation): keep the LEDs right.
 da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 	am = activeMapping
-	if ((state.cs && objectID === state.cs.obj) || (state.bc && objectID === state.bc.obj)) paintLeds(activeDevice)
+	var target = state.cs && objectID === state.cs.obj ? state.cs : state.bc && objectID === state.bc.obj ? state.bc : null
+	if (!target) return
+	try {
+		var knob = target.knobByTag ? target.knobByTag[tag] : undefined
+		if (knob !== undefined) paintRing(activeDevice, knob)
+		else paintLeds(activeDevice)
+	} catch (e) {}
 }
 // Objects added or removed (a plug-in inserted, removed or replaced): look again shortly.
 da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
@@ -351,6 +393,7 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 page.mOnActivate = function (activeDevice, activeMapping) {
 	am = activeMapping
 	ledShown = {}
+	ringShown = {}
 	labelShown = null
 	log('page active')
 	state.rescanAt = Date.now() + 100
