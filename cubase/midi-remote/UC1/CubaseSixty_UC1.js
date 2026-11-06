@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.4.3-dev'
+var SCRIPT_VERSION = '0.4.4-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -328,7 +328,7 @@ var RX = {
 	gain: /gain/i, freq: /freq/i, q: /(^|\W)q(\W|$)|quality/i, on: /(^|\W)on(\W|$)|enable|active/i,
 	bypass: /bypass/i, lowCut: /low\s*cut|lo\s*cut|(^|\W)lc(\W|$)|high\s*pass|(^|\W)hp/i,
 	highCut: /high\s*cut|hi\s*cut|(^|\W)hc(\W|$)|low\s*pass|(^|\W)lp/i,
-	thresh: /thresh/i, ratio: /ratio/i, release: /release/i, range: /range/i, hold: /(^|\W)hold/i, attack: /attack/i, digit: /\d/
+	thresh: /thresh/i, ratio: /ratio/i, release: /release/i, range: /range/i, hold: /(^|\W)hold/i, attack: /attack/i, digit: /\d/, auto: /auto|mode/i
 }
 var stripLogs = 0
 function cubaseStrip(objects) {
@@ -347,7 +347,7 @@ function cubaseStrip(objects) {
 		}
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
-	var t = { da: da, label: 'CUBASE', header: '', knobs: {}, buttons: {}, bypass: null, objs: {} }
+	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
 	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
 		var p = obj ? findParam(list, patterns, exclude) : null
@@ -384,16 +384,17 @@ function cubaseStrip(objects) {
 	}
 	knob(K.CompThreshold, 'comp threshold', comp, compList, [RX.thresh])
 	knob(K.CompRatio, 'comp ratio', comp, compList, [RX.ratio])
-	knob(K.CompRelease, 'comp release', comp, compList, [RX.release])
+	// "Auto Release" (a switch) must not be taken for the release time.
+	knob(K.CompRelease, 'comp release', comp, compList, [RX.release], [RX.auto])
 	knob(K.GateThreshold, 'gate threshold', gate, gateList, [RX.thresh])
 	knob(K.GateRange, 'gate range', gate, gateList, [RX.range])
-	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release])
+	knob(K.GateRelease, 'gate release', gate, gateList, [RX.release], [RX.auto])
 	knob(K.GateHold, 'gate hold', gate, gateList, [RX.hold], [RX.thresh])
 	// The UC1 has no attack knobs: the F.ATT keys switch their section's Release knob between release and attack
 	// (lit = attack). The choice stays when you change tracks.
 	t.flip = {}
 	function attackFlip(key, mode, releaseKnob, obj, list) {
-		var p = obj ? findParam(list, [RX.attack]) : null
+		var p = obj ? findParam(list, [RX.attack], [RX.auto]) : null
 		if (!p || !t.knobs[releaseKnob]) return
 		t.flip[key] = { mode: mode, knob: releaseKnob, release: t.knobs[releaseKnob],
 			attack: { obj: obj, tag: p.tag, invert: false, title: p.title.substr(0, 16) } }
@@ -407,8 +408,11 @@ function cubaseStrip(objects) {
 	if (eqBypass) { eqBypass.invert = true; t.buttons[B.EqIn] = eqBypass; t.objs[eq] = true }
 	var compBypass = sw(comp, compList, [RX.bypass])
 	if (compBypass) { compBypass.invert = true; t.buttons[B.DynIn] = compBypass; t.objs[comp] = true }
-	if (++stripLogs <= 5) log('Cubase strip: found ' + (found.join(', ') || 'nothing') + (missing.length ? '; not found: ' + missing.join(', ') : '')
-		+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none'))
+	if (++stripLogs <= 5) {
+		log('Cubase strip:' + (missing.length ? ' not found: ' + missing.join(', ') : ' everything found')
+			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none'))
+		for (var f = 0; f < found.length; ++f) log('Cubase strip:   ' + found[f])
+	}
 	indexKnobs(t)
 	return t
 }
