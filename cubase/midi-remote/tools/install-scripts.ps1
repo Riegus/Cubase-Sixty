@@ -23,7 +23,7 @@ if (-not (Test-Path $Destination)) {
 $dest = Join-Path $Destination 'CubaseSixty'
 
 $installed = 0
-foreach ($device in 'UF8', 'UF1', 'Helper') {
+foreach ($device in 'UF8', 'UF1', 'UC1', 'Helper') {
     $src = Join-Path $repo "$device\CubaseSixty_$device.js"
     if (-not (Test-Path $src)) { Write-Warning "Missing $src"; continue }
     $dst = Join-Path $dest $device
