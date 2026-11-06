@@ -3272,3 +3272,64 @@ long long msSinceLastNewConn() {
 }
 
 } // namespace sslcore
+
+// ── Cubase-Sixty: a one-line-per-instance summary for the bridge log ─────────
+// What each connected SSL plug-in announced (type, track index / name, model) and
+// whether its CompGain / GateGain streams have values, to tie the instances to
+// Cubase's tracks. Thread-safe.
+namespace sslcore {
+std::string debugSummary()
+{
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    std::string out;
+    const long long now = nowMs();
+    for (const auto& kv : g_inst) {
+        const uint16_t port = kv.first;
+        const Instance& in = kv.second;
+        if (now - in.lastMs > 3000) continue;
+        char line[256];
+        auto pn = g_portName.find(port);
+        auto pi = g_portIndex.find(port);
+        auto pm = g_portModel.find(port);
+        const Slot& comp = in.meter[4];
+        const Slot& gate = in.meter[5];
+        std::snprintf(line, sizeof line, "  port %u type %d kind %s track %d \"%s\" model \"%s\" comp %s gate %s\n",
+                      unsigned(port), in.pluginType, kindName_(in.kind),
+                      pi == g_portIndex.end() ? 0 : pi->second,
+                      pn == g_portName.end() ? "" : pn->second.c_str(),
+                      pm == g_portModel.end() ? "" : pm->second.c_str(),
+                      comp.have && !comp.current.empty() ? std::to_string(comp.current[0]).c_str() : "-",
+                      gate.have && !gate.current.empty() ? std::to_string(gate.current[0]).c_str() : "-");
+        out += line;
+    }
+    return out;
+}
+} // namespace sslcore
+
+// ── Cubase-Sixty: a bus compressor's gain reduction ──────────────────────────
+// A Bus Compressor streams its gain reduction as data type 0 (its "GainReductionMeter", one value, 0 .. negative
+// dB; traced in Cubase 2026-11-06), the slot a channel strip uses for its input meter. So the instance is picked
+// among the BUS COMPRESSORS on the track only: `ordinal` = its position among them (connect = insert order).
+namespace sslcore {
+bool getBusCompGr(int trackIndex, int ordinal, float& dB)
+{
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    const long long now = nowMs();
+    std::vector<std::pair<uint64_t, uint16_t>> v;
+    for (const auto& kv : g_inst) {
+        const int t = kv.second.pluginType;
+        if (t != int(sslmeter::PluginType::NativeBusComp) && t != int(sslmeter::PluginType::GenericBusComp)) continue;
+        if (now - kv.second.lastMs > 1000) continue;
+        auto pi = g_portIndex.find(kv.first);
+        if (pi == g_portIndex.end() || pi->second != trackIndex) continue;
+        auto sq = g_portSeq.find(kv.first);
+        v.emplace_back(sq == g_portSeq.end() ? UINT64_MAX : sq->second, kv.first);
+    }
+    std::sort(v.begin(), v.end());
+    if (ordinal < 0 || size_t(ordinal) >= v.size()) return false;
+    const Slot& s = g_inst[v[size_t(ordinal)].second].meter[0];
+    if (!s.have || s.current.empty() || !std::isfinite(s.current[0])) return false;
+    dB = s.current[0];
+    return true;
+}
+} // namespace sslcore

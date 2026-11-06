@@ -11,6 +11,10 @@ bool scriptLogSysex(const unsigned char* msg, size_t len);
 // Copies everything the bridge prints (its window, including --trace output) into cubase\logs\bridge.log as well,
 // with a timestamp per line; the previous one becomes bridge.previous.log. Call first thing in main().
 void bridgeLogInit(const char* argv0);
+// Rea-Sixty's code writes its own logs (rea_sixty.log: the SSL 360 Core stand-in's start, the plug-ins that
+// connect and what they announce) to the temp folder; this points the temp folder of the bridge process at
+// cubase\logs, so they land next to the others. Call before anything starts.
+void redirectTempToLogs(const char* argv0);
 // A line from the bridge itself.
 void scriptLogLine(const std::string& source, const std::string& text);
 }

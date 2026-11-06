@@ -24,6 +24,10 @@
 //                   SysEx 3F <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc>   the channel strip's routing switches (0 / 1;
 //                                                         7F = the strip has no routing), for the ROUTING screen
 //   UC1 -> script   SysEx 3E <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc>   set the routing (ROUTING screen)
+//                   SysEx 40 <cs track hi> <lo> <cs ordinal> <bc track hi> <lo> <bc ordinal> <cs model>
+//                                                         (cs ordinal: among the SSL strips / bus comps on the track;
+//                                                         bc ordinal: among the bus comps on its track)
+//                                                         where the gain-reduction meters read from (see "Gain reduction")
 //                   SysEx 3A <cc> <value>                 send CC <cc> <value> (channel 1) back to Cubase: lets the script
 //                                                         set a host value it has bound to a CC (a strip module's on switch)
 // The two encoders send one step per detent (Rea-Sixty's accumulator: 3 ticks per step, reset after a 100 ms
@@ -35,6 +39,8 @@
 #include "Uc1Bridge.h"
 
 #include <algorithm>
+#include <climits>
+#include <cmath>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
@@ -56,8 +62,11 @@
 #include "UC1Device.h"
 #include "UC1Protocol.h"
 #include "ScriptLog.h"
+#include "SslCoreImpersonator.h"
 
 namespace cs {
+bool netInit();   // NetInit.cpp
+int stopSslCore(); // SslCoreGuard.cpp
 namespace {
 
 constexpr const char* kPortTo   = "Cubase-Sixty UC1 to Cubase";
@@ -94,6 +103,11 @@ std::atomic<bool> g_routingOn{false};   // the ROUTING screen is showing
 // The channel strip's routing switches as the script reports them (SysEx 3F): -1 = the strip has none.
 int g_routing[5] = {-1, -1, -1, -1, -1};   // filters to input, filters to S/C, EQ to S/C, dynamics pre EQ, external S/C
 bool menuOn() { return g_presetsOn || g_routingOn; }
+// Gain reduction: which SSL plug-in instances the meters read (SysEx 40). Track = the channel's MixConsole number
+// (0 = none), ordinal = the plug-in's position among the SSL plug-ins on that channel (insert order).
+std::mutex g_grMx;
+int g_grCsTrack = 0, g_grCsOrd = 0, g_grBcTrack = 0, g_grBcOrd = 0;
+std::string g_grCsModel;
 void renderRouting();   // the ROUTING screen (below)
 
 void traceMidi(const char* dir, const std::vector<unsigned char>& m)
@@ -539,6 +553,14 @@ void onSysex(const std::vector<unsigned char>& m)
             renderRouting();
         }
         break;
+    case 0x40:
+        if (m.size() >= 12) {
+            std::lock_guard<std::mutex> lk(g_grMx);
+            g_grCsTrack = (m[5] << 7) | m[6]; g_grCsOrd = m[7];
+            g_grBcTrack = (m[8] << 7) | m[9]; g_grBcOrd = m[10];
+            g_grCsModel = decodeName(m, 11);
+        }
+        break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
     default: break;
     }
@@ -942,6 +964,120 @@ void onButton(const ::uc1::ButtonEvent& ev)
     sysex({0x21, ev.id, uint8_t(ev.pressed ? 1 : 0)});
 }
 
+// ---------------------------------------------------------------------------
+// Gain reduction. SSL's plug-ins stream their meters to SSL 360 Core; the bridge stands in for it (Rea-Sixty's
+// SslCoreImpersonator, so SSL 360 must not be running) and reads the channel strip's compressor (CompGain) and gate
+// (GateGain) and the bus compressor's gain reduction. Each plug-in announces the track it is on; the script says which
+// instances the two sections are on (SysEx 40). The Bus Comp needle: UC1Device's 50 Hz stream; the Dyn and Gate LED
+// strips: Rea-Sixty's UC1Surface::pushGainReduction (paired selection / brightness writes, SSL's 3/6/10/14/20 dB
+// segments).
+// ---------------------------------------------------------------------------
+struct GrStrip { uint8_t bri[5] = {0xFE, 0xFE, 0xFE, 0xFE, 0xFE}; uint8_t sel[5] = {0, 0, 0, 0, 0}; };
+GrStrip g_compStrip, g_gateStrip;
+std::atomic<bool> g_grRun{false};
+std::thread g_grThread;
+
+int grSubStep(float dB)
+{
+    if (dB <= 0) return 0;
+    double s;
+    if      (dB <=  3.0) s = dB * 2.0;
+    else if (dB <=  6.0) s =  6.0 + (dB -  3.0) * 2.0;
+    else if (dB <= 10.0) s = 12.0 + (dB -  6.0) * 1.5;
+    else if (dB <= 14.0) s = 18.0 + (dB - 10.0) * 1.5;
+    else if (dB <= 20.0) s = 24.0 + (dB - 14.0);
+    else s = 30.0;
+    return std::clamp(int(std::lround(s)), 0, 30);
+}
+void pushGrStrip(uint8_t baseCell, float dB, GrStrip& st)
+{
+    static const uint8_t kLevels[6] = {0x03, 0x19, 0x2D, 0x54, 0x99, 0xFF};
+    const int sub = grSubStep(dB);
+    uint8_t target[5] = {0, 0, 0, 0, 0};
+    if (sub >= 30) for (auto& t : target) t = 0xFF;
+    else {
+        const int active = sub / 6;
+        for (int i = 0; i < active; ++i) target[i] = 0xFF;
+        target[active] = sub == 0 ? 0x00 : kLevels[sub % 6];
+    }
+    bool changed = false;
+    for (int i = 0; i < 5; ++i) if (target[i] != st.bri[i]) changed = true;
+    if (!changed || menuOn()) return;
+    for (int i = 0; i < 5; ++i) {
+        const uint8_t cell = uint8_t(baseCell + i);
+        const uint8_t sel = target[i] ? 1 : 0;
+        if (sel == st.sel[i]) continue;
+        if (sel) { send(::uc1::buildLedWrite(0x02, cell, 0x00)); send(::uc1::buildLedWrite(0x01, cell, 0x01)); }
+        else send(::uc1::buildLedWrite(0x01, cell, 0x00));
+        st.sel[i] = sel;
+    }
+    for (int i = 0; i < 5; ++i) {
+        if (target[i] != 0 || st.bri[i] != target[i]) send(::uc1::buildLedWrite(0x02, uint8_t(baseCell + i), target[i]));
+        st.bri[i] = target[i];
+    }
+}
+
+float readGr(int csType, int track, int ordinal, const std::string& model)
+{
+    if (track <= 0) return 0.0f;
+    std::vector<float> v;
+    if (!sslcore::getChannelStripMeterForTrackModel(csType, track, model.empty() ? nullptr : model.c_str(), ordinal, v) || v.empty())
+        return 0.0f;
+    return std::isfinite(v[0]) ? std::fabs(v[0]) : 0.0f;
+}
+
+void grLoop()
+{
+    using namespace std::chrono;
+    auto nextLog = steady_clock::now() + seconds(3);
+    std::string lastSummary;
+    while (g_grRun) {
+        std::this_thread::sleep_for(milliseconds(33));
+        if (!g_open || !sslcore::isRunning()) continue;
+        int csT, csO, bcT, bcO;
+        std::string model;
+        { std::lock_guard<std::mutex> lk(g_grMx); csT = g_grCsTrack; csO = g_grCsOrd; bcT = g_grBcTrack; bcO = g_grBcOrd; model = g_grCsModel; }
+        const int compType = int(sslcore::ChannelStripMeter::CompGain), gateType = int(sslcore::ChannelStripMeter::GateGain);
+        const float comp = readGr(compType, csT, csO, model);
+        const float gate = readGr(gateType, csT, csO, model);
+        float bc = 0.0f;
+        if (bcT > 0 && sslcore::getBusCompGr(bcT, bcO, bc)) bc = std::fabs(bc); else bc = 0.0f;
+        g_dev.setGainReduction(bc);
+        pushGrStrip(0x5C, comp, g_compStrip);
+        pushGrStrip(0x61, gate, g_gateStrip);
+        if (steady_clock::now() >= nextLog) {
+            nextLog = steady_clock::now() + seconds(3);
+            stopSslCore();   // the plug-ins start it again when they cannot find a Core
+            std::string sum = sslcore::debugSummary();
+            // Only when the set of instances or their tracks change (the GR values move all the time).
+            std::string key;
+            for (size_t a = 0; a < sum.size();) {
+                const size_t e = sum.find('\n', a);
+                const std::string line = sum.substr(a, e - a);
+                if (line.find("streams:") == std::string::npos) key += line.substr(0, line.find(" comp ")) + "\n";
+                if (e == std::string::npos) break;
+                a = e + 1;
+            }
+            {   // Liveness, every 30 s: how many plug-ins stream, and how long since data / a new connection.
+                static int every = 0;
+                if (++every % 10 == 0) {
+                    int n = 0;
+                    for (char c : sum) if (c == '\n') ++n;
+                    const long long d = sslcore::msSinceLastData(), c = sslcore::msSinceLastNewConn();
+                    std::printf("SSL Core stand-in: %d plug-ins streaming, last data %lld ms ago, last new connection %lld s ago\n",
+                                n, d == INT64_MAX ? -1 : d, c == INT64_MAX ? -1 : c / 1000);
+                }
+            }
+            if (sum.empty()) key = sslcore::pluginConnected() ? "connected, no meter data" : "none";
+            if (key != lastSummary) {
+                lastSummary = key;
+                std::printf("SSL plug-ins connected (UC1 reads: strip track %d #%d \"%s\", bus comp track %d #%d):\n%s",
+                            csT, csO, model.c_str(), bcT, bcO, sum.empty() ? ("  " + key + "\n").c_str() : sum.c_str());
+            }
+        }
+    }
+}
+
 bool openDevice()
 {
     if (!g_dev.open()) {
@@ -975,11 +1111,27 @@ bool uc1Start()
         return false;
     }
     std::printf("UC1 open (serial %s).\n", g_dev.serial().c_str());
+    // The SSL 360 Core stand-in, for the gain-reduction meters (SSL 360 must not be running).
+    if (!netInit()) std::fprintf(stderr, "Windows sockets could not be started.\n");
+    // With --trace: Rea-Sixty's own trace of the SSL plug-in traffic (reaper_sslcore.log) and its object dump
+    // (reasixty_ssl_objects.log: every object a plug-in declares and every value it writes), both in cubase\logs.
+#ifdef _WIN32
+    if (g_trace) _putenv_s("REASIXTY_SSLCORE_TRACE", "1");
+#endif
+    if (sslcore::start()) {
+        std::printf("SSL 360 Core stand-in running (gain reduction).\n");
+        if (g_trace) sslcore::setObjectDump(true);
+    }
+    else std::fprintf(stderr, "SSL 360 Core stand-in could not start (is SSL 360 running?); no gain reduction.\n");
+    if (!g_grThread.joinable()) { g_grRun = true; g_grThread = std::thread(grLoop); }
     return true;
 }
 
 void uc1Stop()
 {
+    g_grRun = false;
+    if (g_grThread.joinable()) g_grThread.join();
+    sslcore::stop();
     if (g_open) { g_dev.close(); g_open = false; }
 }
 
@@ -1004,6 +1156,9 @@ bool uc1Reopen()
 }
 
 } // namespace cs
+
+// Rea-Sixty's impersonator names its build in its logs; the bridge has no build id of that kind.
+namespace uf8 { const char* reasixtyBuildId() { return "cubase-sixty-bridge"; } }
 
 // Rea-Sixty's UC1Device reports every knob event to a census in its host; the bridge has none.
 void reasixty_uc1KnobCensus(int, int, bool) {}

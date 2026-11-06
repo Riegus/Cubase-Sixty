@@ -355,4 +355,9 @@ long long msSinceLastData();
 // each connecting plug-in selects its own track.
 long long msSinceLastNewConn();
 
+// Cubase-Sixty: one line per live instance (type, announced track, model, CompGain / GateGain), for a log.
+std::string debugSummary();
+// Cubase-Sixty: the gain reduction (dB, 0 .. negative) of the `ordinal`-th bus compressor on the track.
+bool getBusCompGr(int trackIndex, int ordinal, float& dB);
+
 } // namespace sslcore

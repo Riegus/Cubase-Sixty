@@ -54,6 +54,8 @@ add_executable(cubase_sixty_bridge
     src/Uf1Bridge.h
     src/Uc1Bridge.cpp
     src/ScriptLog.cpp
+    src/NetInit.cpp
+    src/SslCoreGuard.cpp
     src/ScriptLog.h
     src/Uc1Bridge.h
     ${EXT_SRC}/UF8Device.cpp
@@ -64,11 +66,20 @@ add_executable(cubase_sixty_bridge
     ${EXT_SRC}/UC1Protocol.cpp
     ${EXT_SRC}/Protocol.cpp
     ${EXT_SRC}/Palette.cpp
-    ${EXT_SRC}/LogPath.cpp)
+    ${EXT_SRC}/LogPath.cpp
+    ${EXT_SRC}/SslCoreImpersonator.cpp
+    ${EXT_SRC}/SslMeterProtocol.cpp)
 target_include_directories(cubase_sixty_bridge PRIVATE src ${EXT_SRC})
 target_link_libraries(cubase_sixty_bridge PRIVATE cs_libusb rtmidi)
+if(WIN32)
+    target_link_libraries(cubase_sixty_bridge PRIVATE ws2_32)   # the SSL 360 Core stand-in (sockets)
+endif()
 if(MSVC)
     target_compile_options(cubase_sixty_bridge PRIVATE /utf-8 /permissive-)
+endif()
+if(WIN32)
+    # windows.h's min / max macros break std::max(...) (the SSL 360 Core stand-in uses it).
+    target_compile_definitions(cubase_sixty_bridge PRIVATE NOMINMAX)
 endif()
 
 # Pure mapping logic, testable without hardware or MIDI ports.

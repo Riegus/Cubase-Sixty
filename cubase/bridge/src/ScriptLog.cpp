@@ -63,6 +63,19 @@ std::filesystem::path logDir(const char* argv0)
     return logs;
 }
 
+void redirectTempToLogs(const char* argv0)
+{
+    const std::string dir = logDir(argv0).string() + (logDir(argv0).string().back() == '\\' ? "" : "\\");
+#ifdef _WIN32
+    _putenv_s("TMP", dir.c_str());
+    _putenv_s("TEMP", dir.c_str());
+    std::error_code ec;
+    std::filesystem::remove(logDir(argv0) / "rea_sixty.log", ec);   // one session per file, like the others
+#else
+    (void)dir;
+#endif
+}
+
 void bridgeLogInit(const char* argv0)
 {
     namespace fs = std::filesystem;

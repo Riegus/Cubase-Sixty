@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.10.1-dev'
+var SCRIPT_VERSION = '0.11.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -311,6 +311,7 @@ function rescan(activeDevice) {
 	state.cs = null
 	state.bcSelected = null
 	var list = []
+	var sslCount = 0, bcCount = 0
 	var base
 	try { base = da.getBaseObjectID(am) } catch (e) { log('getBaseObjectID failed: ' + e); return }
 	var objects = walk(da, base, 4, 400, SKIP_TYPES_TRACK)
@@ -320,10 +321,16 @@ function rescan(activeDevice) {
 		var o = info(da, id)
 		if (o.params < 4 || !o.title) continue
 		var bc = findMap(BUS_COMPS, o.title)
-		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); dumpParams(da, id, o.title); continue }
-		var cs = findMap(CHANNEL_STRIPS, o.title)
+		// Each SSL strip / bus comp's position among them on the track (insert order): the order they connect to
+		// SSL 360 Core in, which is how the bridge finds their gain-reduction streams.
+		var csMatch = bc ? null : findMap(CHANNEL_STRIPS, o.title)
+		var sslOrd = bc || (csMatch && csMatch.label) ? sslCount++ : -1
+		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); state.bcSelected.sslOrd = bcCount; dumpParams(da, id, o.title) }
+		if (bc) { ++bcCount; continue }
+		var cs = csMatch
 		if (cs && cs.label) {
 			var t = makeTarget(da, id, cs, o.title)
+			t.sslOrd = sslOrd
 			// The insert slot it sits in (slots are titled "1".."16"), for opening its window (360 key).
 			var slotAt = objects[i].parent
 			if (slotAt >= 0 && objects[slotAt].type === 'Slot') t.insertIndex = parseInt(info(da, objects[slotAt].id).title, 10) - 1
@@ -692,6 +699,7 @@ function showNumber(activeDevice, base) {
 	}
 	numberShown = v
 	sysex(activeDevice, [0x37, (v >> 7) & 0x7F, v & 0x7F])
+	reportGr(activeDevice)
 }
 
 // Every bus comp in the project. Each is listed with the track (channel) it sits on.
@@ -704,6 +712,7 @@ function scanMixer(activeDevice) {
 	var objects = walk(daMix, base, 6, 20000)
 	var verbose = ++mixScans <= 1
 	var list = []
+	var sslOnChannel = {}
 	for (var i = 0; i < objects.length; ++i) {
 		var o = objects[i]
 		if (verbose && o.depth <= 3 && !/^(Slot|Panner)$/.test(o.type)) log('mix ' + new Array(o.depth + 1).join('  ') + '#' + o.id + ' [' + o.type + '] "' + info(daMix, o.id).title + '"')
@@ -711,23 +720,30 @@ function scanMixer(activeDevice) {
 		var inf = info(daMix, o.id)
 		if (inf.params < 4 || !inf.title) continue
 		var map = findMap(BUS_COMPS, inf.title)
-		if (!map) continue
+		var csMap = map ? null : findMap(CHANNEL_STRIPS, inf.title)
+		if (!map && !(csMap && csMap.label)) continue
 		// The track: the nearest enclosing object whose kind is a channel.
-		var p = o.parent, track = '', output = false
+		var p = o.parent, track = '', output = false, channelObj = -1
 		while (p >= 0) {
 			if (/Channel$/.test(objects[p].type)) {
-				track = info(daMix, objects[p].id).title
+				channelObj = objects[p].id
+				track = info(daMix, channelObj).title
 				output = /Output/.test(objects[p].type)
 				break
 			}
 			p = objects[p].parent
 		}
+		// Its position among the bus comps on that channel (insert order): how the bridge finds its gain reduction.
+		if (!map) continue
+		sslOnChannel[channelObj] = (sslOnChannel[channelObj] || 0) + 1
 		var dup = false
 		for (var d = 0; d < list.length; ++d) if (list[d].obj === o.id) dup = true
 		if (!dup) {
 			var t = makeTarget(daMix, o.id, map, inf.title)
 			t.track = track
 			t.output = output
+			t.channelObj = channelObj
+			t.sslOrd = sslOnChannel[channelObj] - 1
 			list.push(t)
 		}
 	}
@@ -796,9 +812,35 @@ function setRouting(activeDevice, message) {
 	for (var k = 0; k < 5; ++k) state.cs.da.setParameterProcessValue(am, state.cs.routing[k].obj, state.cs.routing[k].tag, message[5 + k] ? 1 : 0)
 	reportRouting(activeDevice)
 }
+// Where the gain-reduction meters read (SysEx 40): the channel strip's track (its MixConsole number) and position
+// among the SSL plug-ins there, and the same for the bus comp the Bus Comp section is on.
+var grShown = null
+function reportGr(activeDevice) {
+	var csT = 0, csO = 0, model = '', bcT = 0, bcO = 0
+	if (state.cs && state.cs.key !== 'cubase' && numberShown > 0 && numberShown !== 0x3FFF) {
+		csT = numberShown
+		csO = state.cs.sslOrd || 0
+		model = state.cs.label || ''
+	}
+	var bc = busComp()
+	if (bc) {
+		try {
+			if (bc.channelObj >= 0) bcT = daMix.getMixerChannelIndex(am, bc.channelObj)
+			else if (bc === state.bcSelected && numberShown !== 0x3FFF) bcT = numberShown
+		} catch (e) {}
+		bcO = bc.sslOrd || 0
+	}
+	if (bcT < 0) bcT = 0
+	var key = [csT, csO, model, bcT, bcO].join(',')
+	if (grShown === key) return
+	grShown = key
+	log('gain reduction from: channel strip track ' + csT + ' #' + csO + ' "' + model + '", bus comp track ' + bcT + ' #' + bcO)
+	sysex(activeDevice, [0x40, (csT >> 7) & 0x7F, csT & 0x7F, csO & 0x7F, (bcT >> 7) & 0x7F, bcT & 0x7F, bcO & 0x7F].concat(encodeName(model)))
+}
 var pluginsShown = null
 function paintAll(activeDevice) {
 	reportRouting(activeDevice)
+	reportGr(activeDevice)
 	var bc = busComp()
 	// The SSL plug-ins the two sections are on, for the bridge's PRESETS screen.
 	var csName = state.cs && state.cs.key !== 'cubase' ? state.cs.name || '' : ''
@@ -1222,6 +1264,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	ledShown = {}
 	ringShown = {}
 	routingShown = null
+	grShown = null
 	labelShown = null
 	log('page active')
 	state.rescanAt = Date.now() + 100

@@ -150,6 +150,7 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 | Preset end | `F0 7D 52 36 3D <section> <name> F7` | bridge → Cubase | All values sent; the script reports and shows "<name> LOADED". |
 | Routing switches | `F0 7D 52 36 3F <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc> F7` | Cubase → bridge | The channel strip's routing switches, 0 / 1 (7F = no routing), for the ROUTING screen. |
 | Set routing | `F0 7D 52 36 3E <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc> F7` | bridge → Cubase | The ROUTING screen's choice. |
+| Gain reduction source | `F0 7D 52 36 40 <cs track hi> <lo> <cs ordinal> <bc track hi> <lo> <bc ordinal> <cs model> F7` | Cubase → bridge | Which SSL plug-ins the meters read: the channel strip's MixConsole number and its position among the SSL strips / bus comps there (insert order), the bus comp's MixConsole number and its position among the bus comps there; model = "CS 2", "4K E" … (0 = none). The SSL plug-ins announce the same MixConsole number to SSL 360 Core. |
 | Send CC back | `F0 7D 52 36 3A <cc> <value> F7` | Cubase → bridge | The bridge sends CC `<cc>` `<value>` (channel 1) to Cubase on the UC1 port: lets the script set a host value it has bound to a CC (the strip Gate / Compressor on switches, CC 40 / 41). |
 | Bus Comp header | `F0 7D 52 36 39 <text> F7` | Cubase → bridge | Shown for 1.5 s in place of the model field ("BUS COMP 2"), as SSL 360 does while the Bus Comp encoder turns. |
 

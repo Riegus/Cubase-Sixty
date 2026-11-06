@@ -13,7 +13,7 @@ SSL 360° must not be running: it claims the controllers' USB interfaces exclusi
 |---------|---------|
 | UF8 | Faders (motor, touch, echo suppression), SEL / SOLO / CUT with LEDs, top soft keys = record-enable (red; dark and ignored on strips that cannot record), V-pots (pan) with the pan value and bar on the display, V-pot push, banking (bank-right stops at the bank where the last track is on strip 8), Page left / right (shift the bank by one channel), follows the track selection (also at start-up; jumps show as one switch), automation Read / Write with LEDs, automation mode keys (Off = Cross-Over, Trim, Latch, Touch), zoom pad (left / right = zoom, up / down = vertical zoom, centre = open / close editor), FLIP (faders on pan, V-pots on volume), scribble-strip names and colours, fader level in dB on each strip, stereo meters, empty strips dark (SOLO / CUT / SEL LEDs off, late values ignored). Foot switches are implemented but untested. |
 | UF1 | Fader (motor, touch), SOLO / CUT / SEL (SEL LED in the track colour), transport keys with LEDs, ARROW = previous / next track, BANK = banks the UF8 (8 tracks without a UF8), NAV cross = zoom (centre = open / close editor), pan knob above the fader, MODE (hold) picks the view on the display soft keys: DAW = V-pots 1–4 on sends 1–4, or 5–8 after the 5–8 key (turn = level, push = on / off), SENDS = the same, with all four sends in the display's V-pot cells (name, level, bar), PLUGIN = V-pots on Cubase's Quick Controls 1–4 / 5–8, MASTER puts fader, pan, SOLO and CUT on the main output, SHIFT + the transport soft keys / Cycle / Click = automation (◀ Read, ▶ Write, Cycle Cross-Over, Click Trim, 1 Latch, 2 Touch), FLIP (fader on pan, pan knob on volume), channel encoder selects the previous / next track, jog wheel nudges the cursor (SHIFT + jog = previous / next marker, SHIFT + ARROW = one bar back / forward), SCRUB = real audio scrubbing through a Mackie Control device, SHIFT + SCRUB = shuttle (the jog sets the speed), 360° swaps Cubase's two time formats, BYPASS = bypass / restore all inserts of the selected track. Display: track name, level, colour, and a value line with bar (pan; a send for 3 seconds after it is turned), stereo meter, the selected track's number (as in the MixConsole) in the channel-number box, and the transport position in the big display's time field. |
-| UC1 | Opens with Rea-Sixty's handshake, start-up sequence and keepalive (its own MIDI ports). Knobs and buttons go to the UC1 script, which drives the SSL plug-ins on the selected track; the bridge paints the track name and colour, the model field, value readouts, button LEDs and the knob rings (Rea-Sixty's cell maps). The 7-segment shows the MixConsole number; the Bus Comp encoder picks which bus comp the Bus Comp section controls (name row, "BUS COMP 2" header for 1.5 s). Encoders count one step per detent (Rea-Sixty's accumulator). The magnifier steps through a track's channel strips, 360° opens their window (both in the script, with CCs the bridge sends back, SysEx 3A). The PRESETS screen is the bridge's own (Rea-Sixty's screens; SSL's preset library read from `%ProgramData%`); the values go to the script to set. The ROUTING screen too (Rea-Sixty's ten orders). Not yet: gain-reduction meters. |
+| UC1 | Opens with Rea-Sixty's handshake, start-up sequence and keepalive (its own MIDI ports). Knobs and buttons go to the UC1 script, which drives the SSL plug-ins on the selected track; the bridge paints the track name and colour, the model field, value readouts, button LEDs and the knob rings (Rea-Sixty's cell maps). The 7-segment shows the MixConsole number; the Bus Comp encoder picks which bus comp the Bus Comp section controls (name row, "BUS COMP 2" header for 1.5 s). Encoders count one step per detent (Rea-Sixty's accumulator). The magnifier steps through a track's channel strips, 360° opens their window (both in the script, with CCs the bridge sends back, SysEx 3A). The PRESETS screen is the bridge's own (Rea-Sixty's screens; SSL's preset library read from `%ProgramData%`); the values go to the script to set. The ROUTING screen too (Rea-Sixty's ten orders). Gain reduction: the bridge stands in for SSL 360 Core (Rea-Sixty's SslCoreImpersonator) and reads the SSL channel strips' compressor / gate gain reduction (Dyn / Gate LED rows) and the Bus Compressor 2's (the needle; its data type 0 stream). |
 
 ## Building
 
@@ -53,12 +53,18 @@ Options:
 | `--lamptest` | Lights each UF1 LED in turn about 6 seconds after start-up. |
 | `--no-script-log` | Do not write the scripts' log lines to `cubase\logs\scripts.log` (see Logs). |
 
+### SSL 360 Core
+
+The bridge stands in for SSL 360 Core, so the SSL plug-ins send it their meters (UC1 gain reduction). SSL's own `SSL360Core.exe` must not run: it takes the controllers and, if it is there first, the plug-ins. The SSL plug-ins start it again when they cannot find a Core, so the bridge closes it at start-up and whenever it reappears (seen: with it running, only 6 of ~60 plug-ins reached the bridge). Each plug-in announces the MixConsole number of its channel, which is how the meters are tied to tracks. Windows: the bridge starts Windows sockets itself (REAPER does it for Rea-Sixty).
+
 ### Logs
 
 The bridge writes two files to `cubase\logs\` (ignored by git):
 
 - `bridge.log`: everything the bridge window shows (with `--trace`, the trace too), each line with a timestamp.
 - `scripts.log`: the MIDI Remote scripts' log lines (what Cubase's script console shows), sent to the bridge as SysEx 7E; each line with a timestamp and the script (UF8, UF1, UC1, Helper). Off with `--no-script-log` (`dev-restart.ps1 -NoScriptLog`).
+
+Rea-Sixty's own logs (`rea_sixty.log`: the Core stand-in's start, each plug-in's connection and announced track; with `--trace` also `reaper_sslcore.log` and `reasixty_ssl_objects.log`, the plug-in traffic) land there too.
 
 Each start begins new files and keeps the last run's as `*.previous.log`; a file that passes 20 MB starts again, keeping the older part as `*.log.old`.
 
@@ -116,7 +122,6 @@ tests/              test_mapping
 - **UF1:** the MODE view METER (large meter layout).
 - **UF8:** "show only record-enabled tracks".
 - **UC1:** the remaining parts (see the MIDI Remote README, "Not yet done").
-- **SSL plug-in stream and meters.** Rea-Sixty gets the SSL plug-ins' meters by standing in for SSL 360° Core. Tying each plug-in instance to a Cubase track is the open question.
 - **Extras:** layers, a second UF8, settings UI, packaging.
 
 ## Risks
