@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.4.4-dev'
+var SCRIPT_VERSION = '0.5.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -356,8 +356,11 @@ var RX = {
 var stripLogs = 0
 function cubaseStrip(objects) {
 	var inputFilter = null, eq = null, gate = null, comp = null
+	var emptySlots = []   // strip slots with no module in them (a gate or compressor can be loaded there)
 	for (var i = 0; i < objects.length; ++i) {
 		var o = objects[i]
+		if (o.type === 'Slot' && o.parent >= 0 && objects[o.parent].type === 'Strips'
+			&& (i + 1 >= objects.length || objects[i + 1].parent !== i)) emptySlots.push(o.id)
 		if (o.type === 'InputFilter') inputFilter = o.id
 		else if (o.type === 'EQ') eq = o.id
 		else if (o.type !== 'Slot' && o.parent >= 0 && objects[o.parent].type === 'Slot') {
@@ -370,7 +373,8 @@ function cubaseStrip(objects) {
 		}
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
-	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', knobs: {}, buttons: {}, bypass: null, objs: {} }
+	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', emptySlots: emptySlots,
+		noGate: !gate, noComp: !comp, knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
 	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
 		var p = obj ? findParam(list, patterns, exclude) : null
@@ -438,6 +442,50 @@ function cubaseStrip(objects) {
 	}
 	indexKnobs(t)
 	return t
+}
+
+// Turning a Gate or Dyn knob on Cubase's strip without that module loads it into a free strip slot (Direct Access
+// plug-in manager: the slot's plug-in collections list what it accepts). The turn itself only loads; the knobs
+// work once the track has been looked at again (a moment later).
+var GATE_KNOBS = [K.GateThreshold, K.GateRange, K.GateRelease, K.GateHold]
+var COMP_KNOBS = [K.CompThreshold, K.CompRatio, K.CompRelease]
+var loadTried = {}, collectionsLogged = false
+function loadStripModuleFor(activeDevice, target, knob) {
+	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
+	if (!kind || (kind === 'gate' ? !target.noGate : !target.noComp)) return
+	var key = numberBase + ':' + kind
+	if (loadTried[key] && Date.now() - loadTried[key] < 3000) return
+	loadTried[key] = Date.now()
+	var pm = da.mPluginManager
+	var want = kind === 'gate' ? [/gate/i] : [/^standard\s*compressor/i, /^compressor/i, /compressor/i]
+	for (var s = 0; s < target.emptySlots.length; ++s) {
+		var slot = target.emptySlots[s]
+		var entries = []
+		try {
+			var n = pm.getNumberOfPluginCollections(am, slot)
+			for (var c = 0; c < n; ++c) {
+				var coll = pm.getPluginCollectionByIndex(am, slot, c)
+				for (var e = 0; e < coll.mEntries.length; ++e) entries.push(coll.mEntries[e])
+			}
+		} catch (err) { log('strip slot #' + slot + ': plug-in list not available: ' + err); continue }
+		if (!collectionsLogged) log('strip slot #' + slot + ' accepts: ' + entries.map(function (x) { return x.mPluginName }).join(', '))
+		for (var w = 0; w < want.length; ++w) {
+			for (var e2 = 0; e2 < entries.length; ++e2) {
+				if (!want[w].test(entries[e2].mPluginName)) continue
+				var ok = false
+				try { ok = pm.trySetSlotPlugin(am, slot, entries[e2].mPluginUID, true) } catch (err2) { log('loading ' + entries[e2].mPluginName + ' failed: ' + err2) }
+				log('loading "' + entries[e2].mPluginName + '" into strip slot #' + slot + ': ' + (ok ? 'done' : 'refused'))
+				collectionsLogged = true
+				if (ok) {
+					readout(activeDevice, ZONE_CS, entries[e2].mPluginName, 'ON')
+					state.rescanAt = Date.now() + 200
+					return
+				}
+			}
+		}
+	}
+	collectionsLogged = true
+	log('no free strip slot takes a ' + (kind === 'gate' ? 'gate' : 'compressor'))
 }
 
 // The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
@@ -619,6 +667,7 @@ function onKnob(activeDevice, id, clicks) {
 	var target = targetFor(id)
 	if (!target) return
 	var rf = target.knobs[id]
+	if (!rf && target.emptySlots) { loadStripModuleFor(activeDevice, target, id); return }
 	if (!rf) return
 	var acc = target.da
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
