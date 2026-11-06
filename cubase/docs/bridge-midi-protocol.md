@@ -148,6 +148,8 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 | Plug-ins for PRESETS | `F0 7D 52 36 3B <cs plug-in> 7F 7F 7F <bc plug-in> F7` | Cubase → bridge | The SSL plug-ins the two sections are on (empty = none); the bridge's PRESETS screen lists their library. |
 | Preset value | `F0 7D 52 36 3C <section> <id> 7F 7F 7F <value> F7` | bridge → Cubase | One `<PARAM id value>` of the preset file being loaded; section 0 Channel Strip, 1 Bus Comp. |
 | Preset end | `F0 7D 52 36 3D <section> <name> F7` | bridge → Cubase | All values sent; the script reports and shows "<name> LOADED". |
+| Routing switches | `F0 7D 52 36 3F <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc> F7` | Cubase → bridge | The channel strip's routing switches, 0 / 1 (7F = no routing), for the ROUTING screen. |
+| Set routing | `F0 7D 52 36 3E <f-in> <f-sc> <eq-sc> <dyn-pre-eq> <ext-sc> F7` | bridge → Cubase | The ROUTING screen's choice. |
 | Send CC back | `F0 7D 52 36 3A <cc> <value> F7` | Cubase → bridge | The bridge sends CC `<cc>` `<value>` (channel 1) to Cubase on the UC1 port: lets the script set a host value it has bound to a CC (the strip Gate / Compressor on switches, CC 40 / 41). |
 | Bus Comp header | `F0 7D 52 36 39 <text> F7` | Cubase → bridge | Shown for 1.5 s in place of the model field ("BUS COMP 2"), as SSL 360 does while the Bus Comp encoder turns. |
 
