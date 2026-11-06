@@ -540,7 +540,11 @@ bool cs::uf8BankPress(bool right)
 int main(int argc, char** argv)
 {
     cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
-    cs::scriptLogInit(argc > 0 ? argv[0] : nullptr);
+    // --no-script-log: the scripts' log lines (SysEx 7E) are dropped instead of written to cubase\logs\scripts.log.
+    bool scriptLog = true;
+    for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--no-script-log") scriptLog = false;
+    if (scriptLog) cs::scriptLogInit(argc > 0 ? argv[0] : nullptr);
+    else std::printf("Script log off (--no-script-log).\n");
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); cs::uc1SetTrace(true); g_trace8 = true; cs::midiPortsTrace(true); }
         else if (std::string(argv[i]) == "--loopmidi") cs::midiPortsPreferLoopMidi(true);
