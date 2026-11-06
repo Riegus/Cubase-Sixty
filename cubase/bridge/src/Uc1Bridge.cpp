@@ -891,6 +891,19 @@ bool presetsKnob(uint8_t id, int delta)
 {
     std::lock_guard<std::mutex> lk(g_presetMx);
     if (!menuOn()) return false;
+    if (id == ::uc1::knob::kChannelEncoder && g_routingOn) {
+        // TEST (routing order 10): the CHANNEL encoder shows the UC1's routing pictures by raw number (1..63, then
+        // 0x81..0xBF), without touching the plug-in, to find the one that matches the plug-in's order 10.
+        static Accumulator acc;
+        static int raw = 1;
+        const int step = acc.step(delta);
+        if (step == 0) return true;
+        raw = std::clamp(raw + step, 1, 126);
+        const uint8_t byte = uint8_t(raw <= 63 ? raw : 0x80 + (raw - 63));
+        send(::uc1::buildRoutingOrderIndicator(byte));
+        std::printf("UC1 routing test: picture 0x%02X (%d)\n", byte, byte & 0x7F);
+        return true;
+    }
     if (id != ::uc1::knob::kBcEncoder) return id == ::uc1::knob::kChannelEncoder;   // CHANNEL does nothing here
     static Accumulator acc;
     const int step = acc.step(delta);
