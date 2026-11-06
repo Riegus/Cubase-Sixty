@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.5.0-dev'
+var SCRIPT_VERSION = '0.5.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -444,48 +444,40 @@ function cubaseStrip(objects) {
 	return t
 }
 
-// Turning a Gate or Dyn knob on Cubase's strip without that module loads it into a free strip slot (Direct Access
-// plug-in manager: the slot's plug-in collections list what it accepts). The turn itself only loads; the knobs
-// work once the track has been looked at again (a moment later).
+// Cubase's strip modules are switched on, not loaded: a strip slot without a module has nothing in it until its
+// module is switched on (the Direct Access plug-in manager lists no plug-ins for strip slots). The script cannot
+// set a host value by itself, so the on switches of the selected track's Gate and Compressor are bound to CC 40 /
+// 41 (channel 1), and the script asks the bridge to send that CC (SysEx 3A <cc> 127). Turning a Gate or Dyn knob
+// whose module is missing or off switches it on; the knobs work once the track has been looked at again.
 var GATE_KNOBS = [K.GateThreshold, K.GateRange, K.GateRelease, K.GateHold]
 var COMP_KNOBS = [K.CompThreshold, K.CompRatio, K.CompRelease]
-var loadTried = {}, collectionsLogged = false
-function loadStripModuleFor(activeDevice, target, knob) {
-	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
-	if (!kind || (kind === 'gate' ? !target.noGate : !target.noComp)) return
-	var key = numberBase + ':' + kind
-	if (loadTried[key] && Date.now() - loadTried[key] < 3000) return
-	loadTried[key] = Date.now()
-	var pm = da.mPluginManager
-	var want = kind === 'gate' ? [/gate/i] : [/^standard\s*compressor/i, /^compressor/i, /compressor/i]
-	for (var s = 0; s < target.emptySlots.length; ++s) {
-		var slot = target.emptySlots[s]
-		var entries = []
-		try {
-			var n = pm.getNumberOfPluginCollections(am, slot)
-			for (var c = 0; c < n; ++c) {
-				var coll = pm.getPluginCollectionByIndex(am, slot, c)
-				for (var e = 0; e < coll.mEntries.length; ++e) entries.push(coll.mEntries[e])
-			}
-		} catch (err) { log('strip slot #' + slot + ': plug-in list not available: ' + err); continue }
-		if (!collectionsLogged) log('strip slot #' + slot + ' accepts: ' + entries.map(function (x) { return x.mPluginName }).join(', '))
-		for (var w = 0; w < want.length; ++w) {
-			for (var e2 = 0; e2 < entries.length; ++e2) {
-				if (!want[w].test(entries[e2].mPluginName)) continue
-				var ok = false
-				try { ok = pm.trySetSlotPlugin(am, slot, entries[e2].mPluginUID, true) } catch (err2) { log('loading ' + entries[e2].mPluginName + ' failed: ' + err2) }
-				log('loading "' + entries[e2].mPluginName + '" into strip slot #' + slot + ': ' + (ok ? 'done' : 'refused'))
-				collectionsLogged = true
-				if (ok) {
-					readout(activeDevice, ZONE_CS, entries[e2].mPluginName, 'ON')
-					state.rescanAt = Date.now() + 200
-					return
-				}
-			}
-		}
+var CC_GATE_ON = 40, CC_COMP_ON = 41
+var stripOn = { gate: -1, comp: -1 }   // the modules' on switches as Cubase reports them (-1 = not known)
+try {
+	var stripFx = selected.mInsertAndStripEffects.mStripEffects
+	var bindOn = function (x, cc, kind, hostValue) {
+		var k = surface.makeKnob(x, 3, 1, 1)
+		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
+		page.makeValueBinding(k.mSurfaceValue, hostValue)
+		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) { stripOn[kind] = value }
 	}
-	collectionsLogged = true
-	log('no free strip slot takes a ' + (kind === 'gate' ? 'gate' : 'compressor'))
+	bindOn(0, CC_GATE_ON, 'gate', stripFx.mGate.mOn)
+	bindOn(1, CC_COMP_ON, 'comp', stripFx.mCompressor.mOn)
+} catch (e) { log('strip module switches could not be bound: ' + e) }
+var switchTried = {}
+function switchOnModuleFor(activeDevice, target, knob) {
+	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
+	if (!kind) return false
+	var missing = kind === 'gate' ? target.noGate : target.noComp
+	if (!missing && stripOn[kind] !== 0) return false
+	var key = numberBase + ':' + kind
+	if (switchTried[key] && Date.now() - switchTried[key] < 2000) return true
+	switchTried[key] = Date.now()
+	log('switching on the strip ' + (kind === 'gate' ? 'gate' : 'compressor') + ' (was ' + (missing ? 'not there' : 'off') + ')')
+	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
+	readout(activeDevice, ZONE_CS, kind === 'gate' ? 'Gate' : 'Compressor', 'ON')
+	state.rescanAt = Date.now() + 300
+	return true
 }
 
 // The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
@@ -667,7 +659,7 @@ function onKnob(activeDevice, id, clicks) {
 	var target = targetFor(id)
 	if (!target) return
 	var rf = target.knobs[id]
-	if (!rf && target.emptySlots) { loadStripModuleFor(activeDevice, target, id); return }
+	if (target.emptySlots && switchOnModuleFor(activeDevice, target, id)) return
 	if (!rf) return
 	var acc = target.da
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
