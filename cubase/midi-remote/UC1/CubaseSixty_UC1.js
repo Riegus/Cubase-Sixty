@@ -30,8 +30,9 @@ function out(text) {
 	console.log(text)
 	if (logQueue.length < 1000) logQueue.push(String(text))
 }
+// At most 20 lines per idle tick (~10 a second), so a long parameter list does not arrive as one big burst.
 function flushLog(activeDevice) {
-	while (logQueue.length) {
+	for (var sent = 0; logQueue.length && sent < 20; ++sent) {
 		var t = logQueue.shift()
 		var body = [0xF0, 0x7D, 0x52, 0x36, 0x7E, LOG_SOURCE]
 		for (var n = 0; n < t.length && n < 400; ++n) {
