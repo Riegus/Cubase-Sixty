@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.6.0-dev'
+var SCRIPT_VERSION = '0.6.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -474,7 +474,11 @@ try {
 // in a track's strip is added (and logged with its id, to be listed here).
 var STRIP_MODULES = {
 	gate: [{ name: 'Noise Gate', uid: 'C3B0615A2A444991B423673DEE2379A7', slot: '1' }],
-	comp: [{ name: 'Standard Compressor', uid: 'E022B5972163463CBA2036708D5AF5A5', slot: '2' }]
+	comp: [
+		{ name: 'Standard Compressor', short: 'Standard Comp', uid: 'E022B5972163463CBA2036708D5AF5A5', slot: '2' },
+		{ name: 'Tube Compressor', short: 'Tube Comp', uid: '7186B3CC877647BAADD5EAC0785001DF', slot: '2' },
+		{ name: 'VintageCompressor', short: 'Vintage Comp', uid: '2CA7A4D872A14FDD99B4932F2FD98854', slot: '2' }
+	]
 }
 function rememberModule(kind, obj, title, slotTitle) {
 	var list = STRIP_MODULES[kind]
@@ -493,7 +497,7 @@ function loadModule(activeDevice, target, kind, module) {
 	try { ok = da.mPluginManager.trySetSlotPlugin(am, slot, module.uid, true) } catch (err) { log('trySetSlotPlugin failed: ' + err) }
 	log('loading "' + module.name + '" into strip slot "' + info(da, slot).title + '": ' + (ok ? 'done' : 'refused'))
 	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
-	readout(activeDevice, ZONE_CS, module.name, ok ? 'ON' : 'FAILED')
+	readout(activeDevice, ZONE_CS, module.short || module.name, ok ? 'ON' : 'FAILED')
 	state.rescanAt = Date.now() + 300
 }
 
@@ -503,7 +507,7 @@ function loadModule(activeDevice, target, kind, module) {
 var picker = null   // { kind, index, until, target }
 function showPicker(activeDevice) {
 	var list = STRIP_MODULES[picker.kind]
-	readout(activeDevice, ZONE_CS, list[picker.index].name, (picker.index + 1) + '/' + list.length)
+	readout(activeDevice, ZONE_CS, list[picker.index].short || list[picker.index].name, (picker.index + 1) + '/' + list.length)
 }
 function closePicker(activeDevice, why) {
 	if (!picker) return
