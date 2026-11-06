@@ -1105,7 +1105,15 @@ bool uc1Start()
     std::printf("UC1 open (serial %s).\n", g_dev.serial().c_str());
     // The SSL 360 Core stand-in, for the gain-reduction meters (SSL 360 must not be running).
     if (!netInit()) std::fprintf(stderr, "Windows sockets could not be started.\n");
-    if (sslcore::start()) std::printf("SSL 360 Core stand-in running (gain reduction).\n");
+    // With --trace: Rea-Sixty's own trace of the SSL plug-in traffic (reaper_sslcore.log) and its object dump
+    // (reasixty_ssl_objects.log: every object a plug-in declares and every value it writes), both in cubase\logs.
+#ifdef _WIN32
+    if (g_trace) _putenv_s("REASIXTY_SSLCORE_TRACE", "1");
+#endif
+    if (sslcore::start()) {
+        std::printf("SSL 360 Core stand-in running (gain reduction).\n");
+        if (g_trace) sslcore::setObjectDump(true);
+    }
     else std::fprintf(stderr, "SSL 360 Core stand-in could not start (is SSL 360 running?); no gain reduction.\n");
     if (!g_grThread.joinable()) { g_grRun = true; g_grThread = std::thread(grLoop); }
     return true;
