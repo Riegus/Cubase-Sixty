@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.3.2-dev'
+var SCRIPT_VERSION = '0.3.3-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -277,13 +277,20 @@ function rescan(activeDevice) {
 
 // The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
 // as is (tested: index 50 for the channel the MixConsole numbers 50).
-var numberLogs = 0
+// Hiding or showing a track renumbers the others without telling the script, so the idle callback asks again
+// once a second.
+var numberLogs = 0, numberShown = -2, numberBase = -1, numberCheckAt = 0
 function showNumber(activeDevice, base) {
+	numberBase = base
 	var index = -1, zone = -1
 	try { index = da.getMixerChannelIndex(am, base) } catch (e) {}
-	try { zone = da.getMixerChannelZone(am, base) } catch (e) {}
-	if (++numberLogs <= 10) log('mixer channel index ' + index + ', zone ' + zone)
 	var v = index > 0 ? index : 0x3FFF
+	if (v === numberShown) return
+	if (++numberLogs <= 10) {
+		try { zone = da.getMixerChannelZone(am, base) } catch (e) {}
+		log('mixer channel index ' + index + ', zone ' + zone)
+	}
+	numberShown = v
 	sysex(activeDevice, [0x37, (v >> 7) & 0x7F, v & 0x7F])
 }
 
@@ -535,10 +542,15 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	log('page active')
 	state.rescanAt = Date.now() + 100
 	state.mixScanAt = Date.now() + 200
+	numberShown = -2
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
 	var now = Date.now()
+	if (numberBase >= 0 && now >= numberCheckAt) {
+		numberCheckAt = now + 1000
+		try { showNumber(activeDevice, numberBase) } catch (e) {}
+	}
 	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0
 		try { rescan(activeDevice) } catch (e) { log('scan failed: ' + e) }
