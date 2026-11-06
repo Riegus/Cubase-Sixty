@@ -19,6 +19,8 @@
 //                   SysEx 37 <hi> <lo>                    the 7-segment number (0..999; 7F 7F = blank)
 //                   SysEx 38 <prev> 7F 7F 7F <curr> 7F 7F 7F <next>   the Bus Comp name row (tracks with a bus comp)
 //                   SysEx 39 <header>                     show the Bus Comp scroll header (e.g. "BUS COMP 2") for 1.5 s
+//                   SysEx 3B <cs plug-in> 7F 7F 7F <bc plug-in>   the SSL plug-ins the two sections are on (names; empty =
+//                                                         none), for the PRESETS screen
 //                   SysEx 3A <cc> <value>                 send CC <cc> <value> (channel 1) back to Cubase: lets the script
 //                                                         set a host value it has bound to a CC (a strip module's on switch)
 // The two encoders send one step per detent (Rea-Sixty's accumulator: 3 ticks per step, reset after a 100 ms
@@ -30,6 +32,11 @@
 #include "Uc1Bridge.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -71,6 +78,15 @@ int g_headerGen = 0;
 int g_sevenSeg = -1;                                 // the 7-segment number, -1 = blank
 uint8_t g_palette = 0;
 std::map<int, std::vector<unsigned char>> g_cache;   // last message per kind, replayed after a reopen
+
+// The PRESETS screen (see "PRESETS screen" below).
+std::mutex g_presetMx;
+std::atomic<bool> g_presetsOn{false};   // the PRESETS screen is showing (the main screen's painting waits)
+bool g_presetsBrowse = false;    // false: the CS / BC selector; true: the list
+bool g_presetsCs = true;         // which section's plug-in is browsed
+std::string g_presetGroup;       // the folder shown ('/'-separated below the plug-in's folder)
+int g_presetSel = 0;
+std::string g_csPlugin, g_bcPlugin;   // from the script (SysEx 3B)
 
 void traceMidi(const char* dir, const std::vector<unsigned char>& m)
 {
@@ -122,6 +138,7 @@ std::vector<uint8_t> largeRow()
 // While the Bus Comp scroll header shows, the model field gives way to it (SSL 360: layout 02 + header).
 void paintCentre()
 {
+    if (g_presetsOn) return;
     std::string name, label, header;
     uint8_t palette;
     bool headerOn;
@@ -145,6 +162,7 @@ void paintCentre()
 
 void showHeader(const std::string& text)
 {
+    if (g_presetsOn) return;
     int gen;
     {
         std::lock_guard<std::mutex> lk(g_stateMx);
@@ -160,6 +178,7 @@ void showHeader(const std::string& text)
             if (gen != g_headerGen) return;   // turned again: that one reverts
             g_header.clear();
         }
+        if (g_presetsOn) return;
         send(::uc1::buildCentralMode(::uc1::CentralMode::Main, 0x00));
         paintCentre();
     }).detach();
@@ -459,13 +478,14 @@ void onSysex(const std::vector<unsigned char>& m)
         if (m.size() >= 7) {
             // SSL 360's readout burst: precursor, the large name row, the text.
             const std::string text = decodeName(m, 6);
+            if (g_presetsOn) break;
             send(::uc1::buildReadoutPrecursor(0x00));
             send(largeRow());
             send(::uc1::buildDisplayText(m[5], text, text.size()));
         }
         break;
     case 0x34: if (m.size() >= 8) setLed(m[5], m[6]); break;
-    case 0x35: send(::uc1::buildDisplayInvalidate(m[5])); break;
+    case 0x35: if (!g_presetsOn) send(::uc1::buildDisplayInvalidate(m[5])); break;
     case 0x36:   // knob ring: <knob> <value hi> <value lo> (0..16382; 7F 7F = off) <1 = dim>
         if (m.size() >= 10) {
             const int v = (m[6] << 7) | m[7];
@@ -491,10 +511,19 @@ void onSysex(const std::vector<unsigned char>& m)
             at = end + 3;   // past the separator
         }
         { std::lock_guard<std::mutex> lk(g_stateMx); for (int k = 0; k < 3; ++k) g_bcNames[k] = names[k]; }
-        send(largeRow());
+        if (!g_presetsOn) send(largeRow());
         break;
     }
     case 0x39: showHeader(decodeName(m, 5)); break;
+    case 0x3B: {
+        size_t end = 5;
+        const std::string cs = decodeName(m, 5, &end);
+        const std::string bc = end + 3 < m.size() ? decodeName(m, end + 3) : std::string();
+        std::lock_guard<std::mutex> lk(g_presetMx);
+        g_csPlugin = cs;
+        g_bcPlugin = bc;
+        break;
+    }
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
     default: break;
     }
@@ -509,7 +538,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
@@ -537,9 +566,276 @@ struct Accumulator {
 };
 Accumulator g_channelAcc, g_bcAcc;
 
+// ---------------------------------------------------------------------------
+// PRESETS screen (Rea-Sixty UC1Surface: setMode / renderPresetsSubscreen_ / the PRESETS key, BC encoder, BACK and
+// CONFIRM). SSL's plug-ins show the host no presets; their library is on disk, one folder per plug-in under
+// %ProgramData%\Solid State Logic\PlugIns\Presets (Rea-Sixty SslPresetLibrary). The bridge owns the screen: PRESETS
+// opens it on a selector (CHANNEL STRIP / BUS COMP, the Bus Comp encoder flips it, CONFIRM or the encoder push
+// enters), the Bus Comp encoder then moves through folders and presets, CONFIRM steps into a folder or loads,
+// BACK goes up a folder / back to the selector / out. Loading: each <PARAM id value> of the preset file goes to the
+// script (SysEx 3C <section> <id> 7F 7F 7F <value>, then 3D <section> <name> at the end), which sets the parameters.
+// ---------------------------------------------------------------------------
+struct PresetEntry { std::string name, group, path; };
+struct PresetRow { std::string label; bool folder; int entry; };
+
+std::vector<PresetEntry> g_presetList;
+std::string g_presetListFor;     // the plug-in g_presetList was read for
+
+std::string presetDirFor(const std::string& plugin)
+{
+    // Longest match first: "360 Link Bus Compressor" before "360 Link" (Rea-Sixty kDirs).
+    static const struct { const char* part; const char* leaf; } kDirs[] = {
+        {"Channel Strip 2", "ChannelStrip2"}, {"360 Link Bus Compressor", "SSL360LinkBusCompressor"},
+        {"360 Link", "SSL360Link"}, {"Bus Compressor 2", "BusCompressor2"},
+        {"4K B", "SSL4KB"}, {"4K E", "SSL4KE"}, {"4K G", "SSL4KG"},
+    };
+    for (const auto& d : kDirs) {
+        if (plugin.find(d.part) == std::string::npos) continue;
+        const char* pd = std::getenv("ProgramData");
+        std::string root = (pd && *pd) ? pd : "C:\\ProgramData";
+        return root + "\\Solid State Logic\\PlugIns\\Presets\\" + d.leaf;
+    }
+    return {};
+}
+
+// Natural order ("+9" before "+18"), case-insensitive: SSL 360's own list order (Rea-Sixty scan()).
+bool naturalLess(const std::string& a, const std::string& b)
+{
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        const unsigned char ca = a[i], cb = b[j];
+        if (std::isdigit(ca) && std::isdigit(cb)) {
+            size_t i2 = i, j2 = j;
+            while (i2 < a.size() && std::isdigit((unsigned char)a[i2])) ++i2;
+            while (j2 < b.size() && std::isdigit((unsigned char)b[j2])) ++j2;
+            size_t is = i; while (is < i2 - 1 && a[is] == '0') ++is;
+            size_t js = j; while (js < j2 - 1 && b[js] == '0') ++js;
+            if (i2 - is != j2 - js) return (i2 - is) < (j2 - js);
+            for (size_t k = 0; k < i2 - is; ++k) if (a[is + k] != b[js + k]) return a[is + k] < b[js + k];
+            i = i2; j = j2;
+        } else {
+            const int la = std::tolower(ca), lb = std::tolower(cb);
+            if (la != lb) return la < lb;
+            ++i; ++j;
+        }
+    }
+    return (a.size() - i) < (b.size() - j);
+}
+
+std::vector<PresetEntry> scanPresets(const std::string& dir)
+{
+    namespace fs = std::filesystem;
+    std::vector<PresetEntry> out;
+    std::error_code ec;
+    if (dir.empty() || !fs::is_directory(dir, ec)) return out;
+    for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (it.depth() > 4) { it.disable_recursion_pending(); continue; }
+        if (!it->is_regular_file(ec)) continue;
+        const fs::path p = it->path();
+        std::string ext = p.extension().string();
+        for (auto& c : ext) c = char(std::tolower((unsigned char)c));
+        if (ext != ".xml") continue;
+        std::string group = fs::relative(p.parent_path(), dir, ec).generic_string();
+        if (group == ".") group.clear();
+        out.push_back({p.stem().string(), group, p.string()});
+    }
+    std::sort(out.begin(), out.end(), [](const PresetEntry& x, const PresetEntry& y) {
+        return naturalLess(x.group.empty() ? x.name : x.group + "/" + x.name, y.group.empty() ? y.name : y.group + "/" + y.name);
+    });
+    return out;
+}
+
+// Sub-folders of the current folder first, then its presets (Rea-Sixty presetRows_).
+std::vector<PresetRow> presetRows()
+{
+    std::vector<PresetRow> rows;
+    std::vector<std::string> seen;
+    const std::string& g = g_presetGroup;
+    for (const auto& e : g_presetList) {
+        const std::string& eg = e.group;
+        if (eg == g) continue;
+        if (!g.empty() && (eg.size() <= g.size() + 1 || eg.compare(0, g.size(), g) != 0 || eg[g.size()] != '/')) continue;
+        const size_t base = g.empty() ? 0 : g.size() + 1;
+        const size_t sl = eg.find('/', base);
+        const std::string child = eg.substr(base, sl == std::string::npos ? std::string::npos : sl - base);
+        if (child.empty() || std::find(seen.begin(), seen.end(), child) != seen.end()) continue;
+        seen.push_back(child);
+        rows.push_back({child + "/", true, -1});
+    }
+    for (size_t i = 0; i < g_presetList.size(); ++i)
+        if (g_presetList[i].group == g) rows.push_back({g_presetList[i].name, false, int(i)});
+    return rows;
+}
+
+std::string latin1(const std::string& utf8)
+{
+    std::string out;
+    for (size_t i = 0; i < utf8.size(); ++i) {
+        const unsigned char c = utf8[i];
+        if (c < 0x80) out.push_back(char(c));
+        else if ((c & 0xE0) == 0xC0 && i + 1 < utf8.size()) { const unsigned v = ((c & 0x1F) << 6) | (utf8[i + 1] & 0x3F); out.push_back(v < 256 ? char(v) : '?'); ++i; }
+        else { out.push_back('?'); while (i + 1 < utf8.size() && (utf8[i + 1] & 0xC0) == 0x80) ++i; }
+    }
+    return out;
+}
+
+void renderPresets()   // g_presetMx held
+{
+    namespace U = ::uc1;
+    if (!g_presetsOn) return;
+    if (!g_presetsBrowse) {
+        send(U::buildLcdHeader("PRESETS"));
+        send(g_presetsCs ? U::buildTrackNameTripleLarge("", "CHANNEL STRIP", "BUS COMP")
+                         : U::buildTrackNameTripleLarge("", "BUS COMP", "CHANNEL STRIP"));
+        send(U::buildMenuCommit());
+        return;
+    }
+    send(U::buildCentralMode(U::CentralMode::PresetsSub));
+    const std::string& g = g_presetGroup;
+    send(U::buildLcdHeader(g.empty() ? (g_presetsCs ? "CHANNEL STRIP " : "BUS COMP ")
+                                     : latin1(g.substr(g.find_last_of('/') == std::string::npos ? 0 : g.find_last_of('/') + 1)) + " "));
+    auto body = [&](const std::string& a, const std::string& b, const std::string& c, const std::string& d, const std::string& e) {
+        send(U::buildPresetListScroll(a, b, c, d, e));
+        send(U::buildLcdSubHeader("PRESETS"));
+        send(U::buildMenuIndicator08());
+        send(U::buildMenuCommit());
+    };
+    const std::string plugin = g_presetsCs ? g_csPlugin : g_bcPlugin;
+    if (plugin.empty()) { body("", "", "<no plug-in>", "", ""); return; }
+    if (g_presetListFor != plugin) {
+        g_presetList = scanPresets(presetDirFor(plugin));
+        g_presetListFor = plugin;
+        g_presetGroup.clear();
+        g_presetSel = 0;
+        std::printf("UC1 presets: %zu for \"%s\" (%s)\n", g_presetList.size(), plugin.c_str(), presetDirFor(plugin).c_str());
+    }
+    if (g_presetList.empty()) { body("", "", "<no presets>", "", ""); return; }
+    const auto rows = presetRows();
+    if (rows.empty()) { body("", "", "<empty folder>", "", ""); return; }
+    const int n = int(rows.size());
+    g_presetSel = std::clamp(g_presetSel, 0, n - 1);
+    auto slot = [&](int off) { const int i = g_presetSel + off; return (i < 0 || i >= n) ? std::string() : latin1(rows[size_t(i)].label); };
+    body(slot(-2), slot(-1), slot(0), slot(1), slot(2));
+}
+
+void setPresetsMode(bool on)   // g_presetMx held
+{
+    namespace U = ::uc1;
+    if (g_presetsOn == on) return;
+    g_presetsOn = on;
+    g_presetsBrowse = false;
+    send(U::buildCentralMode(on ? U::CentralMode::Presets : U::CentralMode::Main));
+    send(U::buildBcModeDot(!on));
+    for (auto& f : U::buildMenuDot(U::kCellPresetsDot, on)) send(f);
+    if (on) renderPresets();
+    else { paintCentre(); paintSevenSeg(); }
+}
+
+std::vector<unsigned char> encode3x7(const std::string& utf8)
+{
+    std::vector<unsigned char> out;
+    for (size_t i = 0; i < utf8.size(); ++i) {   // ASCII is all a preset id or value holds
+        const unsigned c = (unsigned char)utf8[i];
+        out.push_back(uint8_t((c >> 14) & 0x7F)); out.push_back(uint8_t((c >> 7) & 0x7F)); out.push_back(uint8_t(c & 0x7F));
+    }
+    return out;
+}
+
+// Send each <PARAM id="…" value="…"/> of the file to the script, then the end marker with the preset's name.
+void loadPreset(const PresetEntry& e, bool cs)
+{
+    std::ifstream f(e.path, std::ios::binary);
+    if (!f) { std::printf("UC1 presets: cannot open %s\n", e.path.c_str()); return; }
+    std::stringstream ss; ss << f.rdbuf();
+    const std::string xml = ss.str();
+    int n = 0;
+    for (size_t pos = 0; (pos = xml.find("<PARAM", pos)) != std::string::npos; ) {
+        const size_t end = xml.find("/>", pos);
+        if (end == std::string::npos) break;
+        const std::string tag = xml.substr(pos, end - pos);
+        pos = end + 2;
+        const size_t ip = tag.find("id=\""), vp = tag.find("value=\"");
+        if (ip == std::string::npos || vp == std::string::npos) continue;
+        const size_t ie = tag.find('"', ip + 4), ve = tag.find('"', vp + 7);
+        if (ie == std::string::npos || ve == std::string::npos) continue;
+        std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, 0x3C, uint8_t(cs ? 0 : 1)};
+        auto id = encode3x7(tag.substr(ip + 4, ie - (ip + 4)));
+        auto val = encode3x7(tag.substr(vp + 7, ve - (vp + 7)));
+        m.insert(m.end(), id.begin(), id.end());
+        m.insert(m.end(), {0x7F, 0x7F, 0x7F});
+        m.insert(m.end(), val.begin(), val.end());
+        m.push_back(0xF7);
+        sendMidi(std::move(m));
+        ++n;
+    }
+    std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, 0x3D, uint8_t(cs ? 0 : 1)};
+    auto name = encode3x7(e.name);
+    m.insert(m.end(), name.begin(), name.end());
+    m.push_back(0xF7);
+    sendMidi(std::move(m));
+    std::printf("UC1 presets: \"%s\" sent (%d values)\n", e.name.c_str(), n);
+}
+
+// The PRESETS screen's keys and encoder. Returns true if the event was the screen's.
+bool presetsButton(uint8_t id, bool pressed)
+{
+    namespace B = ::uc1::button;
+    std::lock_guard<std::mutex> lk(g_presetMx);
+    if (id == B::kPresets) { if (pressed) setPresetsMode(!g_presetsOn); return true; }
+    if (!g_presetsOn) return false;
+    if (id != B::kBack && id != B::kConfirm && id != B::kSecEncPush) return false;
+    if (!pressed) return true;
+    if (id == B::kBack) {
+        if (g_presetsBrowse && !g_presetGroup.empty()) {
+            const size_t sl = g_presetGroup.find_last_of('/');
+            g_presetGroup = sl == std::string::npos ? std::string() : g_presetGroup.substr(0, sl);
+            g_presetSel = 0;
+            renderPresets();
+        } else if (g_presetsBrowse) {
+            g_presetsBrowse = false;
+            send(::uc1::buildCentralMode(::uc1::CentralMode::Presets));
+            renderPresets();
+        } else setPresetsMode(false);
+        return true;
+    }
+    // CONFIRM / encoder push: enter the list from the selector; in the list, into a folder or load.
+    if (!g_presetsBrowse) { g_presetsBrowse = true; renderPresets(); return true; }
+    const auto rows = presetRows();
+    if (rows.empty()) return true;
+    const PresetRow& row = rows[size_t(std::clamp(g_presetSel, 0, int(rows.size()) - 1))];
+    if (row.folder) {
+        std::string child = row.label;
+        if (!child.empty() && child.back() == '/') child.pop_back();
+        g_presetGroup = g_presetGroup.empty() ? child : g_presetGroup + "/" + child;
+        g_presetSel = 0;
+        renderPresets();
+        return true;
+    }
+    if (row.entry >= 0) loadPreset(g_presetList[size_t(row.entry)], g_presetsCs);
+    setPresetsMode(false);
+    return true;
+}
+
+bool presetsKnob(uint8_t id, int delta)
+{
+    std::lock_guard<std::mutex> lk(g_presetMx);
+    if (!g_presetsOn) return false;
+    if (id != ::uc1::knob::kBcEncoder) return id == ::uc1::knob::kChannelEncoder;   // CHANNEL does nothing here
+    static Accumulator acc;
+    const int step = acc.step(delta);
+    if (step == 0) return true;
+    if (!g_presetsBrowse) { g_presetsCs = !g_presetsCs; renderPresets(); return true; }
+    const int n = int(presetRows().size());
+    if (n > 0) g_presetSel = std::clamp(g_presetSel + step, 0, n - 1);
+    renderPresets();
+    return true;
+}
+
+
 void onKnob(const ::uc1::KnobEvent& ev)
 {
     if (g_trace) std::printf("[UC1] knob 0x%02X %+d\n", ev.id, ev.delta);
+    if (presetsKnob(ev.id, ev.delta)) return;
     if (ev.id == ::uc1::knob::kChannelEncoder) {
         const int steps = g_channelAcc.step(ev.delta);
         for (int k = 0; k < std::abs(steps); ++k) {
@@ -562,6 +858,7 @@ void onButton(const ::uc1::ButtonEvent& ev)
 {
     if (g_trace) std::printf("[UC1] button 0x%02X %s\n", ev.id, ev.pressed ? "pressed" : "released");
     namespace B = ::uc1::button;
+    if (presetsButton(ev.id, ev.pressed)) return;
     if (ev.id == B::kPolarity || ev.id == B::kSoloClear || ev.id == B::kSolo || ev.id == B::kCut) {
         note(ev.id, ev.pressed);
         return;

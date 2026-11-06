@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.8.1-dev'
+var SCRIPT_VERSION = '0.9.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -774,8 +774,16 @@ function onBcEncoder(activeDevice, steps) {
 	paintAll(activeDevice)
 }
 
+var pluginsShown = null
 function paintAll(activeDevice) {
 	var bc = busComp()
+	// The SSL plug-ins the two sections are on, for the bridge's PRESETS screen.
+	var csName = state.cs && state.cs.key !== 'cubase' ? state.cs.name || '' : ''
+	var bcName = bc ? bc.name || '' : ''
+	if (pluginsShown !== csName + '|' + bcName) {
+		pluginsShown = csName + '|' + bcName
+		sysex(activeDevice, [0x3B].concat(encodeName(csName), [0x7F, 0x7F, 0x7F], encodeName(bcName)))
+	}
 	setLabel(activeDevice, state.cs ? state.cs.label : bc ? bc.label : '')
 	if (!state.cs) sysex(activeDevice, [0x35, ZONE_CS])
 	if (!bc) sysex(activeDevice, [0x35, ZONE_BC])
@@ -983,10 +991,104 @@ function onButton(activeDevice, id) {
 	log('button 0x' + id.toString(16) + ' has no function yet')
 }
 
+// ---------------------------------------------------------------------------
+// Loading an SSL preset (the bridge's PRESETS screen reads the preset file and sends each value: SysEx 3C <section>
+// <id> 7F 7F 7F <value>, then 3D <section> <name>). An SSL preset names its parameters by their JUCE ids; the
+// Direct Access tag of a JUCE plug-in's parameter is the id's Java-style string hash (31 * h + c, 32 bits, sign bit
+// cleared) plus 4201 (checked against all Bus Compressor 2 tags). The value is the plug-in's own: a choice's index
+// (set through convertParameterPlainToProcessValue), or a plain number in the parameter's unit (set as its display
+// value, which the plug-in parses; checked by reading it back, else found by bisection on the display).
+// ---------------------------------------------------------------------------
+function juceTag(id) {
+	var h = 0
+	for (var i = 0; i < id.length; ++i) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0
+	return (h & 0x7FFFFFFF) + 4201
+}
+function leadingNumber(text) {
+	var m = /^\s*\+?(-?\d*\.?\d+(e[-+]?\d+)?)/i.exec(text || '')
+	return m ? parseFloat(m[1]) : NaN
+}
+var presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
+function presetTarget(section) {
+	if (section === 0) return state.cs && state.cs.key !== 'cubase' ? state.cs : null
+	return busComp()
+}
+function applyPresetValue(section, id, text) {
+	var t = presetTarget(section)
+	if (!t) { ++presetLoad.skipped; return }
+	var acc = t.da, obj = t.obj, tag = juceTag(id)
+	var title = ''
+	try { title = acc.getParameterTitle(am, obj, tag, 40) } catch (e) {}
+	if (!title) { ++presetLoad.unknown; return }   // view state, not a parameter
+	var v = parseFloat(text)
+	if (isNaN(v)) { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return }
+	var plainMax = acc.convertParameterProcessValueToPlain(am, obj, tag, 1)
+	if (plainMax > 1.0001) {   // a choice: the value is its index
+		acc.setParameterProcessValue(am, obj, tag, acc.convertParameterPlainToProcessValue(am, obj, tag, Math.round(v)))
+		++presetLoad.applied
+		return
+	}
+	if ((v === 0 || v === 1) && Math.abs(plainMax - 1) < 1e-6) {
+		// A switch, or a continuous parameter at an end: try it as a switch first.
+		var before = acc.getParameterProcessValue(am, obj, tag)
+		acc.setParameterDisplayValue(am, obj, tag, String(v))
+		var shown = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
+		if (!isNaN(shown) && Math.abs(shown - v) < 1e-6) { ++presetLoad.applied; return }
+		acc.setParameterProcessValue(am, obj, tag, v)
+		var disp = acc.getParameterDisplayValue(am, obj, tag)
+		if (isNaN(leadingNumber(disp)) || Math.abs(leadingNumber(disp) - v) < 1e-6) { ++presetLoad.applied; return }
+		acc.setParameterProcessValue(am, obj, tag, before)
+	}
+	// A number in the parameter's unit: let the plug-in parse it, check, else bisect on the display.
+	acc.setParameterDisplayValue(am, obj, tag, String(v))
+	var got = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
+	var tol = Math.max(Math.abs(v) * 0.02, 0.05)
+	if (!isNaN(got) && Math.abs(got - v) <= tol) { ++presetLoad.applied; return }
+	var at = function (n) { acc.setParameterProcessValue(am, obj, tag, n); return leadingNumber(acc.getParameterDisplayValue(am, obj, tag)) }
+	var lo = at(0), hi = at(1)
+	if (isNaN(lo) || isNaN(hi) || lo === hi) { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return }
+	var asc = hi > lo, a = 0, b = 1, bestN = 0, bestErr = Infinity
+	for (var it = 0; it < 20; ++it) {
+		var n = (a + b) / 2, num = at(n)
+		if (isNaN(num)) break
+		if (Math.abs(num - v) < bestErr) { bestErr = Math.abs(num - v); bestN = n }
+		if ((num < v) === asc) a = n; else b = n
+	}
+	acc.setParameterProcessValue(am, obj, tag, bestN)
+	if (bestErr <= Math.max(Math.abs(hi - lo) * 0.02, 1e-6)) ++presetLoad.applied
+	else { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text) }
+}
+function decodeName(message, from) {
+	var out = '', parts = [], i = from
+	for (; i + 2 < message.length && message[i] !== 0xF7; i += 3) {
+		if (message[i] === 0x7F && message[i + 1] === 0x7F && message[i + 2] === 0x7F) { parts.push(out); out = ''; continue }
+		out += String.fromCharCode((message[i] << 14) | (message[i + 1] << 7) | message[i + 2])
+	}
+	parts.push(out)
+	return parts
+}
+function onPresetMessage(activeDevice, message) {
+	var section = message[5]
+	if (message[4] === 0x3C) {
+		var parts = decodeName(message, 6)
+		try { applyPresetValue(section, parts[0], parts[1] || '') } catch (e) { ++presetLoad.skipped; presetLoad.failed.push(parts[0] + ': ' + e) }
+		return
+	}
+	var name = decodeName(message, 6)[0]
+	var t = presetTarget(section)
+	log('preset "' + name + '" into ' + (t ? '"' + t.name + '"' : 'nothing (no SSL plug-in in that section)') + ': ' + presetLoad.applied
+		+ ' set, ' + presetLoad.skipped + ' not set, ' + presetLoad.unknown + ' not parameters'
+		+ (presetLoad.failed.length ? ' (not set: ' + presetLoad.failed.slice(0, 12).join(', ') + ')' : ''))
+	readout(activeDevice, section === 0 ? ZONE_CS : ZONE_BC, name, t ? 'LOADED' : 'NO SSL')
+	presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
+	paintAll(activeDevice)
+}
+
 var sysexErrors = 0
 midiInput.mOnSysex = function (activeDevice, message) {
 	if (message.length < 7 || message[4] === undefined) return
 	var cmd = message[4]
+	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
 	if (cmd !== 0x20 && cmd !== 0x21) return
 	if (!am) { if (++sysexErrors <= 3) log('UC1 event before the page was active; ignored'); return }
 	try {
