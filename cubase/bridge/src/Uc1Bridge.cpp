@@ -43,6 +43,7 @@
 #include "Palette.h"
 #include "UC1Device.h"
 #include "UC1Protocol.h"
+#include "ScriptLog.h"
 
 namespace cs {
 namespace {
@@ -441,6 +442,7 @@ void pushRing(uint8_t knobId, double value, bool dim)
 void onSysex(const std::vector<unsigned char>& m)
 {
     if (m.size() < 6 || m[1] != 0x7D || m[2] != 0x52 || m[3] != 0x36) return;
+    if (scriptLogSysex(m.data(), m.size())) return;
     switch (m[4]) {
     case 0x30: { std::lock_guard<std::mutex> lk(g_stateMx); g_name = decodeName(m, 5); } paintCentre(); break;
     case 0x31:

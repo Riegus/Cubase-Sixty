@@ -10,7 +10,29 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-console.log('[CubaseSixty UF1] script loaded, version 0.19.2-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
+// Log lines also go to the bridge (SysEx 7E <source>), which writes them to cubase\logs\scripts.log, so they can
+// be read without Cubase's script console. They are queued and sent from the idle callback (sending needs the
+// active device).
+var LOG_SOURCE = 2
+var logQueue = []
+function out(text) {
+	console.log(text)
+	if (logQueue.length < 1000) logQueue.push(String(text))
+}
+function flushLog(activeDevice) {
+	while (logQueue.length) {
+		var t = logQueue.shift()
+		var body = [0xF0, 0x7D, 0x52, 0x36, 0x7E, LOG_SOURCE]
+		for (var n = 0; n < t.length && n < 400; ++n) {
+			var c = t.charCodeAt(n)
+			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		body.push(0xF7)
+		midiOutput.sendMidi(activeDevice, body)
+	}
+}
+
+out('[CubaseSixty UF1] script loaded, version 0.19.2-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -99,12 +121,12 @@ try {
 	var outFilters = ['excludeInputChannels', 'excludeAudioChannels', 'excludeInstrumentChannels', 'excludeSamplerChannels',
 		'excludeMIDIChannels', 'excludeFXChannels', 'excludeGroupChannels', 'excludeVCAChannels']
 	for (var of = 0; of < outFilters.length; ++of) {
-		try { outZone[outFilters[of]]() } catch (e) { console.log('[CubaseSixty UF1] main output bank: ' + outFilters[of] + ' not available') }
+		try { outZone[outFilters[of]]() } catch (e) { out('[CubaseSixty UF1] main output bank: ' + outFilters[of] + ' not available') }
 	}
 	mainOut = outZone.makeMixerBankChannel()
 	bindStrip(mainOut.mValue, stripMaster, stripMasterFlip)
 } catch (e) {
-	console.log('[CubaseSixty UF1] main output could not be bound: ' + e)
+	out('[CubaseSixty UF1] main output could not be bound: ' + e)
 }
 
 function activatorButton(x, note, subPage) {
@@ -138,6 +160,7 @@ function reportVpotPosition(activeDevice, index, value) {
 }
 var vpotIdleLast = 0
 deviceDriver.mOnIdle = function (activeDevice) {
+	flushLog(activeDevice)
 	var now = 0
 	try { now = Date.now() } catch (e) { return }
 	if (now - vpotIdleLast < 1000) return
@@ -279,7 +302,7 @@ activatorButton(3, 54, sends58)
 activatorButton(6, 88, qc14)
 activatorButton(7, 89, qc58)
 var quickControls = null
-try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { console.log('[CubaseSixty UF1] Quick Controls not available: ' + e) }
+try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { out('[CubaseSixty UF1] Quick Controls not available: ' + e) }
 
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
@@ -297,7 +320,7 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 			page.makeValueBinding(sendKnob.mSurfaceValue, quickControls.getByIndex(sendIndex)).setSubPage(qc14)
 			page.makeValueBinding(sendKnob.mSurfaceValue, quickControls.getByIndex(sendIndex + 4)).setSubPage(qc58)
 		} catch (e) {
-			console.log('[CubaseSixty UF1] Quick Control ' + (sendIndex + 1) + ' could not be bound: ' + e)
+			out('[CubaseSixty UF1] Quick Control ' + (sendIndex + 1) + ' could not be bound: ' + e)
 		}
 	}
 	for (var bk = 0; bk < banks.length; ++bk) {
@@ -312,7 +335,7 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 			page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
 			page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
 		} catch (e) {
-			console.log('[CubaseSixty UF1] send ' + (banks[bk].index + 1) + ' could not be bound: ' + e)
+			out('[CubaseSixty UF1] send ' + (banks[bk].index + 1) + ' could not be bound: ' + e)
 		}
 	}
 }
@@ -340,7 +363,7 @@ var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var DEBUG = false
 
 function dbg(text) {
-	if (DEBUG) console.log('[CubaseSixty UF1] ' + text)
+	if (DEBUG) out('[CubaseSixty UF1] ' + text)
 }
 
 function toAscii7(text) {
@@ -556,8 +579,8 @@ try {
 	uf1MeterSide('meterL', 80, selectedValues.getVUChannelMeterByChannelIndex(0), mainOut ? mainOut.mValue.getVUChannelMeterByChannelIndex(0) : null)
 	uf1MeterSide('meterR', 81, selectedValues.getVUChannelMeterByChannelIndex(1), mainOut ? mainOut.mValue.getVUChannelMeterByChannelIndex(1) : null)
 } catch (e) {
-	console.log('[CubaseSixty UF1] stereo meter not available (' + e + '), using one meter')
-	try { uf1MeterSide('meter', 80, track.mVUMeter, mainOut ? mainOut.mValue.mVUMeter : null) } catch (e2) { console.log('[CubaseSixty UF1] meter not available: ' + e2) }
+	out('[CubaseSixty UF1] stereo meter not available (' + e + '), using one meter')
+	try { uf1MeterSide('meter', 80, track.mVUMeter, mainOut ? mainOut.mValue.mVUMeter : null) } catch (e2) { out('[CubaseSixty UF1] meter not available: ' + e2) }
 }
 
 // ---------------------------------------------------------------------------
@@ -604,7 +627,7 @@ try {
 			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
 		}
 	} catch (e) {
-		console.log('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)
+		out('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)
 	}
 })()
 
@@ -617,7 +640,7 @@ try {
 ;(function () {
 	var primary = null, locator = null
 	try { primary = page.mHostAccess.mTransport.mTimeDisplay.mPrimary; locator = primary.mTransportLocator } catch (e) { }
-	if (!locator) { console.log('[CubaseSixty UF1] time display not available in this Cubase version'); return }
+	if (!locator) { out('[CubaseSixty UF1] time display not available in this Cubase version'); return }
 	// The callback is mOnChange(activeDevice, activeMapping, time, format) (as in the community X-Touch
 	// script); the arguments are checked, so a different order still works.
 	var lastTime = null
@@ -625,7 +648,7 @@ try {
 	locator.mOnChange = function () {
 		var strings = []
 		for (var a = 0; a < arguments.length; ++a) if (typeof arguments[a] === 'string') strings.push(arguments[a])
-		if (logged < 2) { ++logged; console.log('[CubaseSixty UF1] time display: ' + JSON.stringify(strings)) }
+		if (logged < 2) { ++logged; out('[CubaseSixty UF1] time display: ' + JSON.stringify(strings)) }
 		var time = strings.length ? strings[0] : null
 		if (time === null || time === lastTime) return
 		lastTime = time
@@ -640,7 +663,7 @@ try {
 		for (var n = 0; n < names.length; ++n) {
 			if (holders[h][names[n]]) {
 				page.makeActionBinding(formatKey.mSurfaceValue, holders[h][names[n]])
-				console.log('[CubaseSixty UF1] 360 key: bound to ' + names[n])
+				out('[CubaseSixty UF1] 360 key: bound to ' + names[n])
 				return
 			}
 		}
@@ -648,7 +671,7 @@ try {
 	// No API action: use the command that swaps the primary and secondary time formats (the two clocks in
 	// Cubase's transport bar), so 360 switches between, say, bars and timecode.
 	page.makeCommandBinding(formatKey.mSurfaceValue, 'Transport', 'Exchange Time Formats')
-	console.log('[CubaseSixty UF1] 360 key: Transport / Exchange Time Formats')
+	out('[CubaseSixty UF1] 360 key: Transport / Exchange Time Formats')
 })()
 
 // ---------------------------------------------------------------------------
@@ -711,7 +734,7 @@ try {
 			})(c, ch)
 		}
 	} catch (e) {
-		console.log('[CubaseSixty UF1] track numbers not available: ' + e)
+		out('[CubaseSixty UF1] track numbers not available: ' + e)
 	}
 })()
 

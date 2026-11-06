@@ -21,11 +21,33 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
+// Log lines also go to the bridge (SysEx 7E <source>), which writes them to cubase\logs\scripts.log, so they can
+// be read without Cubase's script console. They are queued and sent from the idle callback (sending needs the
+// active device).
+var LOG_SOURCE = 4
+var logQueue = []
+function out(text) {
+	console.log(text)
+	if (logQueue.length < 1000) logQueue.push(String(text))
+}
+function flushLog(activeDevice) {
+	while (logQueue.length) {
+		var t = logQueue.shift()
+		var body = [0xF0, 0x7D, 0x52, 0x36, 0x7E, LOG_SOURCE]
+		for (var n = 0; n < t.length && n < 400; ++n) {
+			var c = t.charCodeAt(n)
+			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		body.push(0xF7)
+		midiOutput.sendMidi(activeDevice, body)
+	}
+}
+
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
 var SCRIPT_VERSION = '0.1.0-dev'
-console.log('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
+out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
 var midiInput = deviceDriver.mPorts.makeMidiInput()
@@ -74,7 +96,7 @@ for (var c = 0; c < CHANNELS; ++c) {
 var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: recordable')
 var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels']
 for (var f = 0; f < recFilters.length; ++f) {
-	try { recZone[recFilters[f]]() } catch (e) { console.log('[CubaseSixty Helper] recordable list: ' + recFilters[f] + ' not available: ' + e) }
+	try { recZone[recFilters[f]]() } catch (e) { out('[CubaseSixty Helper] recordable list: ' + recFilters[f] + ' not available: ' + e) }
 }
 for (var k = 0; k < REC_CHANNELS; ++k) {
 	var recChannel = recZone.makeMixerBankChannel()
@@ -91,7 +113,9 @@ for (var k = 0; k < REC_CHANNELS; ++k) {
 var resends = 0
 midiInput.mOnSysex = function (activeDevice, message) {
 	if (message.length < 6 || message[4] !== 0x1B) return
-	if (++resends <= 3 || resends % 20 === 0) console.log('[CubaseSixty Helper] lists requested (' + resends + ')')
+	if (++resends <= 3 || resends % 20 === 0) out('[CubaseSixty Helper] lists requested (' + resends + ')')
 	for (var i = 0; i < CHANNELS; ++i) sendAll(activeDevice, i)
 	for (var s = 0; s < REC_CHANNELS; ++s) sendRec(activeDevice, s)
 }
+
+deviceDriver.mOnIdle = function (activeDevice) { flushLog(activeDevice) }

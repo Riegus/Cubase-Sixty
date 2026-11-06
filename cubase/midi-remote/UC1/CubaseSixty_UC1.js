@@ -21,9 +21,31 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
+// Log lines also go to the bridge (SysEx 7E <source>), which writes them to cubase\logs\scripts.log, so they can
+// be read without Cubase's script console. They are queued and sent from the idle callback (sending needs the
+// active device).
+var LOG_SOURCE = 3
+var logQueue = []
+function out(text) {
+	console.log(text)
+	if (logQueue.length < 1000) logQueue.push(String(text))
+}
+function flushLog(activeDevice) {
+	while (logQueue.length) {
+		var t = logQueue.shift()
+		var body = [0xF0, 0x7D, 0x52, 0x36, 0x7E, LOG_SOURCE]
+		for (var n = 0; n < t.length && n < 400; ++n) {
+			var c = t.charCodeAt(n)
+			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
+		}
+		body.push(0xF7)
+		midiOutput.sendMidi(activeDevice, body)
+	}
+}
+
 var SCRIPT_VERSION = '0.4.4-dev'
-console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
-function log(text) { console.log('[CubaseSixty UC1] ' + text) }
+out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
+function log(text) { out('[CubaseSixty UC1] ' + text) }
 
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 
@@ -711,6 +733,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
+	flushLog(activeDevice)
 	var now = Date.now()
 	if (numberBase >= 0 && now >= numberCheckAt) {
 		numberCheckAt = now + 1000
