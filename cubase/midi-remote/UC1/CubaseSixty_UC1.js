@@ -18,7 +18,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.1.0-dev'
+var SCRIPT_VERSION = '0.1.1-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -62,7 +62,9 @@ function pmap(match, label, knobs, buttons, bypass, inverted) {
 	return { match: match, label: label, knobs: knobs, buttons: buttons, bypass: bypass, inverted: inverted || [] }
 }
 function kv(pairs) { var o = {}; for (var i = 0; i < pairs.length; i += 2) o[pairs[i]] = pairs[i + 1]; return o }
-var CS_INVERSIONS = [K.LowPass, K.HmfQ, K.LmfQ, K.CompThreshold, K.GateThreshold]
+// Knobs whose parameter runs the other way (clockwise = lower value). Rea-Sixty also turns Gate Threshold
+// round; in Cubase that one already runs the right way (tested on Channel Strip 2).
+var CS_INVERSIONS = [K.LowPass, K.HmfQ, K.LmfQ, K.CompThreshold]
 
 // Order matters: the first name contained in the plug-in's name wins.
 var CHANNEL_STRIPS = [
