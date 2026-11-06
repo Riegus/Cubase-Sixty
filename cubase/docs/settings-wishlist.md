@@ -10,11 +10,13 @@ Behaviour that is fixed in code today but should become a setting once Cubase-Si
 
 ## UC1
 
-- **Loading Cubase's strip modules.** Now: on a track without an SSL channel strip, turning a Gate or Dyn knob loads
-  Cubase's Gate / Standard Compressor into a free strip slot, also when the track has a Bus Compressor 2 or another
-  maker's gate / compressor in its inserts. Choices: as now; not when the track already has a gate / compressor
-  plug-in (by name); only on a deliberate action (e.g. DYN IN on an empty strip); never.
-- **Which compressor is loaded.** Now: Standard Compressor if the slot takes it, else the first compressor.
+- **Loading Cubase's strip modules.** Now: on a track without an SSL channel strip, a Gate knob or EXP loads the Noise
+  Gate, DYN IN loads the Standard Compressor, a Dyn knob (or DYN IN held) opens the compressor picker; also when the
+  track has a Bus Compressor 2 or another maker's gate / compressor in its inserts. Choices: as now; not when the track
+  already has a gate / compressor plug-in (by name); only on the keys, not the knobs; never.
+- **Which compressor DYN IN loads.** Now: Standard. Could be: the last one picked; a fixed choice.
+- **Tube / Vintage Compressor knobs.** Now: Ratio knob = Input Gain, Threshold knob = Output Gain.
+- **Bell keys on Cubase's EQ.** Now: Parametric II as the bell; back to the shelf type the band had.
 - **Bus Comp section default.** Now: until one is picked with the Bus Comp encoder, the bus comp on an output channel,
   else the first in the project. Could be: always the selected track's; remembered per project.
 - **F.ATT on Cubase's strip.** Now: switches the section's Release knob between release and attack, the choice kept
