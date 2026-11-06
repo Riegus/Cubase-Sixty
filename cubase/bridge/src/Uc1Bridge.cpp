@@ -817,10 +817,11 @@ void renderRouting()   // g_presetMx held
     if (!g_routingOn) return;
     if (g_routing[0] < 0) { send(::uc1::buildLcdHeader("NO ROUTING")); return; }
     const int pos = routingPosition();
-    // The UC1's own picture 10 is not the plug-ins' order 10 (it draws EQ to the side-chain and Dynamics before the
-    // Filters; the plug-ins' 10 has Dynamics alone in the path, Filters and EQ to the side-chain). Its picture 8 draws
-    // that path (the plug-ins' 8 and 10 differ only in switches the pictures do not show), so 10 shows picture 8.
-    send(::uc1::buildRoutingOrderIndicator(uint8_t(pos == 9 ? 8 : pos + 1)));
+    // The UC1 draws the picture and its number list itself. Its picture 10 is not quite the plug-ins' order 10 (it
+    // draws EQ to the side-chain and Dynamics before the Filters; the plug-ins' 10 has Dynamics alone in the path,
+    // Filters and EQ to the side-chain). Picture 8 draws that path but renumbers the list to 8, so 10 keeps picture
+    // 10: the numbers run 1-10 (Geir's choice).
+    send(::uc1::buildRoutingOrderIndicator(uint8_t(pos + 1)));
 }
 void setRoutingMode(bool on)   // g_presetMx held
 {
