@@ -21,5 +21,7 @@ Behaviour that is fixed in code today but should become a setting once Cubase-Si
   else the first in the project. Could be: always the selected track's; remembered per project.
 - **F.ATT on Cubase's strip.** Now: switches the section's Release knob between release and attack, the choice kept
   across tracks. Could be: fastest attack / back (like an SSL fast-attack switch).
+- **Key assignments.** Now: magnifier = next channel strip on the track, 360° = open / close the strip's window.
+  Rea-Sixty lets the user bind these keys (and the Bus Comp encoder push) to other actions.
 - **Knob step size.** Now: 1/64 of the range per click, Fine = a quarter of that.
 - **7-segment.** Now: the MixConsole number, leading zeros blank. Rea-Sixty shows leading zeros ("007").
