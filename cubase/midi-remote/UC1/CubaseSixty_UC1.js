@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.6.5-dev'
+var SCRIPT_VERSION = '0.6.6-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -782,6 +782,11 @@ function onButton(activeDevice, id) {
 			return
 		}
 		if (id === B.Back) { closePicker(activeDevice, 'Cancelled'); return }
+	}
+	// DYN IN on Cubase's strip without a compressor: load the Standard Compressor straight away.
+	if (id === B.DynIn && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
+		loadModule(activeDevice, state.cs, 'comp', STRIP_MODULES.comp[0])
+		return
 	}
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
