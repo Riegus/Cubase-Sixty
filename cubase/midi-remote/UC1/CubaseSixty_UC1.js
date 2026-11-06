@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.3.0-dev'
+var SCRIPT_VERSION = '0.3.1-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -214,19 +214,23 @@ var state = {
 	dumped: {}         // plug-in names whose parameters were already listed in the log
 }
 
-// Every object under base, depth first: { id, depth, parent index }. Branches of the kinds in skip are not
-// entered (sends, panners, EQ ... cannot hold plug-ins).
+// Every object under base, depth first: { id, depth, parent index }. A channel's branches of the kinds in skip are
+// not entered (sends, panners, EQ ... cannot hold plug-ins); elsewhere the same kinds can be groups of channels
+// (the MixConsole's output channels may sit under an "Outputs" object). Each object is listed once.
 var SKIP_TYPES = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1,
 	Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
 function walk(acc, base, maxDepth, limit) {
 	var out = []
+	var seen = {}
 	function rec(id, depth, parent) {
-		if (out.length >= limit) return
+		if (out.length >= limit || seen[id]) return
+		seen[id] = true
 		var type = ''
 		try { type = acc.getObjectTypeName(am, id) } catch (e) {}
 		out.push({ id: id, depth: depth, parent: parent, type: type })
 		var me = out.length - 1
-		if (depth >= maxDepth || SKIP_TYPES[type]) return
+		var inChannel = parent >= 0 && /Channel$/.test(out[parent].type)
+		if (depth >= maxDepth || (inChannel && SKIP_TYPES[type])) return
 		var n = 0
 		try { n = acc.getNumberOfChildObjects(am, id) } catch (e) { return }
 		for (var i = 0; i < n && i < 512; ++i) rec(acc.getChildObjectID(am, id, i), depth + 1, me)
@@ -293,7 +297,7 @@ function scanMixer(activeDevice) {
 	var list = []
 	for (var i = 0; i < objects.length; ++i) {
 		var o = objects[i]
-		if (verbose && o.depth <= 2) log('mix ' + new Array(o.depth + 1).join('  ') + '#' + o.id + ' [' + o.type + '] "' + info(daMix, o.id).title + '"')
+		if (verbose && o.depth <= 3 && !/^(Slot|Panner)$/.test(o.type)) log('mix ' + new Array(o.depth + 1).join('  ') + '#' + o.id + ' [' + o.type + '] "' + info(daMix, o.id).title + '"')
 		if (o.depth < 2) continue
 		var inf = info(daMix, o.id)
 		if (inf.params < 4 || !inf.title) continue
@@ -309,7 +313,9 @@ function scanMixer(activeDevice) {
 			}
 			p = objects[p].parent
 		}
-		list.push({ da: daMix, obj: o.id, map: map, name: inf.title, track: track, output: output })
+		var dup = false
+		for (var d = 0; d < list.length; ++d) if (list[d].obj === o.id) dup = true
+		if (!dup) list.push({ da: daMix, obj: o.id, map: map, name: inf.title, track: track, output: output })
 	}
 	if (verbose || list.length !== state.bcList.length)
 		log('MixConsole: ' + objects.length + ' objects, ' + list.length + ' bus comps'
