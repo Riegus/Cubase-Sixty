@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.6.4-dev'
+var SCRIPT_VERSION = '0.6.5-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -412,8 +412,9 @@ function cubaseStrip(objects) {
 		if (bands[b][3] !== null) knob(bands[b][3], 'band ' + n + ' Q', eq, eqList, [bx, RX.q], null, on)
 	}
 	// Each compressor type by the controls it shows in the strip (exact parameter names, from the log). The Tube and
-	// Vintage Compressors have no threshold and no ratio on their strip panel: Input Gain drives them into
-	// compression (on the Threshold knob), Output Gain makes up (on the Ratio knob).
+	// Vintage Compressors have no threshold and no ratio on their strip panel: Input Gain (drives them into
+	// compression) goes on the Ratio knob and Output Gain on the Threshold knob, as the Ratio knob sits left of the
+	// Threshold knob on the UC1 (input left, output right, as on the panel).
 	var layout = comp ? COMP_LAYOUTS[info(da, comp).title] : null
 	function exact(name) { return new RegExp('^' + name + '$', 'i') }
 	if (layout) {
@@ -464,8 +465,8 @@ function cubaseStrip(objects) {
 // whose module is missing or off switches it on; the knobs work once the track has been looked at again.
 var COMP_LAYOUTS = {
 	'Standard Compressor': { thresh: 'Threshold', ratio: 'Ratio', release: 'Release', attack: 'Attack' },
-	'Tube Compressor': { thresh: 'Input Gain', ratio: 'Output Gain', release: 'Release Time', attack: 'Attack Time' },
-	'VintageCompressor': { thresh: 'Input Gain', ratio: 'Output Gain', release: 'Release Time', attack: 'Attack Time' }
+	'Tube Compressor': { thresh: 'Output Gain', ratio: 'Input Gain', release: 'Release Time', attack: 'Attack Time' },
+	'VintageCompressor': { thresh: 'Output Gain', ratio: 'Input Gain', release: 'Release Time', attack: 'Attack Time' }
 }
 var GATE_KNOBS = [K.GateThreshold, K.GateRange, K.GateRelease, K.GateHold]
 var COMP_KNOBS = [K.CompThreshold, K.CompRatio, K.CompRelease]
