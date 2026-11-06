@@ -145,6 +145,9 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 | Knob ring | `F0 7D 52 36 36 <knob id> <hi> <lo> <dim> F7` | Cubase → bridge | Position 0–16382 (already flipped for knobs whose parameter runs the other way), 7F 7F = ring off. The bridge draws it with Rea-Sixty's cell maps (dot, or a dot fading into the next cell on the bipolar knobs). |
 | 7-segment | `F0 7D 52 36 37 <hi> <lo> F7` | Cubase → bridge | 0–999, leading zeros blank; 7F 7F = blank. Written again after the rings that share its cells (Bus Comp Release / Mix, Fader Level). |
 | Bus Comp name row | `F0 7D 52 36 38 <prev> 7F 7F 7F <curr> 7F 7F 7F <next> F7` | Cubase → bridge | The tracks of the previous, current and next bus comp (the large name row, 12 characters each). |
+| Plug-ins for PRESETS | `F0 7D 52 36 3B <cs plug-in> 7F 7F 7F <bc plug-in> F7` | Cubase → bridge | The SSL plug-ins the two sections are on (empty = none); the bridge's PRESETS screen lists their library. |
+| Preset value | `F0 7D 52 36 3C <section> <id> 7F 7F 7F <value> F7` | bridge → Cubase | One `<PARAM id value>` of the preset file being loaded; section 0 Channel Strip, 1 Bus Comp. |
+| Preset end | `F0 7D 52 36 3D <section> <name> F7` | bridge → Cubase | All values sent; the script reports and shows "<name> LOADED". |
 | Send CC back | `F0 7D 52 36 3A <cc> <value> F7` | Cubase → bridge | The bridge sends CC `<cc>` `<value>` (channel 1) to Cubase on the UC1 port: lets the script set a host value it has bound to a CC (the strip Gate / Compressor on switches, CC 40 / 41). |
 | Bus Comp header | `F0 7D 52 36 39 <text> F7` | Cubase → bridge | Shown for 1.5 s in place of the model field ("BUS COMP 2"), as SSL 360 does while the Bus Comp encoder turns. |
 
