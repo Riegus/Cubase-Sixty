@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.5.1-dev'
+var SCRIPT_VERSION = '0.5.2-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -368,8 +368,10 @@ function cubaseStrip(objects) {
 			var folder = objects[o.parent].parent
 			if (folder < 0 || objects[folder].type !== 'Strips') continue
 			var title = info(da, o.id).title
-			if (/gate/i.test(title) && !gate) gate = o.id
-			else if (/comp/i.test(title) && !comp) comp = o.id
+			var kind = /gate/i.test(title) ? 'gate' : /comp/i.test(title) ? 'comp' : null
+			if (kind === 'gate' && !gate) gate = o.id
+			else if (kind === 'comp' && !comp) comp = o.id
+			if (kind) rememberModule(kind, o.id, title, info(da, objects[o.parent].id).title)
 		}
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
@@ -459,11 +461,25 @@ try {
 		var k = surface.makeKnob(x, 3, 1, 1)
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
 		page.makeValueBinding(k.mSurfaceValue, hostValue)
-		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) { stripOn[kind] = value }
+		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			if (stripOn[kind] !== value) log('strip ' + kind + ' on switch: ' + value)
+			stripOn[kind] = value
+		}
 	}
 	bindOn(0, CC_GATE_ON, 'gate', stripFx.mGate.mOn)
 	bindOn(1, CC_COMP_ON, 'comp', stripFx.mCompressor.mOn)
 } catch (e) { log('strip module switches could not be bound: ' + e) }
+// A strip module seen on some track: its identity, to load the same module into another track's empty slot
+// (Direct Access trySetSlotPlugin; the strip slots list no plug-ins of their own).
+var moduleSeen = {}
+function rememberModule(kind, obj, title, slotTitle) {
+	if (moduleSeen[kind]) return
+	var uid = '', uname = ''
+	try { uid = da.getObjectUniqueIDString(am, obj) } catch (e) {}
+	try { uname = da.getObjectUniqueName(am, obj) } catch (e) {}
+	moduleSeen[kind] = { uid: uid, uname: uname, title: title, slotTitle: slotTitle }
+	log('strip ' + kind + ' seen: "' + title + '" in slot "' + slotTitle + '", id string "' + uid + '", unique name "' + uname + '"')
+}
 var switchTried = {}
 function switchOnModuleFor(activeDevice, target, knob) {
 	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
@@ -474,6 +490,20 @@ function switchOnModuleFor(activeDevice, target, knob) {
 	if (switchTried[key] && Date.now() - switchTried[key] < 2000) return true
 	switchTried[key] = Date.now()
 	log('switching on the strip ' + (kind === 'gate' ? 'gate' : 'compressor') + ' (was ' + (missing ? 'not there' : 'off') + ')')
+	var seen = moduleSeen[kind]
+	if (missing && seen && target.emptySlots.length) {
+		// The slot it sat in on the other track if that one is free here, else the first free one.
+		var slot = target.emptySlots[0]
+		for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === seen.slotTitle) slot = target.emptySlots[e]
+		var ids = [seen.uid, seen.uname]
+		for (var k = 0; k < ids.length; ++k) {
+			if (!ids[k]) continue
+			var ok = false
+			try { ok = da.mPluginManager.trySetSlotPlugin(am, slot, ids[k], true) } catch (err) { log('trySetSlotPlugin failed: ' + err) }
+			log('loading "' + seen.title + '" into strip slot "' + info(da, slot).title + '" with "' + ids[k] + '": ' + (ok ? 'done' : 'refused'))
+			if (ok) break
+		}
+	} else if (missing && !seen) log('no ' + kind + ' seen on any track yet: select a track that has one in its strip once, then try again')
 	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
 	readout(activeDevice, ZONE_CS, kind === 'gate' ? 'Gate' : 'Compressor', 'ON')
 	state.rescanAt = Date.now() + 300
