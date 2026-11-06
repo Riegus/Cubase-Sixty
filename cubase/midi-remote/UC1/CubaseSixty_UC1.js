@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.3.1-dev'
+var SCRIPT_VERSION = '0.3.2-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -275,14 +275,15 @@ function rescan(activeDevice) {
 	paintAll(activeDevice)
 }
 
-// The 7-segment number: the selected channel's position in the MixConsole (Direct Access getMixerChannelIndex).
+// The 7-segment number: the selected channel's number in the MixConsole. Direct Access getMixerChannelIndex gives it
+// as is (tested: index 50 for the channel the MixConsole numbers 50).
 var numberLogs = 0
 function showNumber(activeDevice, base) {
 	var index = -1, zone = -1
 	try { index = da.getMixerChannelIndex(am, base) } catch (e) {}
 	try { zone = da.getMixerChannelZone(am, base) } catch (e) {}
 	if (++numberLogs <= 10) log('mixer channel index ' + index + ', zone ' + zone)
-	var v = index >= 0 ? index + 1 : 0x3FFF
+	var v = index > 0 ? index : 0x3FFF
 	sysex(activeDevice, [0x37, (v >> 7) & 0x7F, v & 0x7F])
 }
 
