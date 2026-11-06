@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.7.1-dev'
+var SCRIPT_VERSION = '0.7.2-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -412,6 +412,18 @@ function cubaseStrip(objects) {
 		knob(bands[b][2], 'band ' + n + ' freq', eq, eqList, [bx, RX.freq], null, on)
 		if (bands[b][3] !== null) knob(bands[b][3], 'band ' + n + ' Q', eq, eqList, [bx, RX.q], null, on)
 	}
+	// LF BELL / HF BELL: bands 1 and 4 between their shelf (as they come: "Low / High Shelf II") and a bell
+	// ("Parametric II", the top of the type list). Lit while a bell. Switching also switches the band on.
+	var bells = [[B.LfBell, 1], [B.HfBell, 4]]
+	for (var bb = 0; bb < bells.length; ++bb) {
+		var typ = sw(eq, eqList, [band(bells[bb][1]), /type/i])
+		if (!typ) continue
+		typ.eqType = true
+		typ.enable = sw(eq, eqList, [band(bells[bb][1]), RX.on])
+		t.buttons[bells[bb][0]] = typ
+		t.objs[eq] = true
+		found.push((bells[bb][1] === 1 ? 'LF' : 'HF') + ' bell="' + typ.title + '"')
+	}
 	// Each compressor type by the controls it shows in the strip (exact parameter names, from the log). The Tube and
 	// Vintage Compressors have no threshold and no ratio on their strip panel: Input Gain (drives them into
 	// compression) goes on the Ratio knob and Output Gain on the Threshold knob, as the Ratio knob sits left of the
@@ -728,13 +740,30 @@ function dumpParams(acc, obj, name) {
 }
 
 function paramValue(target, rf) { return target.da.getParameterProcessValue(am, rf.obj, rf.tag) }
+// The shelf type each bell key goes back to (by EQ object and tag), learnt when it switches to a bell.
+var shelfBefore = {}
+function isBell(target, rf) { return /param|bell|peak/i.test(target.da.getParameterDisplayValue(am, rf.obj, rf.tag)) }
 function toggleParam(target, rf) {
 	if (!rf) return
+	if (rf.eqType) {
+		var key = rf.obj + ':' + rf.tag
+		if (isBell(target, rf)) target.da.setParameterProcessValue(am, rf.obj, rf.tag, shelfBefore[key] !== undefined ? shelfBefore[key] : 5 / 7)
+		else {
+			shelfBefore[key] = paramValue(target, rf)
+			target.da.setParameterProcessValue(am, rf.obj, rf.tag, 1)
+		}
+		if (rf.enable && paramValue(target, rf.enable) < 0.5) target.da.setParameterProcessValue(am, rf.enable.obj, rf.enable.tag, 1)
+		log('EQ type now "' + target.da.getParameterDisplayValue(am, rf.obj, rf.tag) + '"')
+		return
+	}
 	var v = paramValue(target, rf)
 	target.da.setParameterProcessValue(am, rf.obj, rf.tag, v >= 0.5 ? 0 : 1)
 }
 // A switch's LED: lit when the parameter is on (or, for refs marked invert, off: a bypass lights IN when 0).
-function lit(target, rf) { return (paramValue(target, rf) >= 0.5) !== rf.invert }
+function lit(target, rf) {
+	if (rf.eqType) return isBell(target, rf)
+	return (paramValue(target, rf) >= 0.5) !== rf.invert
+}
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
 var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen]
