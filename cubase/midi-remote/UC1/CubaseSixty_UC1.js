@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.5.3-dev'
+var SCRIPT_VERSION = '0.6.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -469,42 +469,71 @@ try {
 	bindOn(0, CC_GATE_ON, 'gate', stripFx.mGate.mOn)
 	bindOn(1, CC_COMP_ON, 'comp', stripFx.mCompressor.mOn)
 } catch (e) { log('strip module switches could not be bound: ' + e) }
-// A strip module seen on some track: its identity, to load the same module into another track's empty slot
-// (Direct Access trySetSlotPlugin; the strip slots list no plug-ins of their own).
-var moduleSeen = {}
-function rememberModule(kind, obj, title, slotTitle) {
-	if (moduleSeen[kind]) return
-	var uid = '', uname = ''
-	try { uid = da.getObjectUniqueIDString(am, obj) } catch (e) {}
-	try { uname = da.getObjectUniqueName(am, obj) } catch (e) {}
-	moduleSeen[kind] = { uid: uid, uname: uname, title: title, slotTitle: slotTitle }
-	log('strip ' + kind + ' seen: "' + title + '" in slot "' + slotTitle + '", id string "' + uid + '", unique name "' + uname + '"')
+// Strip modules by kind: name and plug-in class id (the unique name without its "-<instance>" ending), which is what
+// an empty strip slot is loaded with (Direct Access trySetSlotPlugin). Known ones are listed; any other module seen
+// in a track's strip is added (and logged with its id, to be listed here).
+var STRIP_MODULES = {
+	gate: [{ name: 'Noise Gate', uid: 'C3B0615A2A444991B423673DEE2379A7', slot: '1' }],
+	comp: [{ name: 'Standard Compressor', uid: 'E022B5972163463CBA2036708D5AF5A5', slot: '2' }]
 }
+function rememberModule(kind, obj, title, slotTitle) {
+	var list = STRIP_MODULES[kind]
+	for (var i = 0; i < list.length; ++i) if (list[i].name === title) return
+	var uname = ''
+	try { uname = da.getObjectUniqueName(am, obj) } catch (e) {}
+	if (!uname) return
+	list.push({ name: title, uid: uname.replace(/-\d+$/, ''), slot: slotTitle })
+	log('strip ' + kind + ' seen: "' + title + '" in slot "' + slotTitle + '", class id ' + uname.replace(/-\d+$/, ''))
+}
+function loadModule(activeDevice, target, kind, module) {
+	// The slot it sits in by default if that one is free, else the first free one.
+	var slot = target.emptySlots[0]
+	for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === module.slot) slot = target.emptySlots[e]
+	var ok = false
+	try { ok = da.mPluginManager.trySetSlotPlugin(am, slot, module.uid, true) } catch (err) { log('trySetSlotPlugin failed: ' + err) }
+	log('loading "' + module.name + '" into strip slot "' + info(da, slot).title + '": ' + (ok ? 'done' : 'refused'))
+	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
+	readout(activeDevice, ZONE_CS, module.name, ok ? 'ON' : 'FAILED')
+	state.rescanAt = Date.now() + 300
+}
+
+// The compressor picker: a Dyn knob turned on a track without a compressor (and more than one compressor type
+// known) shows the types in the readout; turning any Dyn knob steps through them, CONFIRM or DYN IN loads the one
+// shown, BACK (or 8 s without a turn, or another track) cancels.
+var picker = null   // { kind, index, until, target }
+function showPicker(activeDevice) {
+	var list = STRIP_MODULES[picker.kind]
+	readout(activeDevice, ZONE_CS, list[picker.index].name, (picker.index + 1) + '/' + list.length)
+}
+function closePicker(activeDevice, why) {
+	if (!picker) return
+	picker = null
+	if (why) readout(activeDevice, ZONE_CS, why, '')
+}
+
 var switchTried = {}
-function switchOnModuleFor(activeDevice, target, knob) {
+function switchOnModuleFor(activeDevice, target, knob, clicks) {
 	var kind = GATE_KNOBS.indexOf(knob) >= 0 ? 'gate' : COMP_KNOBS.indexOf(knob) >= 0 ? 'comp' : null
 	if (!kind) return false
 	var missing = kind === 'gate' ? target.noGate : target.noComp
+	if (picker && picker.kind === kind && picker.target === target) {
+		var n = STRIP_MODULES[kind].length
+		picker.index = ((picker.index + (clicks > 0 ? 1 : -1)) % n + n) % n
+		picker.until = Date.now() + 8000
+		showPicker(activeDevice)
+		return true
+	}
 	if (!missing && stripOn[kind] !== 0) return false
+	if (missing && target.emptySlots.length && STRIP_MODULES[kind].length > 1) {
+		picker = { kind: kind, index: 0, until: Date.now() + 8000, target: target }
+		showPicker(activeDevice)
+		return true
+	}
 	var key = numberBase + ':' + kind
 	if (switchTried[key] && Date.now() - switchTried[key] < 2000) return true
 	switchTried[key] = Date.now()
 	log('switching on the strip ' + (kind === 'gate' ? 'gate' : 'compressor') + ' (was ' + (missing ? 'not there' : 'off') + ')')
-	var seen = moduleSeen[kind]
-	if (missing && seen && target.emptySlots.length) {
-		// The slot it sat in on the other track if that one is free here, else the first free one.
-		var slot = target.emptySlots[0]
-		for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === seen.slotTitle) slot = target.emptySlots[e]
-		// The unique name is "<plug-in class id>-<instance>"; the class id is what a slot is loaded with.
-		var ids = [seen.uname.replace(/-\d+$/, ''), seen.uid, seen.uname]
-		for (var k = 0; k < ids.length; ++k) {
-			if (!ids[k]) continue
-			var ok = false
-			try { ok = da.mPluginManager.trySetSlotPlugin(am, slot, ids[k], true) } catch (err) { log('trySetSlotPlugin failed: ' + err) }
-			log('loading "' + seen.title + '" into strip slot "' + info(da, slot).title + '" with "' + ids[k] + '": ' + (ok ? 'done' : 'refused'))
-			if (ok) break
-		}
-	} else if (missing && !seen) log('no ' + kind + ' seen on any track yet: select a track that has one in its strip once, then try again')
+	if (missing && target.emptySlots.length) { loadModule(activeDevice, target, kind, STRIP_MODULES[kind][0]); return true }
 	sysex(activeDevice, [0x3A, kind === 'gate' ? CC_GATE_ON : CC_COMP_ON, 127])
 	readout(activeDevice, ZONE_CS, kind === 'gate' ? 'Gate' : 'Compressor', 'ON')
 	state.rescanAt = Date.now() + 300
@@ -690,7 +719,7 @@ function onKnob(activeDevice, id, clicks) {
 	var target = targetFor(id)
 	if (!target) return
 	var rf = target.knobs[id]
-	if (target.emptySlots && switchOnModuleFor(activeDevice, target, id)) return
+	if (target.emptySlots && switchOnModuleFor(activeDevice, target, id, clicks)) return
 	if (!rf) return
 	var acc = target.da
 	var step = clicks / 64 * (state.fine ? 0.25 : 1)
@@ -714,6 +743,15 @@ function onKnob(activeDevice, id, clicks) {
 }
 
 function onButton(activeDevice, id) {
+	if (picker) {
+		if (id === B.Confirm || id === B.DynIn) {
+			var p = picker
+			picker = null
+			loadModule(activeDevice, p.target, p.kind, STRIP_MODULES[p.kind][p.index])
+			return
+		}
+		if (id === B.Back) { closePicker(activeDevice, 'Cancelled'); return }
+	}
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
 	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.bypass); paintLeds(activeDevice); return }
@@ -787,6 +825,7 @@ if (daMix) {
 
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	am = activeMapping
+	picker = null
 	sysex(activeDevice, [0x30].concat(encodeName(title)))
 	state.rescanAt = Date.now() + 100
 }
@@ -808,6 +847,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
 	flushLog(activeDevice)
 	var now = Date.now()
+	if (picker && now > picker.until) closePicker(activeDevice, 'Cancelled')
 	if (numberBase >= 0 && now >= numberCheckAt) {
 		numberCheckAt = now + 1000
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
