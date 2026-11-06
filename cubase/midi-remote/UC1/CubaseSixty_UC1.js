@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.7.2-dev'
+var SCRIPT_VERSION = '0.7.3-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -742,6 +742,31 @@ function dumpParams(acc, obj, name) {
 function paramValue(target, rf) { return target.da.getParameterProcessValue(am, rf.obj, rf.tag) }
 // The shelf type each bell key goes back to (by EQ object and tag), learnt when it switches to a bell.
 var shelfBefore = {}
+// The value of a band's bell type. The outer bands' type lists differ from the mid bands' (the top of band 4's
+// list is "High Shelf IV"), so the list is read once: each value is set for a moment and its name read back, and
+// the type goes back to what it was (all within one callback, so nothing is heard). Prefers "Parametric II".
+var bellValues = {}
+function bellValue(target, rf) {
+	var key = rf.title
+	if (bellValues[key] !== undefined) return bellValues[key]
+	var acc = target.da, before = paramValue(target, rf)
+	var names = [], seen = {}, found = null, foundAny = null
+	for (var i = 0; i <= 32; ++i) {
+		var v = i / 32
+		acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
+		var name = acc.getParameterDisplayValue(am, rf.obj, rf.tag)
+		if (seen[name]) continue
+		seen[name] = true
+		var exact = acc.getParameterProcessValue(am, rf.obj, rf.tag)
+		names.push(name + ' (' + exact.toFixed(3) + ')')
+		if (/parametric\s*ii$/i.test(name) && found === null) found = exact
+		if (/param|bell|peak/i.test(name) && foundAny === null) foundAny = exact
+	}
+	acc.setParameterProcessValue(am, rf.obj, rf.tag, before)
+	log(rf.title + ' types: ' + names.join(', '))
+	bellValues[key] = found !== null ? found : foundAny
+	return bellValues[key]
+}
 function isBell(target, rf) { return /param|bell|peak/i.test(target.da.getParameterDisplayValue(am, rf.obj, rf.tag)) }
 function toggleParam(target, rf) {
 	if (!rf) return
@@ -750,7 +775,9 @@ function toggleParam(target, rf) {
 		if (isBell(target, rf)) target.da.setParameterProcessValue(am, rf.obj, rf.tag, shelfBefore[key] !== undefined ? shelfBefore[key] : 5 / 7)
 		else {
 			shelfBefore[key] = paramValue(target, rf)
-			target.da.setParameterProcessValue(am, rf.obj, rf.tag, 1)
+			var bell = bellValue(target, rf)
+			if (bell === null) { log('no bell type found for ' + rf.title); return }
+			target.da.setParameterProcessValue(am, rf.obj, rf.tag, bell)
 		}
 		if (rf.enable && paramValue(target, rf.enable) < 0.5) target.da.setParameterProcessValue(am, rf.enable.obj, rf.enable.tag, 1)
 		log('EQ type now "' + target.da.getParameterDisplayValue(am, rf.obj, rf.tag) + '"')
