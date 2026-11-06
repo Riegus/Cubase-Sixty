@@ -10,7 +10,7 @@ The bridge creates two virtual MIDI ports per surface, one for each direction. N
 |---------|----------------------------------|-------------------------------------|
 | UF8     | `Cubase-Sixty UF8 to Cubase`     | `Cubase-Sixty UF8 from Cubase`      |
 | UF1     | `Cubase-Sixty UF1 to Cubase`     | `Cubase-Sixty UF1 from Cubase`      |
-| UC1     | `Cubase-Sixty UC1 to Cubase` (later) | `Cubase-Sixty UC1 from Cubase` (later) |
+| UC1     | `Cubase-Sixty UC1 to Cubase`     | `Cubase-Sixty UC1 from Cubase`      |
 | Mackie Control | `Cubase-Sixty MCU to Cubase` | `Cubase-Sixty MCU from Cubase` |
 
 Each MIDI Remote script detects its surface by these exact names. Keep the ports out of Cubase's *All MIDI Inputs*. The Mackie Control pair is for a Mackie Control remote device in Cubase (see "Mackie Control" below), not a script.
@@ -125,8 +125,25 @@ The bridge talks to a Mackie Control device in Cubase only for what the MIDI Rem
 
 Everything else Cubase sends on that port (display, LEDs, faders) is ignored.
 
+## UC1 messages
+
+The UC1 script finds the SSL plug-ins on the selected track and drives their parameters itself (Direct Access); the bridge only passes events on and paints. Knob and button ids are Rea-Sixty's (`extension/src/UC1Protocol.h`). Names and texts are encoded 3 × 7 bits per character (UTF-16), as for the helper; the bridge shows Latin-1.
+
+| Item | Message | Direction | Notes |
+|------|---------|-----------|-------|
+| Knob | `F0 7D 52 36 20 <knob id> <64 + clicks> F7` | bridge → Cubase | Clicks signed (usually ±1..3). |
+| Button | `F0 7D 52 36 21 <button id> <1 pressed / 0 released> F7` | bridge → Cubase | All buttons except the note-bound ones below. |
+| CHANNEL encoder | Note 100 (next) / 101 (previous), press + release | bridge → Cubase | `Project / Select Track: Next / Prev`. |
+| Polarity / Solo Clear / Solo / Cut | Notes 0x19 / 0x1B / 0x1C / 0x1D | both | Bound in the script (phase switch, `Edit / Deactivate All Solo`, solo, mute of the selected track); Cubase → bridge lights the LED. |
+| Track name | `F0 7D 52 36 30 <name> F7` | Cubase → bridge | The small (Channel Strip) name row, 12 characters. |
+| Track colour | `F0 7D 52 36 31 <r> <g> <b> F7` | Cubase → bridge | 0–127 each; the bridge quantises to the UC1 palette. |
+| Model field | `F0 7D 52 36 32 <label> F7` | Cubase → bridge | "CS 2", "4K E", "BC 2" …; empty = no plug-in (the layout mode follows). |
+| Value readout | `F0 7D 52 36 33 <zone> <text> F7` | Cubase → bridge | Zone 03 Channel Strip, 05 Bus Comp; text = name padded to 16 + value right-aligned in 7. |
+| Button LED | `F0 7D 52 36 34 <button id> <0 off / 1 on / 2 dim> F7` | Cubase → bridge | |
+| Clear readout | `F0 7D 52 36 35 <zone> F7` | Cubase → bridge | |
+| Knob ring | `F0 7D 52 36 36 <knob id> <hi> <lo> <dim> F7` | Cubase → bridge | Position 0–16382 (already flipped for knobs whose parameter runs the other way), 7F 7F = ring off. The bridge draws it with Rea-Sixty's cell maps (dot, or a dot fading into the next cell on the bipolar knobs). |
+
 ## Not yet covered
 
-- UC1 mappings.
 - The UF1 MODE view METER (soft key 3).
 - A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.
