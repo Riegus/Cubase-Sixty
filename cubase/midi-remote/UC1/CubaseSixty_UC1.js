@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.9.0-dev'
+var SCRIPT_VERSION = '0.9.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -1019,7 +1019,7 @@ function applyPresetValue(section, id, text) {
 	var acc = t.da, obj = t.obj, tag = juceTag(id)
 	var title = ''
 	try { title = acc.getParameterTitle(am, obj, tag, 40) } catch (e) {}
-	if (!title) { ++presetLoad.unknown; return }   // view state, not a parameter
+	if (!title || title === '-') { ++presetLoad.unknown; return }   // view state / a placeholder, not a parameter
 	var v = parseFloat(text)
 	if (isNaN(v)) { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return }
 	var plainMax = acc.convertParameterProcessValueToPlain(am, obj, tag, 1)
@@ -1039,23 +1039,61 @@ function applyPresetValue(section, id, text) {
 		if (isNaN(leadingNumber(disp)) || Math.abs(leadingNumber(disp) - v) < 1e-6) { ++presetLoad.applied; return }
 		acc.setParameterProcessValue(am, obj, tag, before)
 	}
+	// The display across the range (65 points), for the two cases below.
+	var at = function (n) { acc.setParameterProcessValue(am, obj, tag, n); return acc.getParameterDisplayValue(am, obj, tag) }
+	var probe = function () {
+		var pts = []
+		for (var k = 0; k <= 64; ++k) { var d = at(k / 64); pts.push({ n: k / 64, text: d, num: leadingNumber(d) }) }
+		return pts
+	}
+	// A stepped parameter whose file value is its index (4K compressor / gate release, Bus Compressor 2 attack and
+	// release): a short list of distinct readings, and the index picks one.
+	var pts = null
+	if (v === Math.round(v) && v >= 0) {
+		pts = probe()
+		var steps = []
+		for (var q = 0; q < pts.length; ++q) if (!steps.length || steps[steps.length - 1].text !== pts[q].text) steps.push(pts[q])
+		if (steps.length <= 24 && v < steps.length) {
+			// A number that is itself one of the readings (an HPF of "20" Hz) means the value, not the index.
+			var byValue = null
+			for (var w = 0; w < steps.length; ++w) if (!isNaN(steps[w].num) && Math.abs(steps[w].num - v) < 1e-6) byValue = steps[w]
+			acc.setParameterProcessValue(am, obj, tag, (byValue || steps[v]).n)
+			++presetLoad.applied
+			return
+		}
+	}
 	// A number in the parameter's unit: let the plug-in parse it, check, else bisect on the display.
 	acc.setParameterDisplayValue(am, obj, tag, String(v))
 	var got = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
 	var tol = Math.max(Math.abs(v) * 0.02, 0.05)
 	if (!isNaN(got) && Math.abs(got - v) <= tol) { ++presetLoad.applied; return }
-	var at = function (n) { acc.setParameterProcessValue(am, obj, tag, n); return leadingNumber(acc.getParameterDisplayValue(am, obj, tag)) }
-	var lo = at(0), hi = at(1)
-	if (isNaN(lo) || isNaN(hi) || lo === hi) { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return }
-	var asc = hi > lo, a = 0, b = 1, bestN = 0, bestErr = Infinity
-	for (var it = 0; it < 20; ++it) {
-		var n = (a + b) / 2, num = at(n)
+	// Bisect between the two sampled points around the value (the ends may read "OFF": no number there).
+	if (!pts) pts = probe()
+	var lo = null, hi = null
+	for (var z = 0; z + 1 < pts.length; ++z) {
+		var p0 = pts[z], p1 = pts[z + 1]
+		if (isNaN(p0.num) || isNaN(p1.num)) continue
+		if ((p0.num - v) * (p1.num - v) <= 0) { lo = p0; hi = p1; break }
+	}
+	if (!lo) {
+		// Outside the numbered part: an end that reads "OFF" (a filter at its end) takes values beyond the range.
+		var first = null, last = null
+		for (var y = 0; y < pts.length; ++y) if (!isNaN(pts[y].num)) { if (!first) first = pts[y]; last = pts[y] }
+		var offEnd = null
+		if (first && isNaN(pts[0].num) && (first.num > last.num ? v > first.num : v < first.num)) offEnd = pts[0]
+		if (last && isNaN(pts[pts.length - 1].num) && (last.num > first.num ? v > last.num : v < last.num)) offEnd = pts[pts.length - 1]
+		if (offEnd) { acc.setParameterProcessValue(am, obj, tag, offEnd.n); ++presetLoad.applied; return }
+		++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return
+	}
+	var a = lo.n, b = hi.n, asc = hi.num > lo.num, bestN = lo.n, bestErr = Math.abs(lo.num - v)
+	for (var it = 0; it < 16; ++it) {
+		var n = (a + b) / 2, num = leadingNumber(at(n))
 		if (isNaN(num)) break
 		if (Math.abs(num - v) < bestErr) { bestErr = Math.abs(num - v); bestN = n }
 		if ((num < v) === asc) a = n; else b = n
 	}
 	acc.setParameterProcessValue(am, obj, tag, bestN)
-	if (bestErr <= Math.max(Math.abs(hi - lo) * 0.02, 1e-6)) ++presetLoad.applied
+	if (bestErr <= Math.max(Math.abs(hi.num - lo.num), Math.abs(v) * 0.02, 1e-6)) ++presetLoad.applied
 	else { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text) }
 }
 function decodeName(message, from) {
