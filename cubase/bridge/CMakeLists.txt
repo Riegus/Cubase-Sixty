@@ -52,6 +52,8 @@ add_executable(cubase_sixty_bridge
     src/MidiPorts.h
     src/Uf1Bridge.cpp
     src/Uf1Bridge.h
+    src/Uf1Meter.cpp
+    src/Uf1Meter.h
     src/Uc1Bridge.cpp
     src/ScriptLog.cpp
     src/NetInit.cpp

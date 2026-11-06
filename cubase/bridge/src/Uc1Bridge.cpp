@@ -1058,9 +1058,10 @@ void grLoop()
                 if (e == std::string::npos) break;
                 a = e + 1;
             }
+            // The two reports below were for finding the gain-reduction meters; now only with --trace.
             {   // Liveness, every 30 s: how many plug-ins stream, and how long since data / a new connection.
                 static int every = 0;
-                if (++every % 10 == 0) {
+                if (++every % 10 == 0 && g_trace) {
                     int n = 0;
                     for (char c : sum) if (c == '\n') ++n;
                     const long long d = sslcore::msSinceLastData(), c = sslcore::msSinceLastNewConn();
@@ -1069,7 +1070,7 @@ void grLoop()
                 }
             }
             if (sum.empty()) key = sslcore::pluginConnected() ? "connected, no meter data" : "none";
-            if (key != lastSummary) {
+            if (key != lastSummary && g_trace) {
                 lastSummary = key;
                 std::printf("SSL plug-ins connected (UC1 reads: strip track %d #%d \"%s\", bus comp track %d #%d):\n%s",
                             csT, csO, model.c_str(), bcT, bcO, sum.empty() ? ("  " + key + "\n").c_str() : sum.c_str());

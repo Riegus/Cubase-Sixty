@@ -15,6 +15,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdio>
+#include <initializer_list>
 #include <map>
 #include <mutex>
 #include <string>
@@ -29,8 +30,12 @@
 #include "UF1Protocol.h"
 #include "Uf1Pacer.h"
 #include "ScriptLog.h"
+#include "Uf1Meter.h"
+#include "SslCoreImpersonator.h"
 
 namespace cs {
+bool netInit();      // NetInit.cpp
+int stopSslCore();   // SslCoreGuard.cpp
 namespace {
 
 constexpr const char* kPortTo   = "Cubase-Sixty UF1 to Cubase";
@@ -82,9 +87,12 @@ int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts a
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
 // The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
-// 3 SENDS = V-pots on the sends and the four sends shown in the display's V-pot cells).
-enum { kViewPlugin = 0, kViewDaw = 1, kViewSends = 3 };
+// 2 METER = the SSL Meter plug-in's Overview screen (Uf1Meter.cpp), 3 SENDS = V-pots on the sends and the four
+// sends shown in the display's V-pot cells).
+enum { kViewPlugin = 0, kViewDaw = 1, kViewMeter = 2, kViewSends = 3 };
 std::atomic<int> g_view{kViewDaw};
+std::atomic<bool> g_meterReset{false};   // METER: the RESET soft key was pressed (the cycle thread takes it)
+std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LED note from the script)
 long long nowMs();
 void paintSendCells(bool force = false);
 void startIdleCycle();
@@ -194,6 +202,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 1 && ev.id <= 4) {
+            if (g_view == kViewMeter) break;   // METER: the V-pots have no meter settings yet (and would change sends unseen)
             const size_t k = size_t(ev.id - 1);
             if (g_vpotPos[k] < 0) break;   // position not known yet (comes from Cubase within a second)
             const int v = std::clamp(g_vpotPos[k] + ev.delta * kVpotStep, 0, 16383);
@@ -248,23 +257,25 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         // MODE: while held, the four display soft keys pick the view (as in Rea-Sixty): 1 PLUGIN (V-pots on
-        // Cubase's Quick Controls), 2 DAW (V-pots on the sends); 3 and 4 are not used yet. Releasing MODE
-        // closes the picker. The view keeps its 5-8 state (Quick Controls 5-8 / sends 5-8).
+        // Cubase's Quick Controls), 2 DAW (V-pots on the sends), 3 METER (the SSL Meter's Overview), 4 SENDS.
+        // Releasing MODE closes the picker. The view keeps its 5-8 state (Quick Controls 5-8 / sends 5-8).
         if (ev.id == 0x20) {
             g_modeHeld = ev.pressed;
             paintSoftKeys();
             break;
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
+            // METER, without MODE: soft key 2 = RESET (the peak holds and overload marks). FINE and PRESETS: later.
+            if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1A) { g_meterReset = true; break; }
             if (!ev.pressed || !g_modeHeld) break;
-            if (ev.id == 0x19 || ev.id == 0x1A || ev.id == 0x1C) {
+            {
                 const int view = ev.id - 0x19;
                 if (view != g_view) {
                     const bool pageChanges = (view == kViewPlugin) != (g_view == kViewPlugin);
                     g_view = view;
                     if (pageChanges) sendVpotPage();
                     paintSendCells(true);
-                    if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : "SENDS");
+                    if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
                 }
                 paintSoftKeys();
             }
@@ -370,21 +381,23 @@ void softKeyLed(int i, uint32_t rgb)
 void paintSoftKeys()
 {
     if (!g_open) return;
-    static const char* const kPicker[4] = {"PLUGIN", "DAW", "", "SENDS"};   // 3 = METER, later
+    static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
+    static const char* const kMeterKeys[4] = {"OVERVIEW", "RESET", "FINE", "PRESETS"};   // the METER view's own keys
+    const bool meter = g_view == kViewMeter;
     for (int i = 0; i < 4; ++i) {
-        const std::string label = g_modeHeld ? kPicker[i] : "";
+        const std::string label = g_modeHeld ? kPicker[i] : meter ? kMeterKeys[i] : "";
         std::vector<uint8_t> p;
         p.push_back(uint8_t(i));
         p.insert(p.end(), label.begin(), label.end());
         g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
         uint32_t rgb = 0;   // dark
-        if (g_modeHeld && i != 2) {
+        if (g_modeHeld) {
             const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
         }
         softKeyLed(i, rgb);
     }
-    const uint8_t noHighlight = 0;
+    const uint8_t noHighlight = (meter && !g_modeHeld) ? 0x01 : 0x00;   // the meter layout's base value is 01
     g_dev.send(::uf1::buildScreen(0x0102, std::span<const uint8_t>(&noHighlight, 1)));
 }
 
@@ -456,22 +469,80 @@ std::string sendCellLine(const SendCell& c)
 // ---------------------------------------------------------------------------
 std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
 std::atomic<bool> g_cycleRunning{false};
+std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected track's MixConsole position, 0 = unknown
+void screenText(uint16_t addr, const std::string& text);
+void restoreChannelView();
+void put(uint16_t addr, std::initializer_list<uint8_t> p)
+{
+    g_dev.send(::uf1::buildScreen(addr, std::span<const uint8_t>(std::data(p), p.size())));
+}
+// METER needs the SSL 360 Core stand-in (shared with the UC1's gain-reduction meters). Started when the view
+// opens if the UC1 has not started it; SSL360Core.exe is closed while the view is open (the plug-ins start it
+// again when they find no Core, and then most of them connect there instead).
+void ensureSslCore()
+{
+    static long long nextTry = 0, nextGuard = 0;
+    const long long now = nowMs();
+    if (!sslcore::isRunning() && now >= nextTry) {
+        nextTry = now + 2000;
+        netInit();
+        if (sslcore::start()) std::printf("SSL 360 Core stand-in running (UF1 meter).\n");
+        else std::fprintf(stderr, "UF1 meter: the SSL 360 Core stand-in could not start (is SSL 360 running?).\n");
+    }
+    if (now >= nextGuard) {
+        nextGuard = now + 3000;
+        std::thread([] { stopSslCore(); }).detach();   // off the cycle thread: the snapshot takes a while
+    }
+}
 void startIdleCycle()
 {
     bool expected = false;
     if (!g_cycleRunning.compare_exchange_strong(expected, true)) return;
     std::thread([] {
         auto slot = std::chrono::steady_clock::now();
+        bool inMeter = false;
+        long long flashUntil = 0;
+        std::string label;
         while (g_open) {
+            // View changes are made here, between two cycles: the entry frames must not land inside one.
+            const bool wantMeter = g_view == kViewMeter;
+            if (wantMeter != inMeter) {
+                inMeter = wantMeter;
+                if (inMeter) {
+                    ensureSslCore();
+                    uf1meter::sendOverviewEntry(g_dev);
+                    paintSoftKeys();   // the meter keys' labels (or the picker, while MODE is still held)
+                    label.clear();
+                    if (g_trace) std::printf("UF1: METER view (Overview)\n");
+                } else {
+                    restoreChannelView();
+                }
+            }
             uf1pace::Parts p;
-            const uint8_t level[4] = { g_meterL.load(), g_meterR.load(), 0x00, 0x00 };
-            const uint8_t idle[4] = { 0x00, 0x00, 0x00, 0x00 };
-            const uint8_t zero = 0x00, closeValue = 0x11;   // 011d = 11 closes the channel view's idle cycle
-            p.meters.push_back(::uf1::buildScreen(0x0009, level));
-            p.meters.push_back(::uf1::buildScreen(0x000a, idle));
-            p.meters.push_back(::uf1::buildScreen(0x0015, std::span<const uint8_t>(&zero, 1)));
-            p.meters.push_back(::uf1::buildScreen(0x0016, std::span<const uint8_t>(&zero, 1)));
-            p.tail.push_back(::uf1::buildScreen(0x011d, std::span<const uint8_t>(&closeValue, 1)));
+            if (inMeter) {
+                ensureSslCore();
+                const bool reset = g_meterReset.exchange(false);
+                // RESET lights its key for a moment (0x0102 is a bitmask: 01 base, 02 = soft key 2).
+                if (reset) { flashUntil = nowMs() + 150; put(0x0102, {0x03}); }
+                else if (flashUntil && nowMs() >= flashUntil) { flashUntil = 0; if (!g_modeHeld) put(0x0102, {0x01}); }
+                const std::string l = uf1meter::instanceLabel();
+                if (l != label) {
+                    label = l;
+                    std::vector<uint8_t> c{0x00};
+                    c.insert(c.end(), l.begin(), l.end());
+                    g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, c));
+                }
+                uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
+            } else {
+                const uint8_t level[4] = { g_meterL.load(), g_meterR.load(), 0x00, 0x00 };
+                const uint8_t idle[4] = { 0x00, 0x00, 0x00, 0x00 };
+                const uint8_t zero = 0x00, closeValue = 0x11;   // 011d = 11 closes the channel view's idle cycle
+                p.meters.push_back(::uf1::buildScreen(0x0009, level));
+                p.meters.push_back(::uf1::buildScreen(0x000a, idle));
+                p.meters.push_back(::uf1::buildScreen(0x0015, std::span<const uint8_t>(&zero, 1)));
+                p.meters.push_back(::uf1::buildScreen(0x0016, std::span<const uint8_t>(&zero, 1)));
+                p.tail.push_back(::uf1::buildScreen(0x011d, std::span<const uint8_t>(&closeValue, 1)));
+            }
             uf1pace::emitCycle(g_dev, p, slot);
             slot += std::chrono::microseconds(40800);
             std::this_thread::sleep_until(slot);
@@ -480,13 +551,12 @@ void startIdleCycle()
     }).detach();
 }
 
-
-
 // Only what changed goes out (turning one V-pot used to resend all four cells, the bars and the styles for
 // every step, which made the bar slow and choppy). force: send everything (view change, start-up, reopen).
 void paintSendCells(bool force)
 {
     if (!g_open) return;
+    if (g_view == kViewMeter) return;   // the meter layout uses these cells for its own labels
     std::lock_guard<std::mutex> lk(g_cellMx);
     static std::array<std::string, 4> shownLine;
     static std::array<uint8_t, 8> shownBars{};
@@ -605,7 +675,6 @@ void revertLoop() {
 // Channel-number box: the UF8 strip holding the selected track (blank while MASTER is on, or when the
 // track is not on the UF8's current bank).
 std::atomic<int> g_stripNo{0};
-std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected track's MixConsole position, 0 = unknown
 void showStripNumber()
 {
     // The track number when the script knows it, else the UF8 strip; blank on MASTER.
@@ -790,6 +859,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         return;
     }
     if ((status == 0x90 || status == 0x80 || status == 0xA0)) {
+        if (m[1] == uf1m::kNotePlay && status != 0xA0) g_playing = status == 0x90 && m[2] > 0;   // for the meter view
         if (m[1] == kNoteSel) { g_selOn = status != 0x80 && m[2] > 0; showSelLed(); return; }
         if (m[1] == 62 && status != 0xA0) {
             // BYPASS LED: off without inserts, orange at 35 % while they are active, full orange when bypassed.
@@ -801,6 +871,41 @@ void onMidiIn(std::vector<unsigned char>& msg)
         }
         if (auto led = uf1m::noteToLed(m[1])) setLed(*led, status != 0x80 && m[2] > 0);
     }
+}
+
+// Back from METER to the channel layout: Rea-Sixty's channel entry (cap84 / cap101, the frames the meter
+// layout changed), then everything the channel view shows drawn again from what Cubase sent last.
+void restoreChannelView()
+{
+    put(0x0000, {0x03, 0x00});
+    put(0x0011, {0x01});
+    put(0x0100, {0x03, 0x00});   // layout: plugin / channel
+    put(0x0101, {0x05});
+    put(0x010d, {0x02, 0x02, 0x08, 0x02});
+    put(0x0110, {0x0f});
+    put(0x011a, {0x02});
+    put(0x011e, {0x19});
+    put(0x000a, {0x00, 0x00, 0x00, 0x00});
+    put(0x011b, {});
+    put(0x0102, {0x00});
+    {
+        const char* banner = "Cubase-Sixty";   // the header row carried the meter readouts
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow,
+            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(banner), 12)));
+    }
+    screenText(::uf1::scr::kCsType, std::string(12, ' '));
+    screenText(::uf1::scr::kChSoftKey, "BYPASS");
+    { std::lock_guard<std::mutex> lk(g_lineMx); g_barStyleShown = 0x00; }   // the bar style goes out again
+    g_tcShown.clear();
+    std::map<int, std::vector<unsigned char>> cache;
+    { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
+    for (auto& kv : cache)   // the script's texts (not its log lines)
+        if (kv.first >= 0x100 && kv.first != 0x17E) { auto msg = kv.second; onMidiIn(msg); }
+    { std::lock_guard<std::mutex> lk(g_lineMx); g_tempUntil = 0; showHomeLocked(); }
+    showStripNumber();
+    paintSoftKeys();
+    paintSendCells(true);
+    if (g_trace) std::printf("UF1: channel view again\n");
 }
 
 } // namespace
