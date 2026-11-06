@@ -3301,6 +3301,19 @@ std::string debugSummary()
                       comp.have && !comp.current.empty() ? std::to_string(comp.current[0]).c_str() : "-",
                       gate.have && !gate.current.empty() ? std::to_string(gate.current[0]).c_str() : "-");
         out += line;
+        // A bus compressor streams none of the strip's meters: list what it does stream (data type: values).
+        if (in.pluginType == int(sslmeter::PluginType::NativeBusComp) || in.pluginType == int(sslmeter::PluginType::GenericBusComp)) {
+            std::string dts = "    streams:";
+            for (size_t dt = 0; dt < in.meter.size(); ++dt) {
+                const Slot& sl = in.meter[dt];
+                if (!sl.have || sl.current.empty()) continue;
+                dts += " dt" + std::to_string(dt) + "=";
+                for (size_t k = 0; k < sl.current.size() && k < 4; ++k) {
+                    char b[24]; std::snprintf(b, sizeof b, "%s%.2f", k ? "," : "", sl.current[k]); dts += b;
+                }
+            }
+            out += dts + "\n";
+        }
     }
     return out;
 }

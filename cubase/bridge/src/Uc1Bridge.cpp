@@ -1048,7 +1048,15 @@ void grLoop()
             for (size_t a = 0; a < sum.size();) {
                 const size_t e = sum.find('\n', a);
                 const std::string line = sum.substr(a, e - a);
-                key += line.substr(0, line.find(" comp ")) + "\n";
+                if (line.find("streams:") == std::string::npos) key += line.substr(0, line.find(" comp ")) + "\n";
+                if (e == std::string::npos) break;
+                a = e + 1;
+            }
+            // The bus comp streams (temporary: to find which one carries its gain reduction).
+            for (size_t a = 0; a < sum.size();) {
+                const size_t e = sum.find('\n', a);
+                const std::string line = sum.substr(a, e - a);
+                if (line.find("streams:") != std::string::npos && line.find("=") != std::string::npos) std::printf("BC%s\n", line.c_str());
                 if (e == std::string::npos) break;
                 a = e + 1;
             }
