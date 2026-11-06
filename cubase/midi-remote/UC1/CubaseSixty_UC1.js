@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.8.0-dev'
+var SCRIPT_VERSION = '0.8.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -626,10 +626,12 @@ function nextStrip(activeDevice) {
 	var next = (i + 1) % list.length
 	state.cs = list[next]
 	state.csChoice[state.csBase] = state.cs.key
-	var n = list.length
+	// The neighbours as they sit in the list (no wrapping in the display: with two strips, wrapping showed the
+	// other one above and below).
 	var sep = [0x7F, 0x7F, 0x7F]
-	sysex(activeDevice, [0x38].concat(encodeName(list[(next - 1 + n) % n].short), sep, encodeName(list[next].short), sep,
-		encodeName(list[(next + 1) % n].short)))
+	var prevName = next > 0 ? list[next - 1].short : ''
+	var nextName = next + 1 < list.length ? list[next + 1].short : ''
+	sysex(activeDevice, [0x38].concat(encodeName(prevName), sep, encodeName(list[next].short), sep, encodeName(nextName)))
 	sysex(activeDevice, [0x39].concat(encodeName(state.trackName)))
 	state.restoreBcAt = Date.now() + 1600
 	sysex(activeDevice, [0x35, ZONE_CS])
