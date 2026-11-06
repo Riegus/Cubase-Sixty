@@ -21,7 +21,7 @@
 
 var midiremote_api = require('midiremote_api_v1')
 
-var SCRIPT_VERSION = '0.3.3-dev'
+var SCRIPT_VERSION = '0.3.4-dev'
 console.log('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { console.log('[CubaseSixty UC1] ' + text) }
 
@@ -295,9 +295,10 @@ function showNumber(activeDevice, base) {
 }
 
 // Every bus comp in the project. Each is listed with the track (channel) it sits on.
-var mixScans = 0
+var mixScans = 0, lastMixScan = 0
 function scanMixer(activeDevice) {
 	if (!daMix || !am) return
+	lastMixScan = Date.now()
 	var base
 	try { base = daMix.getBaseObjectID(am) } catch (e) { log('MixConsole getBaseObjectID failed: ' + e); daMix = null; return }
 	var objects = walk(daMix, base, 6, 20000)
@@ -359,8 +360,10 @@ function showBcNames(activeDevice) {
 	sysex(activeDevice, [0x38].concat(encodeName(names[0]), sep, encodeName(names[1]), sep, encodeName(names[2])))
 }
 // The Bus Comp encoder: step through the project's bus comps.
+// The MixConsole does not always report a plug-in added to another track (one added to the Stereo Out was missed),
+// so the list is read again when the encoder is turned after a pause (a search takes ~70 ms in a big project).
 function onBcEncoder(activeDevice, steps) {
-	if (!state.bcList.length) scanMixer(activeDevice)
+	if (!state.bcList.length || Date.now() - lastMixScan > 2000) scanMixer(activeDevice)
 	var list = state.bcList
 	if (!list.length) return
 	var i = anchorIndex()
@@ -513,14 +516,17 @@ da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 	am = activeMapping
 	state.rescanAt = Date.now() + 300
+	state.mixScanAt = Date.now() + 500   // a bus comp added to the selected track belongs in the list too
 }
 if (daMix) {
 	daMix.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		am = activeMapping
 		if (!state.cs || objectID !== state.cs.obj) onParameterChange(activeDevice, objectID, tag)
 	}
+	var mixChanges = 0
 	daMix.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 		am = activeMapping
+		if (++mixChanges <= 5) log('MixConsole object change #' + objectID)
 		state.mixScanAt = Date.now() + 500
 	}
 }
