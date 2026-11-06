@@ -32,6 +32,7 @@
 #include "Uf8Fader.h"
 #include "Uf8Frames.h"
 #include "Uf1Bridge.h"
+#include "Uc1Bridge.h"
 
 using namespace cs;
 
@@ -537,7 +538,7 @@ bool cs::uf8BankPress(bool right)
 int main(int argc, char** argv)
 {
     for (int i = 1; i < argc; ++i)
-        if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); g_trace8 = true; cs::midiPortsTrace(true); }
+        if (std::string(argv[i]) == "--trace") { cs::uf1SetTrace(true); cs::uc1SetTrace(true); g_trace8 = true; cs::midiPortsTrace(true); }
         else if (std::string(argv[i]) == "--loopmidi") cs::midiPortsPreferLoopMidi(true);
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
@@ -576,7 +577,8 @@ int main(int argc, char** argv)
         }
     }
     const bool uf1Ok = cs::uf1Start();
-    if (!uf8Ok && !uf1Ok) {
+    bool uc1Ok = cs::uc1Start();
+    if (!uf8Ok && !uf1Ok && !uc1Ok) {
         std::fprintf(stderr, "Nothing to bridge. Exiting.\n");
         return 1;
     }
@@ -606,6 +608,10 @@ int main(int argc, char** argv)
             std::fprintf(stderr, "UF1 stopped answering (%s); reopening...\n", cs::uf1LastError().c_str());
             if (!cs::uf1Reopen()) { std::fprintf(stderr, "UF1 could not be reopened; exiting (restart the bridge).\n"); break; }
         }
+        if (uc1Ok && cs::uc1NeedsReopen()) {
+            std::fprintf(stderr, "The UC1 stopped answering (%s); reopening...\n", cs::uc1LastError().c_str());
+            if (!cs::uc1Reopen()) { std::fprintf(stderr, "The UC1 could not be reopened; it stays dark until the bridge is restarted.\n"); uc1Ok = false; }
+        }
         if (uf8Ok && g_dev.needsReopen()) {
             // Reopen it (three tries) and replay the last state Cubase sent; the MIDI ports stay as they are.
             std::fprintf(stderr, "The UF8 stopped answering (%s); reopening...\n", g_dev.lastError().c_str());
@@ -632,5 +638,6 @@ int main(int argc, char** argv)
     }
     if (uf8Ok) g_dev.close();
     cs::uf1Stop();
+    cs::uc1Stop();
     return 0;
 }
