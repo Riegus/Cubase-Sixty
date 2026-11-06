@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.5.2-dev'
+var SCRIPT_VERSION = '0.5.3-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -495,7 +495,8 @@ function switchOnModuleFor(activeDevice, target, knob) {
 		// The slot it sat in on the other track if that one is free here, else the first free one.
 		var slot = target.emptySlots[0]
 		for (var e = 0; e < target.emptySlots.length; ++e) if (info(da, target.emptySlots[e]).title === seen.slotTitle) slot = target.emptySlots[e]
-		var ids = [seen.uid, seen.uname]
+		// The unique name is "<plug-in class id>-<instance>"; the class id is what a slot is loaded with.
+		var ids = [seen.uname.replace(/-\d+$/, ''), seen.uid, seen.uname]
 		for (var k = 0; k < ids.length; ++k) {
 			if (!ids[k]) continue
 			var ok = false
