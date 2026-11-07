@@ -166,6 +166,8 @@ var flipResets = []
 	flipFlipped.mOnActivate = function (activeDevice) { setFlip(true) }
 })()
 
+// SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
+var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
 for (var i = 0; i < STRIPS; ++i) {
 	var channel = bankZone.makeMixerBankChannel()
 	var strip = strips[i]
@@ -195,6 +197,20 @@ for (var i = 0; i < STRIPS; ++i) {
 	// on the same note, and the bridge shows it on SEL (red).
 	page.makeValueBinding(strip.autoWrite.mSurfaceValue, channel.mValue.mAutomationWrite)
 		.setTypeToggle()
+	;(function (index, ch) {
+		skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null }
+		try { skDa[index] = page.mHostAccess.makeDirectAccess(ch) } catch (e) { if (index === 0) out('[CubaseSixty] no Direct Access, the SSL soft keys do nothing: ' + e) }
+		if (!skDa[index]) return
+		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+			skAm = activeMapping
+			if (skFocus && objectID === skStrip[index].obj) skReport(activeDevice, index)
+		}
+		skDa[index].mOnObjectChange = function (activeDevice, activeMapping, objectID) {
+			skAm = activeMapping
+			skStrip[index].scanned = false
+			skRescanAt = Date.now() + 300
+		}
+	})(i, channel)
 	// Meters: left and right VU level to the bridge as CC 80 + strip (left) and CC 88 + strip (right),
 	// 0..127. A mono channel only reports the left side; the bridge then shows it on both.
 	;(function (index, ch) {
@@ -231,6 +247,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			dbg('title strip ' + (index + 1) + ': [' + title + ']')
 			sendStripName(activeDevice, index, title)
 			stripTitles[index] = title
+			if (skStrip[index]) { skStrip[index].scanned = false; skStrip[index].wanted = null; skAm = activeMapping; skRescanAt = Date.now() + 150 }
 			updateArmable(activeDevice, index)
 			seekOnTitle(activeDevice)
 			followOnStripTitle(activeDevice)
@@ -739,11 +756,137 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
+	if (m[4] >= 0x21 && m[4] <= 0x23) {
+		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
+		return
+	}
 	if (m[4] === 0x18 && m.length >= 8) {
 		if (++listNamesSeen === 1) out('[CubaseSixty] channel lists from the helper script arriving')
 		onAllTitle(activeDevice, (m[5] << 7) | m[6], decodeName(m, 7))
 	} else if (m[4] === 0x19 && m.length >= 7) {
 		++listNamesSeen
 		onRecTitle(activeDevice, m[5], decodeName(m, 6))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SSL soft keys (Rea-Sixty's default for the top soft keys, as SSL 360 has them). The bridge owns the six pages of
+// eight (V-POT, 1-5) and their labels; a top soft key focuses one parameter (SysEx 21 <page> <slot>, 7F 7F = none),
+// and the eight V-pots then work it on each strip's SSL channel strip: 22 <strip> <delta + 64> = turned,
+// 23 <strip> = pushed. Each strip's value goes back as 20 <strip> <has> <position 0-127> <ring 1 / 2> <text>.
+// The parameters by index, per model (as the UC1 script; the indices from the dumps in docs/ssl-native-params).
+// kind: s = switch (push / turn switches it), b = gain or trim (centre bar, push = 0 dB), u = anything else.
+// ---------------------------------------------------------------------------
+function skp(kind, cs2, b, e, g, link) { return { kind: kind, idx: { cs2: cs2, b: b, e: e, g: g, link: link } } }
+var SK_NONE = null
+var SK_PAGES = [
+	[skp('s', 0, 0, 0, 0, 0), skp('b', 2, 2, 2, 6, 4), skp('s', 3, 5, 5, 11, 5), skp('s', null, 3, 3, 9, null),
+		skp('u', null, 4, 4, 10, 44), SK_NONE, skp('s', null, null, null, 7, null), skp('u', null, null, null, 8, null)],
+	[skp('u', 40, 8, 9, 15, 2), SK_NONE, SK_NONE, SK_NONE, skp('u', 5, 10, 14, 20, 7), skp('u', 4, 11, 15, 21, 6),
+		skp('s', 6, 14, 18, 22, 15), skp('s', 7, null, 19, 23, 14)],
+	[skp('u', 9, 16, 21, 24, 19), skp('b', 10, 17, 22, 25, 20), skp('s', 8, 18, 23, 26, 21), SK_NONE,
+		skp('u', 11, 19, 24, 28, 17), skp('b', 12, 20, 25, 29, 16), skp('u', 13, 21, 26, 30, 18), SK_NONE],
+	[skp('u', 14, 22, 27, 32, 12), skp('b', 15, 23, 28, 33, 11), skp('u', 16, 24, 29, 34, 13), SK_NONE, SK_NONE,
+		skp('u', 18, 25, 30, 35, 10), skp('b', 19, 26, 31, 36, 9), skp('s', 17, 27, 32, 37, 8)],
+	[skp('s', 20, 28, 33, 38, 22), skp('u', 26, 33, 38, 42, 23), skp('u', 23, 30, 35, 39, 26), skp('u', 24, 31, 36, 40, 27),
+		skp('u', 25, 32, 37, 41, 28), skp('s', 22, null, 39, 43, 24), skp('s', 21, null, null, null, 25), SK_NONE],
+	[skp('u', 32, 36, 44, 48, 31), skp('u', 30, 35, 43, 47, 30), skp('u', 31, 34, 42, 46, 29), skp('u', 29, null, null, null, 32),
+		skp('s', 28, null, 45, 49, 34), skp('s', 27, 37, 46, 50, 33), SK_NONE, skp('b', 39, 7, 8, 14, 37)]
+]
+// The SSL channel strips by name; the first match wins (the Link bus compressor is not a channel strip).
+var SK_MODELS = [['SSL 360 Link Bus', null], ['Channel Strip 2', 'cs2'], ['4K G', 'g'], ['4K E', 'e'], ['4K B', 'b'], ['SSL 360 Link', 'link']]
+var SK_SKIP = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+var SK_STEP = 0.02   // per detent, as the UF1's PLUGIN view
+
+function skScan(index) {
+	var st = skStrip[index], da = skDa[index]
+	st.scanned = true
+	st.obj = -1
+	st.model = null
+	if (!da || !skAm) return
+	var base
+	try { base = da.getBaseObjectID(skAm) } catch (e) { return }
+	var seen = {}, count = 0
+	function rec(id, depth, parentType) {
+		if (st.obj >= 0 || count > 300 || seen[id]) return
+		seen[id] = true
+		++count
+		var type = '', title = ''
+		try { type = da.getObjectTypeName(skAm, id) } catch (e) {}
+		try { title = da.getObjectTitle(skAm, id) } catch (e) {}
+		for (var k = 0; k < SK_MODELS.length; ++k) if (title && title.indexOf(SK_MODELS[k][0]) >= 0) {
+			if (SK_MODELS[k][1]) { st.obj = id; st.model = SK_MODELS[k][1] }
+			break
+		}
+		if (st.obj >= 0 || depth >= 4 || (/Channel$/.test(parentType) && SK_SKIP[type])) return
+		var n = 0
+		try { n = da.getNumberOfChildObjects(skAm, id) } catch (e) { return }
+		for (var i = 0; i < n && i < 256; ++i) rec(da.getChildObjectID(skAm, id, i), depth + 1, type)
+	}
+	rec(base, 0, '')
+}
+// The focused parameter on strip index: { da, obj, tag, kind } or null.
+function skTarget(index) {
+	if (!skFocus || !skAm) return null
+	var slot = SK_PAGES[skFocus.bank][skFocus.slot]
+	if (!slot) return null
+	var st = skStrip[index]
+	if (!st.scanned) skScan(index)
+	if (st.obj < 0) return null
+	var idx = slot.idx[st.model]
+	if (idx === null || idx === undefined) return null
+	var da = skDa[index]
+	try { return { da: da, obj: st.obj, tag: da.getParameterTagByIndex(skAm, st.obj, idx), kind: slot.kind } } catch (e) { return null }
+}
+function skReport(activeDevice, index) {
+	var t = skTarget(index)
+	var body
+	if (!t) body = [0x20, index, 0, 0, 1].concat(toAscii7('-'))
+	else {
+		var v = t.da.getParameterProcessValue(skAm, t.obj, t.tag)
+		var text = String(t.da.getParameterDisplayValue(skAm, t.obj, t.tag))
+		var units = ''
+		try { units = t.da.getParameterDisplayUnits(skAm, t.obj, t.tag) || '' } catch (e) {}
+		if (units && text.indexOf(units) < 0) text += units
+		body = [0x20, index, 1, Math.max(0, Math.min(127, Math.round(v * 127))), t.kind === 'b' ? 2 : 1].concat(toAscii7(text.replace(/\s+/g, ' ').trim()))
+	}
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7]))
+}
+function skReportAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) skReport(activeDevice, i) }
+function skMessage(activeDevice, m) {
+	if (m[4] === 0x21 && m.length >= 8) {
+		skFocus = m[5] === 0x7F ? null : { bank: m[5], slot: m[6] }
+		for (var i = 0; i < STRIPS; ++i) skStrip[i].wanted = null
+		if (skFocus) skReportAll(activeDevice)
+		return
+	}
+	if (!skFocus || m.length < 7 || m[5] >= STRIPS) return
+	var index = m[5], t = skTarget(index)
+	if (!t) return
+	var st = skStrip[index], v
+	if (m[4] === 0x23) {   // push
+		if (t.kind === 's') v = t.da.getParameterProcessValue(skAm, t.obj, t.tag) >= 0.5 ? 0 : 1
+		else if (t.kind === 'b') v = 0.5
+		else return
+	} else {               // turn
+		var delta = m[6] - 64
+		if (t.kind === 's') v = delta > 0 ? 1 : 0
+		else {
+			// A stepped parameter snaps a small change back, so a turn is added up while it goes on (< 1 s).
+			var now = Date.now(), w = st.wanted
+			var from = w && w.tag === t.tag && now - w.at < 1000 ? w.value : t.da.getParameterProcessValue(skAm, t.obj, t.tag)
+			v = Math.max(0, Math.min(1, from + delta * SK_STEP))
+			st.wanted = { tag: t.tag, value: v, at: now }
+		}
+	}
+	t.da.setParameterProcessValue(skAm, t.obj, t.tag, v)
+	skReport(activeDevice, index)
+}
+page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping }
+page.mOnIdle = function (activeDevice, activeMapping) {
+	skAm = activeMapping
+	if (skRescanAt && Date.now() >= skRescanAt) {
+		skRescanAt = 0
+		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
 	}
 }
