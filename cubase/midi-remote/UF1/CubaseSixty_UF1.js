@@ -1246,11 +1246,12 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 // first slot, then on by the PLUGIN view's slot number, and the window is toggled once the viewer reports the
 // plug-in it is on and that is the one shown (else one slot on per idle tick, then back; Cubase moves the viewer
 // with a delay, so steps sent as MIDI notes landed on the wrong slot).
-var editWin = { viewer: null, open: 0, name: '', job: null }
+var editWin = { viewer: null, state: null, open: 0, name: '', job: null }
 try {
 	editWin.viewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyEdit')
 	var editState = surface.makeCustomValueVariable('pluginWindow')
 	page.makeValueBinding(editState, editWin.viewer.mEdit)
+	editWin.state = editState
 	editState.mOnProcessValueChange = function (activeDevice, value) { editWin.open = value }
 	editWin.viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { editWin.name = name || '' }
 } catch (e) { out('[CubaseSixty UF1] plug-in window switch could not be set up: ' + e) }
@@ -1278,10 +1279,9 @@ function windowIdle(activeDevice) {
 	editWin.job = null
 	out('[CubaseSixty UF1] plug-in window: "' + job.title + '", viewer on "' + editWin.name + '" after ' + job.tries + ' extra steps, window ' + (editWin.open >= 0.5 ? 'open: closing' : 'closed: opening'))
 	if (job.tries >= 32) { out('[CubaseSixty UF1] plug-in window: "' + job.title + '" not found in the inserts'); return }
-	try {
-		if (editWin.open >= 0.5) editWin.viewer.mEdit.decrement(plugAm)
-		else editWin.viewer.mEdit.increment(plugAm)
-	} catch (e) { out('[CubaseSixty UF1] plug-in window: ' + e) }
+	// Through the value variable bound to the viewer's edit switch (increment / decrement on the host value did
+	// nothing: a small step on a switch).
+	try { editWin.state.setProcessValue(activeDevice, editWin.open >= 0.5 ? 0 : 1) } catch (e) { out('[CubaseSixty UF1] plug-in window: ' + e) }
 }
 
 // ---------------------------------------------------------------------------
