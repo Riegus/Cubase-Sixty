@@ -62,6 +62,8 @@
 #include "UC1Device.h"
 #include "UC1Protocol.h"
 #include "Favourites.h"
+#include "Settings.h"
+#include "Uf1Bridge.h"
 #include "ScriptLog.h"
 #include "SslCoreImpersonator.h"
 #include "SslPresets.h"
@@ -837,7 +839,9 @@ void onKnob(const ::uc1::KnobEvent& ev)
     if (ev.id == ::uc1::knob::kChannelEncoder) {
         const int steps = g_channelAcc.step(ev.delta);
         for (int k = 0; k < std::abs(steps); ++k) {
-            const uint8_t n = steps > 0 ? kNoteNextTrack : kNotePrevTrack;
+            if (settings::trackStepping() == settings::Stepping::MixConsole && uf1StepTrack(steps > 0 ? 1 : -1)) continue;
+            // 102 / 103 = Navigate Down / Up: only the tracks the Project window shows (settings.txt).
+            const uint8_t n = settings::projectStepping() ? uint8_t(steps > 0 ? 102 : 103) : steps > 0 ? kNoteNextTrack : kNotePrevTrack;
             note(n, true);
             note(n, false);
         }

@@ -567,7 +567,9 @@ var encoderCommands = [
 	{ note: 2, category: 'Transport', command: 'Nudge Cursor Left' },
 	{ note: 3, category: 'Transport', command: 'Nudge Cursor Right' },
 	{ note: 4, category: 'Transport', command: 'Locate Previous Marker' },
-	{ note: 5, category: 'Transport', command: 'Locate Next Marker' }
+	{ note: 5, category: 'Transport', command: 'Locate Next Marker' },
+	{ note: 6, category: 'Navigate', command: 'Up' },     // Channel Select with track-stepping = project
+	{ note: 7, category: 'Navigate', command: 'Down' }
 ]
 for (var ec = 0; ec < encoderCommands.length; ++ec) {
 	var encButton = surface.makeButton(ec, 16, 1, 1)

@@ -33,6 +33,7 @@
 #include "Uf8Frames.h"
 #include "Uf1Bridge.h"
 #include "Favourites.h"
+#include "Settings.h"
 #include "Uc1Bridge.h"
 #include "ScriptLog.h"
 namespace cs { int stopSslCore(); }
@@ -394,7 +395,9 @@ void handleFrame(const uf8frames::Frame& fr)
             for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
                 if (mode == kEncBank) { note(right ? kNotePageRight : kNotePageLeft, true); note(right ? kNotePageRight : kNotePageLeft, false); continue; }
                 if (mode == kEncCsFav || mode == kEncBcFav) { cs::uc1FavouriteStep(mode == kEncBcFav, right ? 1 : -1); continue; }
-                const uint8_t n = uint8_t(mode * 2 + (right ? 1 : 0));   // Select 0 / 1, Nudge 2 / 3, Markers 4 / 5
+                if (mode == kEncSelect && cs::settings::trackStepping() == cs::settings::Stepping::MixConsole && cs::uf1StepTrack(right ? 1 : -1)) continue;
+                // Select 0 / 1 (6 / 7 = Navigate Up / Down: only the tracks the Project window shows), Nudge 2 / 3, Markers 4 / 5
+                const uint8_t n = mode == kEncSelect && cs::settings::projectStepping() ? uint8_t(right ? 7 : 6) : uint8_t(mode * 2 + (right ? 1 : 0));
                 sendMidi({0x91, n, 127});
                 sendMidi({0x81, n, 0});
             }
@@ -893,6 +896,7 @@ int main(int argc, char** argv)
     cs::redirectTempToLogs(argc > 0 ? argv[0] : nullptr);
     cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
     cs::favourites::init(argc > 0 ? argv[0] : nullptr);
+    cs::settings::init(argc > 0 ? argv[0] : nullptr);
     cs::stopSslCore();   // SSL360Core.exe takes the devices and the SSL plug-ins (SslCoreGuard.cpp)
     // --no-script-log: the scripts' log lines (SysEx 7E) are dropped instead of written to cubase\logs\scripts.log.
     bool scriptLog = true;

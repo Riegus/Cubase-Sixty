@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.21.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.22.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -475,6 +475,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
 	}
+	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
+		try { stepTrack(activeDevice, m[5] ? 1 : -1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+		return
+	}
 	if (m[4] === 0x57 && m.length >= 8) {
 		// From the UC1 script, via the bridge: the strip its magnifier key picked.
 		var choice = { kind: m[5], ord: m[6] }
@@ -501,6 +505,62 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 	dbg('selected color: ' + r + ' ' + g + ' ' + b + ' a=' + a)
 	selectedInfo.r = r; selectedInfo.g = g; selectedInfo.b = b
 	if (!masterActive) sendColor(activeDevice, r, g, b)
+}
+// Track stepping past the tracks hidden in the MixConsole (track-stepping = mixconsole, cubase\settings.txt): the
+// bridge asks for a step (SysEx 5C <1 forward / 0 back>). The script reads the MixConsole's channels (Direct Access
+// on the whole MixConsole: order and visibility), counts how many tracks lie between the selected one and the next
+// visible one, and triggers the track selection's next / previous action that many times at once. (Stepping and
+// then looking at the new track was slow: Cubase reports the new selection up to a second later.) A click soon
+// after the last one counts from where that one went, as Cubase may not have caught up yet.
+var stepMix = null
+try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
+var stepLast = { id: -1, at: 0 }
+var stepListed = false   // (the channel list is logged once, when the selected track is not in it)
+// Every track's channel in the MixConsole, in MixConsole order: the VST Mixer's children, except the inputs and
+// outputs. (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
+function stepChannels() {
+	var list = []
+	var base = stepMix.getBaseObjectID(plugAm)
+	var n = stepMix.getNumberOfChildObjects(plugAm, base)
+	for (var i = 0; i < n && i < 1024; ++i) {
+		var id = stepMix.getChildObjectID(plugAm, base, i)
+		var type = ''
+		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
+		if (/Input|Output|ControlRoom|Monitor/.test(type)) continue
+		var vis = true, idx = i
+		try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
+		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
+		list.push({ id: id, vis: vis, idx: idx })
+	}
+	list.sort(function (a, b) { return a.idx - b.idx })
+	return list
+}
+function stepTrack(activeDevice, dir) {
+	if (!plugAm) return
+	var action = dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
+	var count = 1
+	if (stepMix) {
+		try {
+			var list = stepChannels()
+			var now = Date.now()
+			var cur = now - stepLast.at < 600 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
+			var at = -1
+			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
+			if (at >= 0) {
+				var k = at + dir
+				while (k >= 0 && k < list.length && !list[k].vis) k += dir
+				if (k < 0 || k >= list.length) return   // no visible track that way
+				count = Math.abs(k - at)
+				stepLast = { id: list[k].id, at: now }
+			}
+			if (at < 0 && !stepListed) {
+				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it')
+				stepListed = true
+				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
+			}
+		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+	}
+	for (var c = 0; c < count; ++c) action.trigger(plugAm)
 }
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')

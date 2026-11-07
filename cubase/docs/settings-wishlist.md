@@ -3,6 +3,9 @@
 Behaviour that is fixed in code today but should become a setting once Cubase-Sixty has a place for settings
 (a settings file read by the bridge, or a settings page). Each entry: what it is now, and what the choice would be.
 
+Some settings are in `cubase\settings.txt` now (written with the defaults the first time the bridge starts; edit it,
+no restart needed): `track-stepping` = mixconsole (default) / project / all.
+
 ## Logging
 
 - **Script log** (`cubase\logs\scripts.log`). Now: on, `--no-script-log` turns it off. For releases: off by default.
