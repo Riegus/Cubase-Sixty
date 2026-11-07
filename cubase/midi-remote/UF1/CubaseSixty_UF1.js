@@ -515,6 +515,7 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 var stepMix = null
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
+var stepListed = false
 function stepChannels() {
 	var list = []
 	var base = stepMix.getBaseObjectID(plugAm)
@@ -550,7 +551,11 @@ function stepTrack(activeDevice, dir) {
 				count = Math.abs(k - at)
 				stepLast = { id: list[k].id, at: now }
 			}
-			out('[CubaseSixty UF1] track step: ' + list.length + ' channels, selected at ' + at + ', ' + count + ' step(s) ' + (dir > 0 ? 'on' : 'back'))
+			out('[CubaseSixty UF1] track step: ' + list.length + ' channels, selected at ' + at + ' ("' + selectedInfo.title + '", object ' + cur + '), ' + count + ' step(s) ' + (dir > 0 ? 'on' : 'back'))
+			if (at < 0 && !stepListed) {
+				stepListed = true
+				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
+			}
 		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 	}
 	for (var c = 0; c < count; ++c) action.trigger(plugAm)
