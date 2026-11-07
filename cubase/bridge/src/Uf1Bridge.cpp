@@ -34,6 +34,7 @@
 #include "Uf1Meter.h"
 #include "SslCoreImpersonator.h"
 #include "Uf1EqCurve.h"
+#include "SslPresets.h"
 
 namespace cs {
 bool netInit();      // NetInit.cpp
@@ -99,9 +100,17 @@ std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LE
 // V-pots, the display soft keys and ◄ ► go to the script as SysEx 53 instead of Quick Controls / track steps.
 std::atomic<bool> g_plugPresent{false}, g_plugEqIn{false};
 std::atomic<int> g_plugPage{0}, g_plugPages{1}, g_plugOrd{0};
+// FINE (quick key 2, as in Rea-Sixty): the V-pots move a quarter as far per detent. Shown in the header's FINE
+// CTRL field (the UF1 prints "FINE CTRL 2" over the key itself).
+std::atomic<bool> g_fine{false};
+// The preset browser (SHIFT + 5-8, Rea-Sixty's channel-view browser): the SSL plug-in's presets in the big display,
+// V-pot 4 scrolls, its push loads, soft key 3 goes back. Drawn by the cycle thread (see browserFrame).
+std::atomic<bool> g_presetsOpen{false};
+std::atomic<int> g_browserScroll{0};        // V-pot 4 detents not yet applied
+std::atomic<bool> g_browserLoad{false};     // V-pot 4 pushed
 void plugEvent(uint8_t kind, uint8_t a, uint8_t b)
 {
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x53, kind, a, b, 0xF7});
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x53, kind, a, b, uint8_t(g_fine ? 1 : 0), 0xF7});
 }
 bool plugActive() { return g_view == kViewPlugin && g_plugPresent; }
 void paintHeader(bool force = false);
@@ -217,11 +226,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 1 && ev.id <= 4) {
+            if (g_presetsOpen) { if (ev.id == 4) g_browserScroll += ev.delta; break; }   // the browser: V-pot 4 scrolls
             if (g_view == kViewMeter) break;   // METER: the V-pots have no meter settings yet (and would change sends unseen)
             if (plugActive()) { plugEvent(0, uint8_t(ev.id - 1), uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }
             const size_t k = size_t(ev.id - 1);
             if (g_vpotPos[k] < 0) break;   // position not known yet (comes from Cubase within a second)
-            const int v = std::clamp(g_vpotPos[k] + ev.delta * kVpotStep, 0, 16383);
+            const int v = std::clamp(g_vpotPos[k] + ev.delta * (g_fine ? kVpotStep / 4 : kVpotStep), 0, 16383);
             g_vpotPos[k] = v;
             g_vpotOwnUntil[k] = nowMs() + 500;   // Cubase's echoes of our own turns are not taken back meanwhile
             const uint8_t cc = uint8_t(uf1m::kCcEncoder + ev.id);
@@ -282,12 +292,14 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
             // METER, without MODE: soft key 2 = RESET (the peak holds and overload marks). FINE and PRESETS: later.
+            if (g_presetsOpen && !g_modeHeld) { if (ev.pressed && ev.id == 0x1B) g_presetsOpen = false; break; }   // 3 = Navigate Back
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1A) { g_meterReset = true; break; }
             // PLUGIN with an SSL plug-in, without MODE: the plug-in's switches on this page.
             if (ev.pressed && !g_modeHeld && plugActive()) { plugEvent(2, uint8_t(ev.id - 0x19), 0); break; }
             if (!ev.pressed || !g_modeHeld) break;
             {
                 const int view = ev.id - 0x19;
+                g_presetsOpen = false;   // picking a view closes the preset browser
                 // The V-pot page goes out on every pick, also of the view already shown: after the scripts are
                 // reloaded, Cubase starts on the sends while the bridge still shows the view it had.
                 sendVpotPage_(view);
@@ -304,6 +316,13 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         // 5-8: the V-pots switch between sends 1-4 (note 53) and 5-8 (note 54). LED on = 5-8.
         if (ev.id == 0x22) {
             if (!ev.pressed) break;
+            // SHIFT + 5-8: the preset browser for the track's SSL plug-in (as in Rea-Sixty), in the channel views.
+            if (g_shift) {
+                g_shiftUsed.insert(ev.id);
+                if (g_view != kViewMeter) g_presetsOpen = !g_presetsOpen;
+                break;
+            }
+            if (g_presetsOpen) break;
             g_sends58 = !g_sends58;
             sendVpotPage();
             paintHeader();
@@ -341,6 +360,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id == 0x24 || ev.id == 0x26) {
             if (!ev.pressed) break;
+            if (g_presetsOpen) break;
             // PLUGIN: ◄ ► page (as in Rea-Sixty): through the SSL plug-in's controls, or without one between
             // Quick Controls 1-4 and 5-8 (as the 5-8 key does). The channel encoder still steps the track.
             if (plugActive() && !g_shift) { plugEvent(3, ev.id == 0x26 ? 1 : 0, 0); break; }
@@ -360,7 +380,13 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             note(n, false);
             break;
         }
+        if (ev.id >= 0x09 && ev.id <= 0x0C && g_presetsOpen) { if (ev.pressed && ev.id == 0x0C) g_browserLoad = true; break; }   // V-pot 4 = Select
         if (ev.id >= 0x09 && ev.id <= 0x0C && plugActive()) { if (ev.pressed) plugEvent(1, uint8_t(ev.id - 0x09), 0); break; }
+        // Quick key 2 (without SHIFT): FINE on / off.
+        if (ev.id == 0x35) {
+            if (ev.pressed) { g_fine = !g_fine; paintHeader(); if (g_trace) std::printf("UF1 FINE %s\n", g_fine ? "on" : "off"); }
+            break;
+        }
         if (auto n = uf1m::buttonToNote(ev.id)) note(*n, ev.pressed);
         break;
     default: break;
@@ -414,6 +440,7 @@ std::array<PlugCell, 4> g_plugCells;
 struct PlugKey { std::vector<uint8_t> label; uint8_t state = 2; };   // state 0 off, 1 on, 2 no switch
 std::array<PlugKey, 4> g_plugKeys;
 std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
+std::string g_plugTitle;   // the plug-in's name in Cubase (for its preset folder)
 
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
 // takes no FF39 frame: Rea-Sixty found that one sticks its rectangle on.
@@ -433,9 +460,10 @@ void paintSoftKeys()
     static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
     static const char* const kMeterKeys[4] = {"OVERVIEW", "RESET", "FINE", "PRESETS"};   // the METER view's own keys
     const bool meter = g_view == kViewMeter;
-    const bool plugin = plugActive() && !g_modeHeld;
+    const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen;
+    const bool browser = g_presetsOpen && !g_modeHeld;
     for (int i = 0; i < 4; ++i) {
-        const std::string label = g_modeHeld ? kPicker[i] : meter ? kMeterKeys[i] : "";
+        const std::string label = g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i] : "";
         std::vector<uint8_t> p;
         p.push_back(uint8_t(i));
         uint32_t rgb = 0;   // dark
@@ -455,7 +483,7 @@ void paintSoftKeys()
         }
         softKeyLed(i, rgb);
     }
-    const uint8_t noHighlight = (meter && !g_modeHeld) ? 0x01 : 0x00;   // the meter layout's base value is 01
+    const uint8_t noHighlight = (meter && !g_modeHeld && !g_presetsOpen) ? 0x01 : 0x00;   // the meter layout's base value is 01
     g_dev.send(::uf1::buildScreen(0x0102, std::span<const uint8_t>(&noHighlight, 1)));
 }
 
@@ -546,16 +574,104 @@ void ensureSslCore()
         std::thread([] { stopSslCore(); }).detach();   // off the cycle thread: the snapshot takes a while
     }
 }
+// The preset browser (Rea-Sixty's, opened from the channel view): enter = the browser layout (0x0100 = 04 03) with
+// the view's own state reset, then every tick the list in the header row (0x011c: field 0 = the plug-in, fields 1-7 a
+// window with the selection in the middle row, which the firmware highlights), the graph area cleared (0x0122) and
+// the scrollbar (0x011f). V-pot 4 scrolls (3 detents per preset), its push loads the preset into the plug-in and
+// closes the browser.
+void browserFrame(bool enter)
+{
+    static std::vector<sslpresets::Entry> list;
+    static std::string listFor;
+    static int sel = 0;
+    static std::map<std::string, int> lastSel;   // per plug-in: the preset last loaded
+    static int scrollAcc = 0;
+    static int barShown = -1;
+    std::string title;
+    { std::lock_guard<std::mutex> lk(g_cellMx); title = g_plugPresent ? g_plugTitle : std::string(); }
+    if (enter || title != listFor) {
+        listFor = title;
+        list = title.empty() ? std::vector<sslpresets::Entry>{} : sslpresets::scan(sslpresets::dirFor(title));
+        sel = lastSel.count(title) ? lastSel[title] : 0;
+        scrollAcc = 0;
+        g_browserScroll = 0;
+        if (!title.empty()) std::printf("UF1 presets: %zu for \"%s\" (%s)\n", list.size(), title.c_str(), sslpresets::dirFor(title).c_str());
+    }
+    if (enter) {
+        g_browserLoad = false;
+        put(0x0100, {0x04, 0x03});
+        put(0x010d, {0x0a, 0x06, 0x06, 0x0a});
+        put(0x010f, {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
+        put(0x0101, {0x03});
+        put(0x011a, {0x07});
+        put(0x011e, {0x10});
+        for (uint8_t i = 0; i < 3; ++i) put(0x010e, {i});
+        { std::vector<uint8_t> p{0x03}; const char* t = "Select"; p.insert(p.end(), t, t + 6); g_dev.send(::uf1::buildScreen(0x010e, p)); }
+        paintSoftKeys();   // Navigate Back on soft key 3, the others blank
+        barShown = -1;
+    }
+    const int n = int(list.size());
+    scrollAcc += g_browserScroll.exchange(0);
+    while (scrollAcc >= 3) { scrollAcc -= 3; ++sel; }
+    while (scrollAcc <= -3) { scrollAcc += 3; --sel; }
+    sel = std::clamp(sel, 0, n > 0 ? n - 1 : 0);
+    if (g_browserLoad.exchange(false)) {
+        if (n > 0) {
+            const auto msgs = sslpresets::loadMessages(list[size_t(sel)], 0);
+            for (const auto& m : msgs) sendMidi(m);
+            lastSel[title] = sel;
+            std::printf("UF1 presets: \"%s\" sent (%zu values)\n", list[size_t(sel)].name.c_str(), msgs.empty() ? size_t(0) : msgs.size() - 1);
+        }
+        g_presetsOpen = false;   // closed after the load (Rea-Sixty), the channel view shows the new values
+        return;
+    }
+    // A row is "<folder>/<name>"; one that does not fit loses its folder first (Rea-Sixty's fitField).
+    std::array<uint8_t, 200> row{};
+    auto field = [&](int f, const std::string& text) {
+        std::string t = sslpresets::latin1(text);
+        if (t.size() > 24) { const size_t sl = t.find_last_of('/'); if (sl != std::string::npos) t = t.substr(sl + 1); }
+        for (size_t k = 0; k < t.size() && k < 24; ++k) row[size_t(f) * 25 + k] = uint8_t(t[k]);
+    };
+    field(0, title.empty() ? std::string("PRESETS") : title);
+    if (title.empty()) field(1, "(no SSL plug-in)");
+    else if (n == 0) field(1, "(no presets)");
+    else for (int f = 1; f <= 7; ++f) {
+        const int i = sel - 3 + (f - 1);
+        if (i < 0 || i >= n) continue;
+        const auto& e = list[size_t(i)];
+        const size_t sl = e.group.find_last_of('/');
+        field(f, e.group.empty() ? e.name : e.group.substr(sl == std::string::npos ? 0 : sl + 1) + "/" + e.name);
+    }
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow, row));
+    const std::array<uint8_t, 251> blank{};
+    g_dev.send(::uf1::buildScreen(0x0122, blank));
+    const int bar = n > 1 ? int(std::lround(100.0 * sel / (n - 1))) : 0;
+    if (bar != barShown) { barShown = bar; const uint8_t b = uint8_t(bar); g_dev.send(::uf1::buildScreen(0x011f, std::span<const uint8_t>(&b, 1))); }
+}
+
 void startIdleCycle()
 {
     bool expected = false;
     if (!g_cycleRunning.compare_exchange_strong(expected, true)) return;
     std::thread([] {
         auto slot = std::chrono::steady_clock::now();
-        bool inMeter = false;
+        bool inMeter = false, inBrowser = false;
         long long flashUntil = 0;
         std::string label;
         while (g_open) {
+            // The preset browser owns the big display while it is open: no cycle (as Rea-Sixty pauses its pacer),
+            // the browser's frames restated every tick instead.
+            if (g_presetsOpen) {
+                browserFrame(!inBrowser);
+                inBrowser = true;
+                slot += std::chrono::microseconds(40800);
+                std::this_thread::sleep_until(slot);
+                continue;
+            }
+            if (inBrowser) {
+                inBrowser = false;
+                if (!inMeter) restoreChannelView();
+            }
             // View changes are made here, between two cycles: the entry frames must not land inside one.
             const bool wantMeter = g_view == kViewMeter;
             if (wantMeter != inMeter) {
@@ -611,7 +727,7 @@ void startIdleCycle()
 void paintSendCells(bool force)
 {
     if (!g_open) return;
-    if (g_view == kViewMeter) return;   // the meter layout uses these cells for its own labels
+    if (g_view == kViewMeter || g_presetsOpen) return;   // the meter layout / the browser use these cells
     std::lock_guard<std::mutex> lk(g_cellMx);
     static std::array<std::string, 4> shownLine;
     static std::array<uint8_t, 8> shownBars{};
@@ -680,7 +796,7 @@ void paintSendCells(bool force)
 // PLUGIN with an SSL plug-in: its page; otherwise V-pots 1-4 / 5-8 as page 1 / 2.
 void paintHeader(bool force)
 {
-    if (!g_open || g_view == kViewMeter) return;
+    if (!g_open || g_view == kViewMeter || g_presetsOpen) return;
     static std::array<uint8_t, 200> shown{};
     std::array<uint8_t, 200> h{};
     const char* name = "Cubase-Sixty";
@@ -689,7 +805,7 @@ void paintHeader(bool force)
     const std::string page = plug ? std::to_string(g_plugPage + 1) + "/" + std::to_string(int(g_plugPages))
                                   : std::string(g_sends58 ? "2/2" : "1/2");
     std::memcpy(h.data() + 75, page.data(), std::min<size_t>(page.size(), 24));
-    std::memcpy(h.data() + 100, "OFF", 3);
+    std::memcpy(h.data() + 100, g_fine ? "ON" : "OFF", g_fine ? 2 : 3);
     if (!force && h == shown) return;
     shown = h;
     g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow, h));
@@ -945,7 +1061,10 @@ void onSysex(const std::vector<unsigned char>& m)
         const bool present = m[5] != 0;
         {
             std::lock_guard<std::mutex> lk(g_cellMx);
-            g_plugModel.assign(m.begin() + 10, m.end() - 1);
+            // model, then 00 and the plug-in's name
+            const auto sep = std::find(m.begin() + 10, m.end() - 1, uint8_t(0x00));
+            g_plugModel.assign(m.begin() + 10, sep);
+            g_plugTitle = sep == m.end() - 1 ? std::string() : std::string(sep + 1, m.end() - 1);
             if (!present) {   // the script sends the Quick Controls' cells next
                 for (auto& k : g_plugKeys) k = PlugKey{};
                 for (auto& c : g_plugCells) c = PlugCell{};

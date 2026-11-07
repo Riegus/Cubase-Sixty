@@ -458,7 +458,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length >= 9 && m[0] === 0xF0 && m[4] === 0x53) {
-		try { plugEvent(activeDevice, m[5], m[6], m[7]) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
+		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
+		return
+	}
+	if ((m[4] === 0x3C || m[4] === 0x3D) && m.length >= 7) {
+		try { onPresetMessage(activeDevice, m) } catch (e) { out('[CubaseSixty UF1] preset: ' + e) }
 		return
 	}
 	if (m.length < 7 || m[0] !== 0xF0 || m[4] !== 0x1C) return
@@ -988,7 +992,7 @@ function plugPaint(activeDevice, force) {
 	var present = plug.obj >= 0 ? 1 : 0
 	var eqIn = 0
 	if (present && plug.kind.strip) { var eq = plugParam('EQ In'); eqIn = eq && plugValue(eq) >= 0.5 ? 1 : 0 }
-	var info = [0x50, present, plug.page, plugPages(), eqIn, plug.ordinal & 0x7F].concat(toAscii7(present ? plug.kind.model : ''))
+	var info = [0x50, present, plug.page, plugPages(), eqIn, plug.ordinal & 0x7F].concat(toAscii7(present ? plug.kind.model : ''), [0x00], toAscii7(present ? plug.title : ''))
 	var infoKey = info.join(',')
 	if (infoKey !== plug.sentInfo) {
 		plug.sentInfo = infoKey
@@ -1031,7 +1035,7 @@ function plugCell(activeDevice, i, slot) {
 	plugSend(activeDevice, body)
 }
 
-function plugEvent(activeDevice, kind, a, b) {
+function plugEvent(activeDevice, kind, a, b, fine) {
 	if (plug.obj < 0 || !plugAm) return
 	if (kind === 3) {
 		var n = plugPages()
@@ -1052,7 +1056,7 @@ function plugEvent(activeDevice, kind, a, b) {
 			// than 1 s apart) the turn is added up here instead of read back from the plug-in.
 			var now = Date.now(), w = plug.wanted[p.tag]
 			var from = w && now - w.at < 1000 ? w.value : plugValue(p)
-			v = Math.max(0, Math.min(1, from + (b - 64) * PLUG_STEP))
+			v = Math.max(0, Math.min(1, from + (b - 64) * PLUG_STEP * (fine ? 0.25 : 1)))
 			plug.wanted[p.tag] = { value: v, at: now }
 		}
 		plugDa.setParameterProcessValue(plugAm, plug.obj, p.tag, v)
@@ -1090,4 +1094,121 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Presets: the bridge's preset browser (SHIFT + 5-8) reads the SSL preset file and sends each value (SysEx 3C <section>
+// <id> 7F 7F 7F <value>, then 3D <section> <name>); they go into the plug-in the PLUGIN view shows. The same way as the
+// UC1 script loads them: an SSL preset names its parameters by their JUCE ids, whose Direct Access tag is the id's
+// Java-style string hash (31 * h + c, sign bit cleared) plus 4201; a value is a choice's index or a plain number in the
+// parameter's unit (set as its display value and checked, else found on the display).
+// ---------------------------------------------------------------------------
+function juceTag(id) {
+	var h = 0
+	for (var i = 0; i < id.length; ++i) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0
+	return (h & 0x7FFFFFFF) + 4201
+}
+function leadingNumber(text) {
+	var r = /^\s*\+?(-?\d*\.?\d+(e[-+]?\d+)?)/i.exec(text || '')
+	return r ? parseFloat(r[1]) : NaN
+}
+var presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
+function applyPresetValue(id, text) {
+	if (plug.obj < 0 || !plugAm) { ++presetLoad.skipped; return }
+	var acc = plugDa, am = plugAm, obj = plug.obj, tag = juceTag(id)
+	var title = ''
+	try { title = acc.getParameterTitle(am, obj, tag, 40) } catch (e) {}
+	if (!title || title === '-') { ++presetLoad.unknown; return }   // view state / a placeholder, not a parameter
+	var v = parseFloat(text)
+	if (isNaN(v)) { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return }
+	var plainMax = acc.convertParameterProcessValueToPlain(am, obj, tag, 1)
+	if (plainMax > 1.0001) {   // a choice: the value is its index
+		acc.setParameterProcessValue(am, obj, tag, acc.convertParameterPlainToProcessValue(am, obj, tag, Math.round(v)))
+		++presetLoad.applied
+		return
+	}
+	if ((v === 0 || v === 1) && Math.abs(plainMax - 1) < 1e-6) {
+		// A switch, or a continuous parameter at an end: try it as a switch first.
+		var before = acc.getParameterProcessValue(am, obj, tag)
+		acc.setParameterDisplayValue(am, obj, tag, String(v))
+		var shown = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
+		if (!isNaN(shown) && Math.abs(shown - v) < 1e-6) { ++presetLoad.applied; return }
+		acc.setParameterProcessValue(am, obj, tag, v)
+		var disp = acc.getParameterDisplayValue(am, obj, tag)
+		if (isNaN(leadingNumber(disp)) || Math.abs(leadingNumber(disp) - v) < 1e-6) { ++presetLoad.applied; return }
+		acc.setParameterProcessValue(am, obj, tag, before)
+	}
+	var at = function (n) { acc.setParameterProcessValue(am, obj, tag, n); return acc.getParameterDisplayValue(am, obj, tag) }
+	var probe = function () {
+		var pts = []
+		for (var k = 0; k <= 64; ++k) { var d = at(k / 64); pts.push({ n: k / 64, text: d, num: leadingNumber(d) }) }
+		return pts
+	}
+	// A stepped parameter whose file value is its index: a short list of distinct readings, and the index picks one.
+	var pts = null
+	if (v === Math.round(v) && v >= 0) {
+		pts = probe()
+		var steps = []
+		for (var q = 0; q < pts.length; ++q) if (!steps.length || steps[steps.length - 1].text !== pts[q].text) steps.push(pts[q])
+		if (steps.length <= 24 && v < steps.length) {
+			var byValue = null
+			for (var w = 0; w < steps.length; ++w) if (!isNaN(steps[w].num) && Math.abs(steps[w].num - v) < 1e-6) byValue = steps[w]
+			acc.setParameterProcessValue(am, obj, tag, (byValue || steps[v]).n)
+			++presetLoad.applied
+			return
+		}
+	}
+	// A number in the parameter's unit: let the plug-in parse it, check, else bisect on the display.
+	acc.setParameterDisplayValue(am, obj, tag, String(v))
+	var got = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
+	if (!isNaN(got) && Math.abs(got - v) <= Math.max(Math.abs(v) * 0.02, 0.05)) { ++presetLoad.applied; return }
+	if (!pts) pts = probe()
+	var lo = null, hi = null
+	for (var z = 0; z + 1 < pts.length; ++z) {
+		var p0 = pts[z], p1 = pts[z + 1]
+		if (isNaN(p0.num) || isNaN(p1.num)) continue
+		if ((p0.num - v) * (p1.num - v) <= 0) { lo = p0; hi = p1; break }
+	}
+	if (!lo) {
+		// Outside the numbered part: an end that reads "OFF" (a filter at its end) takes values beyond the range.
+		var first = null, last = null
+		for (var y = 0; y < pts.length; ++y) if (!isNaN(pts[y].num)) { if (!first) first = pts[y]; last = pts[y] }
+		var offEnd = null
+		if (first && isNaN(pts[0].num) && (first.num > last.num ? v > first.num : v < first.num)) offEnd = pts[0]
+		if (last && isNaN(pts[pts.length - 1].num) && (last.num > first.num ? v > last.num : v < last.num)) offEnd = pts[pts.length - 1]
+		if (offEnd) { acc.setParameterProcessValue(am, obj, tag, offEnd.n); ++presetLoad.applied; return }
+		++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return
+	}
+	var a = lo.n, b = hi.n, asc = hi.num > lo.num, bestN = lo.n, bestErr = Math.abs(lo.num - v)
+	for (var it = 0; it < 16; ++it) {
+		var n = (a + b) / 2, num = leadingNumber(at(n))
+		if (isNaN(num)) break
+		if (Math.abs(num - v) < bestErr) { bestErr = Math.abs(num - v); bestN = n }
+		if ((num < v) === asc) a = n; else b = n
+	}
+	acc.setParameterProcessValue(am, obj, tag, bestN)
+	if (bestErr <= Math.max(Math.abs(hi.num - lo.num), Math.abs(v) * 0.02, 1e-6)) ++presetLoad.applied
+	else { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text) }
+}
+function decodeParts(message, from) {
+	var text = '', parts = [], i = from
+	for (; i + 2 < message.length && message[i] !== 0xF7; i += 3) {
+		if (message[i] === 0x7F && message[i + 1] === 0x7F && message[i + 2] === 0x7F) { parts.push(text); text = ''; continue }
+		text += String.fromCharCode((message[i] << 14) | (message[i + 1] << 7) | message[i + 2])
+	}
+	parts.push(text)
+	return parts
+}
+function onPresetMessage(activeDevice, message) {
+	if (message[4] === 0x3C) {
+		var parts = decodeParts(message, 6)
+		try { applyPresetValue(parts[0], parts[1] || '') } catch (e) { ++presetLoad.skipped; presetLoad.failed.push(parts[0] + ': ' + e) }
+		return
+	}
+	var name = decodeParts(message, 6)[0]
+	out('[CubaseSixty UF1] preset "' + name + '" into ' + (plug.obj >= 0 ? '"' + plug.title + '"' : 'nothing (no SSL plug-in)') + ': '
+		+ presetLoad.applied + ' set, ' + presetLoad.skipped + ' not set, ' + presetLoad.unknown + ' not parameters'
+		+ (presetLoad.failed.length ? ' (not set: ' + presetLoad.failed.slice(0, 12).join(', ') + ')' : ''))
+	presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
+	if (plug.obj >= 0) plugPaint(activeDevice, false)
 }
