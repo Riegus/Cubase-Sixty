@@ -1038,6 +1038,11 @@ void uc1Stop()
 
 void uc1SetTrace(bool on) { g_trace = on; }
 
+void uc1FollowStrip(int kind, int ordinal)
+{
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x45, uint8_t(kind & 0x7F), uint8_t(ordinal & 0x7F), 0xF7});
+}
+
 void uc1FavouriteStep(int domain, int dir)
 {
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x44, uint8_t(domain ? 1 : 0), uint8_t(dir > 0 ? 1 : 0), 0xF7});

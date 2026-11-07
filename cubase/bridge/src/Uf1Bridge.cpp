@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include "Uc1Bridge.h"
 
 #include <algorithm>
 #include <array>
@@ -1265,6 +1266,8 @@ void onSysex(const std::vector<unsigned char>& m)
         // What the Quick Controls belong to ("-" = not known), for the header in PLUGIN.
         { std::lock_guard<std::mutex> lk(g_cellMx); g_qcSource.assign(m.begin() + 5, m.end() - 1); if (g_qcSource == "-") g_qcSource.clear(); }
         paintHeader();
+    } else if (m[4] == 0x59 && m.size() >= 8) {
+        uc1FollowStrip(m[5], m[6]);   // SHIFT + CHANNEL picked a strip: the UC1 follows
     } else if (m[4] == 0x58 && m.size() >= 7) {
         g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
         if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");

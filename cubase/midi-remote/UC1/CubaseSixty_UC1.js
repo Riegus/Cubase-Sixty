@@ -664,6 +664,23 @@ function nextStrip(activeDevice) {
 	paintAll(activeDevice)
 }
 
+// The UF1's SHIFT + CHANNEL encoder picked a strip for its PLUGIN view (SysEx 45 <kind> <ordinal>, via the bridge;
+// kind 1 = an SSL strip by its position among the track's SSL plug-ins, 2 = Cubase's own): the UC1 goes to the same
+// one, as the UF1 follows the magnifier key.
+function followUf1(activeDevice, kind, ord) {
+	var list = state.csList, want = null
+	for (var i = 0; i < list.length; ++i) {
+		if (kind === 2 && list[i].key === 'cubase') want = list[i]
+		if (kind === 1 && list[i].key !== 'cubase' && (list[i].sslOrd || 0) === ord) want = list[i]
+	}
+	if (!want || want === state.cs) return
+	state.cs = want
+	state.csChoice[state.csBase] = want.key
+	log('channel strip from the UF1: "' + want.name + '"')
+	sysex(activeDevice, [0x35, ZONE_CS])
+	paintAll(activeDevice)
+}
+
 // The 360 key: open or close the window of the strip the UC1 controls: an SSL plug-in's own window (the insert
 // slot's edit switch), or for Cubase's own strip the track's Channel Settings. The script cannot set these itself,
 // so they are bound to CCs the bridge sends back (SysEx 3A): CC 50 + slot for the inserts, CC 70 for Channel
@@ -1413,6 +1430,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var cmd = message[4]
 	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
 	if (cmd === 0x43) { onFavList(message); return }
+	if (cmd === 0x45 && am) { followUf1(activeDevice, message[5], message[6]); return }
 	if (cmd === 0x44 && am) { try { favStep(activeDevice, message[5] === 0 ? 'cs' : 'bc', message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) } return }
 	if (cmd === 0x3E && am && message.length >= 11) { try { setRouting(activeDevice, message) } catch (e) { log('routing: ' + e) } return }
 	if (cmd !== 0x20 && cmd !== 0x21) return

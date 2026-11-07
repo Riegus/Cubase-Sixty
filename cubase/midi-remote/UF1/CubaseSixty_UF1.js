@@ -1112,6 +1112,12 @@ function plugStep(activeDevice, dir) {
 	var next = ((cur + dir) % list.length + list.length) % list.length
 	plug.pick = { base: plug.base, id: list[next] }
 	plugRescan(activeDevice)
+	// The UC1 follows to a channel strip (or Cubase's own, for "none"; a bus comp leaves it where it is): SysEx 59
+	// <kind> <ordinal>, on to the UC1 script as 45.
+	var e = null
+	for (var i = 0; i < (plug.all || []).length; ++i) if (plug.all[i].id === list[next]) e = plug.all[i]
+	if (list[next] === 'cubase') plugSend(activeDevice, [0x59, 2, 0])
+	else if (e && e.kind.strip) plugSend(activeDevice, [0x59, 1, e.sslOrd & 0x7F])
 }
 function plugPaint(activeDevice, force) {
 	if (force) { plug.sentInfo = null; plug.sentCells = [null, null, null, null]; plug.sentKeys = [null, null, null, null] }
