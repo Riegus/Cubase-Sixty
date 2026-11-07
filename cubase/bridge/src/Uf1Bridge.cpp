@@ -538,19 +538,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             }
             break;
         }
-        // The CHANNEL encoder's push: open / close the window of the plug-in the PLUGIN view is on (the script's
-        // insert viewer, channel 2: 60 = first slot, 61 = next slot, once per slot, 62 = toggle its window), or
-        // without one the track's channel editor (the SEL note, which toggles it).
+        // The CHANNEL encoder's push: open / close the window of the plug-in the PLUGIN view is on (PLUGIN event
+        // kind 5: the script moves an insert viewer to its slot and toggles the window), or without one the
+        // track's channel editor (the SEL note, which toggles it).
         if (ev.id == 0x0D) {
             if (!ev.pressed) break;
-            const int slot = g_plugSlot;
-            // 40 ms apart: back-to-back notes were merged by Cubase (slot 4 opened slot 2's window).
-            if (slot >= 0) std::thread([slot] {
-                cmd2(60);
-                for (int i = 0; i < slot; ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(40)); cmd2(61); }
-                std::this_thread::sleep_for(std::chrono::milliseconds(40));
-                cmd2(62);
-            }).detach();
+            if (g_plugSlot >= 0) plugEvent(5, 0, 64);
             else { note(kNoteSel, true); note(kNoteSel, false); }
             break;
         }

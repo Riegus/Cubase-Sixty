@@ -1095,7 +1095,8 @@ function plugRescan(activeDevice) {
 
 function plugSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
 // The insert slot of the plug-in the PLUGIN view is on (SysEx 58 <slot 0-15, 7F = none>): the CHANNEL encoder's push
-// opens / closes its window (the bridge steers the insert viewer below to it), or the track's channel editor without one.
+// opens / closes its window (PLUGIN event kind 5: the script moves an insert viewer there), or the track's channel
+// editor without one.
 var slotReported = null
 function plugReportSlot(activeDevice, slot) {
 	var v = slot >= 0 ? slot : 0x7F
@@ -1166,6 +1167,7 @@ function plugCell(activeDevice, i, slot) {
 
 function plugEvent(activeDevice, kind, a, b, fine) {
 	if (kind === 4 && plugAm) { plugStep(activeDevice, a ? 1 : -1); return }
+	if (kind === 5) { windowToggle(activeDevice); return }
 	if (plug.obj < 0 || !plugAm) return
 	if (kind === 3) {
 		var n = plugPages()
@@ -1232,26 +1234,54 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		eqPollAt = t + 150
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
 	}
+	windowIdle(activeDevice)
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
 	}
 }
 
-// The plug-in window: one insert viewer (16 fixed-slot viewers made every track change lag). On the CHANNEL
-// encoder's push the bridge points it at the PLUGIN view's slot and toggles its edit switch: MIDI channel 2,
-// note 60 = first slot, 61 = next slot (once per slot), 62 = open / close.
+// The plug-in window: one insert viewer (16 fixed-slot viewers made every track change lag), moved by the script
+// itself (its actions can be triggered directly). On the CHANNEL encoder's push (PLUGIN event kind 5) it goes to the
+// first slot, then on by the PLUGIN view's slot number, and the window is toggled once the viewer reports the
+// plug-in it is on and that is the one shown (else one slot on per idle tick, then back; Cubase moves the viewer
+// with a delay, so steps sent as MIDI notes landed on the wrong slot).
+var editWin = { viewer: null, open: 0, name: '', job: null }
 try {
-	var editViewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyEdit')
-	var editKeys = []
-	for (var es = 0; es < 3; ++es) {
-		editKeys.push(surface.makeButton(es, 16, 1, 1))
-		editKeys[es].mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 60 + es)
+	editWin.viewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyEdit')
+	var editState = surface.makeCustomValueVariable('pluginWindow')
+	page.makeValueBinding(editState, editWin.viewer.mEdit)
+	editState.mOnProcessValueChange = function (activeDevice, value) { editWin.open = value }
+	editWin.viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { editWin.name = name || '' }
+} catch (e) { out('[CubaseSixty UF1] plug-in window switch could not be set up: ' + e) }
+function windowToggle(activeDevice) {
+	if (!editWin.viewer || !plugAm || plug.obj < 0) return
+	var slot = -1
+	for (var i = 0; i < (plug.all || []).length; ++i) if (plug.all[i].id === plug.obj) slot = plug.all[i].slot
+	if (slot < 0) return
+	try {
+		editWin.viewer.mAction.mReset.trigger(plugAm)
+		for (var k = 0; k < slot; ++k) editWin.viewer.mAction.mNext.trigger(plugAm)
+	} catch (e) { out('[CubaseSixty UF1] plug-in window: ' + e); return }
+	editWin.job = { title: plug.title, at: Date.now() + 60, tries: 0 }
+}
+function windowIdle(activeDevice) {
+	var job = editWin.job
+	if (!job || Date.now() < job.at) return
+	// Not there yet: on by one slot (16 tries), then back by one (16 more), in case the start was not slot 1.
+	if (editWin.name && job.title.indexOf(editWin.name) < 0 && editWin.name.indexOf(job.title) < 0 && job.tries < 32) {
+		++job.tries
+		job.at = Date.now() + 60
+		try { (job.tries <= 16 ? editWin.viewer.mAction.mNext : editWin.viewer.mAction.mPrev).trigger(plugAm) } catch (e) { editWin.job = null }
+		return
 	}
-	page.makeActionBinding(editKeys[0].mSurfaceValue, editViewer.mAction.mReset)
-	page.makeActionBinding(editKeys[1].mSurfaceValue, editViewer.mAction.mNext)
-	page.makeValueBinding(editKeys[2].mSurfaceValue, editViewer.mEdit).setTypeToggle()
-} catch (e) { out('[CubaseSixty UF1] plug-in window switch could not be bound: ' + e) }
+	editWin.job = null
+	if (job.tries >= 32) { out('[CubaseSixty UF1] plug-in window: "' + job.title + '" not found in the inserts'); return }
+	try {
+		if (editWin.open >= 0.5) editWin.viewer.mEdit.decrement(plugAm)
+		else editWin.viewer.mEdit.increment(plugAm)
+	} catch (e) { out('[CubaseSixty UF1] plug-in window: ' + e) }
+}
 
 // ---------------------------------------------------------------------------
 // Presets: the bridge's preset browser (SHIFT + 5-8) reads the SSL preset file and sends each value (SysEx 3C <section>
