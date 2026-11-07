@@ -49,7 +49,8 @@ Strips are numbered 1–8 and map to MIDI channels 1–8.
 | Automation modes  | Notes 58 / 59 / 60 / 61          | bridge → Cubase | Off (= Cross-Over), Trim (toggle), Latch, Touch: Cubase's global automation mode. Cubase gives no feedback; the bridge lights the LEDs from the last key pressed. |
 | Meters            | CC 80 + strip−1 (left), CC 88 + strip−1 (right), 0–127 | Cubase → bridge | From the script, already in dB (−55…0 dBFS onto 0–127). A strip with no right value is shown mono. |
 | Foot switch 1 / 2 | Note 62 / 63                     | bridge → Cubase | Play / record. Ignored for 4 s after start-up (phantom press). |
-| FLIP              | Note 77 (normal) / 78 (flipped)  | bridge → Cubase | The bridge toggles on each press and lights the FLIP LED; the script switches sub-pages. |
+| Faders / V-pots on | Channel 2, notes 80–92 | bridge → Cubase | What the faders and V-pots are on (two sub-page areas): faders 80 = track volume, 81 = track pan (FLIP), 82–89 = send 1–8 of each track (SEND / PLUGIN 1–8; CUT = the send on / off); V-pots 90 = track pan, 91 = track volume (FLIP), 92 = sends 1–8 of the selected track (FLIP held 0.4 s). CHANNEL (left panel) = home: volume and pan. The bridge lights SEND / PLUGIN N and FLIP. In a send view the strip name is the send's destination (the faders' view wins). |
+| Send level on the V-pot | `F0 7D 52 36 0D <strip> <text> F7`, `F0 7D 52 36 0E <strip> <0–127> F7` | Cubase → bridge | The V-pots on the selected track's sends: value line "Send" + the level, and a unipolar bar. |
 
 LED state arrives as note on / off, or as polyphonic aftertouch with value 127 for "on"; the bridge accepts both.
 

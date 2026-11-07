@@ -11,6 +11,11 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   (V-POT / 1–5 pages, a key puts its parameter on the V-pots), and NORM / REC / AUTO set what SEL does. Differences
   left: AUTO toggles the track's Write (W) instead of stepping a per-track automation mode (Cubase has none); Q1–Q3,
   the bus-comp pages, user banks and REC + MON are not there yet (see Missing features).
+- **Send views** (forced, partly). As Rea-Sixty: SEND / PLUGIN 1–8 put send N of each track on the faders, a long
+  FLIP the selected track's sends on the V-pots, CHANNEL is home. Differences: no send pan (the API has none), so the
+  V-pot stays on the track's pan in Send N and FLIP does not swap a send's level and pan; SOLO stays the track's solo
+  (no exclusive send solo); CUT follows the faders' view only; no Receive views (no receives in the API); eight sends,
+  so no paging; a track without that send shows a blank name and its fader does nothing.
 - **V-pot push** (chosen). Rea-Sixty: centre the pan. Cubase-Sixty: open the channel editor.
 - **Favourite cycle** (chosen). Rea-Sixty swaps the plug-in at every notch; Cubase-Sixty shows the favourites on the
   UC1's name row while you turn and swaps once, half a second after the last notch (loading a plug-in per notch is

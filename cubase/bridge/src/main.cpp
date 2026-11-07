@@ -173,6 +173,35 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 
 // ---------------------------------------------------------------- UF8 -> Cubase
 
+// Send views (Rea-Sixty's routing views). The script switches its fader and V-pot sub-pages on channel 2 notes:
+// faders 80 = volume, 81 = pan (FLIP), 82-89 = send 1-8 of each track; V-pots 90 = pan, 91 = volume (FLIP),
+// 92 = sends 1-8 of the selected track. SEND / PLUGIN 1-8 light for the fader send, FLIP for the flip.
+std::atomic<int> g_routeSend{-1};
+std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
+long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+void note2(uint8_t n) { sendMidi({0x91, n, 127}); sendMidi({0x81, n, 0}); }
+void unfocus()
+{
+    g_focus = -1;
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, 0x7F, 0x7F, 0xF7});
+    paintSoftKeys();
+    paintVpots();
+}
+void applyRoute()
+{
+    const int send = g_routeSend;
+    const bool flip = g_routeFlip, sel = g_routeSelSends;
+    note2(uint8_t(send >= 0 ? 82 + send : flip ? 81 : 80));
+    note2(uint8_t(sel ? 92 : flip ? 91 : 90));
+    static const uf8::Uf8GlobalLed sp[8] = { uf8::Uf8GlobalLed::SendPlugin1, uf8::Uf8GlobalLed::SendPlugin2, uf8::Uf8GlobalLed::SendPlugin3,
+        uf8::Uf8GlobalLed::SendPlugin4, uf8::Uf8GlobalLed::SendPlugin5, uf8::Uf8GlobalLed::SendPlugin6, uf8::Uf8GlobalLed::SendPlugin7,
+        uf8::Uf8GlobalLed::SendPlugin8 };
+    for (int i = 0; i < 8; ++i) sendLedFrames(uf8::buildUf8GlobalLed(sp[i], i == send));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Flip, flip || sel));
+    if (g_trace8) std::printf("UF8 route: faders %s, V-pots %s\n", send >= 0 ? ("send " + std::to_string(send + 1)).c_str() : flip ? "pan" : "volume",
+                              sel ? "selected track's sends" : flip ? "volume" : "pan");
+}
+
 void handleFrame(const uf8frames::Frame& fr)
 {
     const uint8_t* d = fr.b;
@@ -203,14 +232,35 @@ void handleFrame(const uf8frames::Frame& fr)
     }
     case 0x22: {   // button: FF 22 03 id 00 state ck
         const bool pressed = d[5] == 0x01;
-        if (d[3] == 0x54) {   // FLIP: faders on pan, V-pots on volume (script sub-pages, notes 77 / 78)
+        if (d[3] == 0x54) {   // FLIP: a tap swaps faders and V-pots; held 0.4 s: the selected track's sends on the V-pots
+            static std::atomic<int> gen{0};
             if (pressed) {
-                static bool flip = false;
-                flip = !flip;
-                note(flip ? 78 : 77, true);
-                note(flip ? 78 : 77, false);
-                sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Flip, flip));
+                const int g = ++gen;
+                std::thread([g] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                    if (g != gen) return;
+                    gen = -1;   // the release does nothing more
+                    g_routeSelSends = !g_routeSelSends;
+                    if (g_routeSelSends && g_focus >= 0) unfocus();
+                    applyRoute();
+                }).detach();
+            } else if (gen > 0) {
+                ++gen;   // a tap
+                g_routeFlip = !g_routeFlip;
+                applyRoute();
             }
+            break;
+        }
+        if (d[3] >= 0x48 && d[3] <= 0x4F) {   // SEND / PLUGIN 1-8: send N of every track on the faders (again: off)
+            if (pressed) {
+                const int n = d[3] - 0x48;
+                g_routeSend = g_routeSend == n ? -1 : n;
+                applyRoute();
+            }
+            break;
+        }
+        if (d[3] == 0x51) {   // CHANNEL (left panel): home, the strips back on track volume and pan
+            if (pressed) { g_routeSend = -1; g_routeSelSends = false; g_routeFlip = false; applyRoute(); }
             break;
         }
         if (d[3] == 0x76) {   // CHANNEL encoder push: held = pick a mode
@@ -242,6 +292,7 @@ void handleFrame(const uf8frames::Frame& fr)
             const int slot = d[3] - 0x18, key = g_skBank * 8 + slot;
             if (!softKeyLive(g_skBank, slot)) break;
             const int f = g_focus == key ? -1 : key;
+            if (f >= 0 && g_routeSelSends) { g_routeSelSends = false; applyRoute(); }   // the V-pots go to the parameter
             g_focus = f;
             if (f < 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, 0x7F, 0x7F, 0xF7});
             else sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, uint8_t(f / 8), uint8_t(f % 8), 0xF7});
@@ -471,7 +522,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         // Names / colours / pan / levels by (command, strip); faders by channel; LED notes by note number.
         std::lock_guard<std::mutex> lk(g_uf8CacheMx);
         const uint8_t st = m[0] & 0xF0;
-        if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && (m[4] == 0x01 || m[4] == 0x02 || m[4] == 0x06 || m[4] == 0x07 || m[4] == 0x0C))
+        if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && (m[4] == 0x01 || m[4] == 0x02 || m[4] == 0x06 || m[4] == 0x07 || m[4] == 0x0C || m[4] == 0x0D || m[4] == 0x0E))
             g_uf8Cache[0x10000 + (m[4] << 8) + m[5]] = m;
         else if (st == 0xE0 && m.size() >= 3) g_uf8Cache[0x20000 + (m[0] & 0x0F)] = m;
         else if ((st == 0x90 || st == 0x80 || st == 0xA0) && m.size() >= 3) g_uf8Cache[m[1]] = m;
@@ -480,7 +531,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         // Frozen (jump running): drop the strip state (cached above, shown after the jump) and meters;
         // the script's requests still go through.
         const uint8_t st = m[0] & 0xF0;
-        const bool stripSysex = m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && (m[4] == 0x01 || m[4] == 0x02 || m[4] == 0x06 || m[4] == 0x07 || m[4] == 0x0C);
+        const bool stripSysex = m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && (m[4] == 0x01 || m[4] == 0x02 || m[4] == 0x06 || m[4] == 0x07 || m[4] == 0x0C || m[4] == 0x0D || m[4] == 0x0E);
         if (stripSysex || st == 0xE0 || st == 0x90 || st == 0x80 || st == 0xA0 || st == 0xB0) return;
     }
     const uint8_t status = m[0] & 0xF0;
@@ -634,6 +685,19 @@ void onMidiIn(std::vector<unsigned char>& msg)
             line += v;
             g_panLine[m[5]] = line;
             if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+        } else if (m.size() >= 7 && m[4] == 0x0D && m[5] < kStrips) {
+            // A send level on the V-pot (the selected track's sends): "Send" left, the level right.
+            std::string v(m.begin() + 6, m.end() - 1);
+            if (v.size() > 14) v.resize(14);
+            std::string line = "Send";
+            line.append(19 - line.size() - v.size(), ' ');
+            line += v;
+            g_panLine[m[5]] = line;
+            if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+        } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
+            // A send level 0..127 on the V-pot: a unipolar bar.
+            g_panPos[m[5]] = uf8::vpotPosUnipolar(m[6] / 127.0);
+            if (g_focus < 0) g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
         } else if (m.size() >= 10 && m[4] == 0x20 && m[5] < kStrips) {
             // The focused parameter on one strip: has (0 = no SSL channel strip / not on this model),
             // position 0..127, ring (1 unipolar, 2 bipolar), the value text.
