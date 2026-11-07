@@ -1080,6 +1080,7 @@ void onSysex(const std::vector<unsigned char>& m)
         }
         model.on = !model.bands.empty();
         std::lock_guard<std::mutex> lk(g_cellMx);
+        if (model.bands.size() != g_cubaseEq.bands.size()) std::printf("UF1 EQ graph: Cubase EQ, %zu band(s) on\n", model.bands.size());
         g_cubaseEq = model;
     } else if (m[4] == 0x54) {
         // The script (re)started: it begins on the sends, so tell it the V-pot page of the view shown.

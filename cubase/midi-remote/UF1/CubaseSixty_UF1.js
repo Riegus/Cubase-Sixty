@@ -1117,8 +1117,16 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	plug.obj = -2   // look again and send everything
 	plug.rescanAt = Date.now() + 200
 }
+var eqPollAt = 0
 page.mOnIdle = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
+	// Cubase's EQ is also read here, ten times a second: its changes do not reliably arrive as parameter changes.
+	// Only a changed band list is sent.
+	var t = Date.now()
+	if (t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
+		eqPollAt = t + 100
+		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
+	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
@@ -1304,6 +1312,7 @@ function cubaseEqSend(activeDevice) {
 	var text = bands.join(';')
 	if (text === cubaseEq.sent) return
 	cubaseEq.sent = text
+	if (cubaseEq.bandCount !== bands.length) { cubaseEq.bandCount = bands.length; out('[CubaseSixty UF1] EQ graph: ' + bands.length + ' band(s) on' + (bands.length ? ': ' + text : '')) }
 	plugSend(activeDevice, [0x55].concat(asciiAll(text)))
 }
 // toAscii7 stops at 32 characters; the band list is longer.
