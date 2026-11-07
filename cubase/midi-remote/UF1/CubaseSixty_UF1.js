@@ -553,8 +553,8 @@ function stepTrack(activeDevice, dir) {
 				count = Math.abs(k - at)
 				stepLast = { id: list[k].id, at: now }
 			}
-			out('[CubaseSixty UF1] track step: ' + list.length + ' channels, selected at ' + at + ' ("' + selectedInfo.title + '", object ' + cur + '), ' + count + ' step(s) ' + (dir > 0 ? 'on' : 'back'))
 			if (at < 0 && !stepListed) {
+				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it')
 				stepListed = true
 				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
 			}
