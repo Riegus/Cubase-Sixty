@@ -488,6 +488,25 @@ stopSeekOnPress(bankRight)
 // Zoom pad (notes 72-76: up, left, centre, right, down), same as the UF1's NAV cross: left / right = zoom
 // out / in, up / down = vertical zoom in / out, centre opens / closes the editor.
 // ---------------------------------------------------------------------------
+// The CHANNEL encoder's modes (picked in the bridge: hold the encoder's push and turn, or the NAV / NUDGE keys):
+// each detent is a Cubase command, sent on MIDI channel 2 (notes 0-5). Bank by 1 uses the Page notes (44 / 45).
+// ---------------------------------------------------------------------------
+
+var encoderCommands = [
+	{ note: 0, category: 'Project', command: 'Select Track: Prev' },
+	{ note: 1, category: 'Project', command: 'Select Track: Next' },
+	{ note: 2, category: 'Transport', command: 'Nudge Cursor Left' },
+	{ note: 3, category: 'Transport', command: 'Nudge Cursor Right' },
+	{ note: 4, category: 'Transport', command: 'Locate Previous Marker' },
+	{ note: 5, category: 'Transport', command: 'Locate Next Marker' }
+]
+for (var ec = 0; ec < encoderCommands.length; ++ec) {
+	var encButton = surface.makeButton(ec, 16, 1, 1)
+	encButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, encoderCommands[ec].note)
+	page.makeCommandBinding(encButton.mSurfaceValue, encoderCommands[ec].category, encoderCommands[ec].command)
+}
+
+// ---------------------------------------------------------------------------
 
 var zoomKeys = [
 	{ note: 72, category: 'Zoom', command: 'Zoom In Vertically' },
