@@ -6,17 +6,16 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. More CHANNEL encoder modes: Nudge, Markers, Bank by 1.
-2. UC1 favourites.
-3. UF1 jog modes.
+1. UC1 favourites.
+2. UF1 jog modes.
 
 ## UF8
 
 - **Selection modes**: NORM / REC / AUTO are done; REC + MON and the V-pot cycle modes (FX Cycle, Instance Cycle)
   are not.
-- **CHANNEL encoder modes** (16 in Rea-Sixty): Nudge, Mousewheel, Markers, Bank by 1, Last Touched Param, Instance /
-  FX Cycle (also across tracks), FX Move, Selset Cycle, CS / BC / focused favourite cycle, Lanes; hold the push and
-  turn to pick a mode. Cubase-Sixty: channel select only.
+- **CHANNEL encoder modes** (16 in Rea-Sixty): Channel Select, Nudge, Markers and Bank by 1 are done (hold the push
+  and turn to pick; NAV / NUDGE switch to Markers / Nudge); missing are Mousewheel, Last Touched Param, Instance /
+  FX Cycle (also across tracks), FX Move, Selset Cycle, CS / BC / focused favourite cycle, Lanes.
 - **Soft keys on the top row**: SSL's channel-strip pages are done (V-POT, 1-5); missing are the Q1-Q3 sets (SSL bus
   comp pages, user sets), user bindings and layers, dynamic soft-key banks.
 - **SSL Strip Mode / UF8 Plug-in Mode**: a channel strip's or a plug-in's controls across the eight V-pots (and

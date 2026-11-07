@@ -107,6 +107,19 @@ std::array<uint16_t, 8> g_ringPosShown{};
 std::array<uint8_t, 8> g_ringModeShown{};
 void paintSoftKeys();
 void paintVpots();
+
+// The CHANNEL encoder's modes (Rea-Sixty's Channel Encoder modes, the first few): each detent is a Cubase command
+// (MIDI channel 2, notes 0-5, or the Page notes for Bank by 1). Picked as in Rea-Sixty: hold the encoder's push
+// (id 0x76) and turn; the scribble strips list the modes, the current one on strip 4 with its top soft key lit;
+// letting go keeps the mode. NAV (0x73) and NUDGE (0x74) switch to Markers / Nudge directly and back (lit while on).
+enum { kEncSelect = 0, kEncNudge, kEncMarkers, kEncBank, kEncModes };
+const char* const kEncNames[kEncModes] = { "Ch Sel", "Nudge", "Markers", "Bank 1" };
+std::atomic<int> g_encMode{kEncSelect};
+std::atomic<bool> g_encHeld{false};
+int g_encPick = 0;
+void paintEncPicker();
+void paintEncLeds();
+void restoreStripNames();
 void setLed(int strip, int cls, bool on);
 void sendLedFrames(const uf8::LedColourFrames& frames);
 std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
@@ -199,6 +212,26 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
+        if (d[3] == 0x76) {   // CHANNEL encoder push: held = pick a mode
+            if (pressed) { g_encHeld = true; g_encPick = g_encMode; paintEncPicker(); }
+            else if (g_encHeld) {
+                g_encHeld = false;
+                g_encMode = g_encPick;
+                if (g_trace8) std::printf("UF8 encoder mode: %s\n", kEncNames[g_encPick]);
+                restoreStripNames();
+                paintSoftKeys();
+                paintEncLeds();
+            }
+            break;
+        }
+        if (d[3] == 0x73 || d[3] == 0x74) {   // NAV / NUDGE: Markers / Nudge on and off
+            if (pressed) {
+                const int m = d[3] == 0x73 ? kEncMarkers : kEncNudge;
+                g_encMode = g_encMode == m ? kEncSelect : m;
+                paintEncLeds();
+            }
+            break;
+        }
         if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
             if (pressed) { g_skBank = d[3] - 0x68; paintSoftKeys(); }
             break;
@@ -225,6 +258,7 @@ void handleFrame(const uf8frames::Frame& fr)
                 g_selMode = d[3] - 0x70;
                 paintSelMode();
             paintSoftKeys();
+            paintEncLeds();
                 for (int i = 0; i < kStrips; ++i) paintSel(i);
                 if (g_trace8) std::printf("UF8 selection mode %s\n", g_selMode == kSelNorm ? "NORM" : g_selMode == kSelRec ? "REC" : "AUTO");
             }
@@ -249,8 +283,34 @@ void handleFrame(const uf8frames::Frame& fr)
         }
         break;
     }
-    case 0x24: {   // v-pot: FF 24 02 strip raw ck
+    case 0x24: {   // v-pot: FF 24 02 strip raw ck (strip 8 = the CHANNEL encoder)
         const uint8_t s = d[3];
+        if (s == 8) {
+            // The encoder reports about four counts per notch (Rea-Sixty: kChannelEncoderScale = 4): one step per
+            // four, the rest kept for the next frame (it starts again when the direction changes).
+            static int acc = 0;
+            const int raw = uf8frames::vpotDelta(d[4]);
+            if (raw == 0) break;
+            if ((acc > 0 && raw < 0) || (acc < 0 && raw > 0)) acc = 0;
+            acc += raw;
+            const int delta = acc / 4;
+            acc -= delta * 4;
+            if (delta == 0) break;
+            if (g_encHeld) {   // picking a mode
+                g_encPick = std::clamp(g_encPick + delta, 0, kEncModes - 1);
+                paintEncPicker();
+                break;
+            }
+            const bool right = delta > 0;
+            const int mode = g_encMode;
+            for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
+                if (mode == kEncBank) { note(right ? kNotePageRight : kNotePageLeft, true); note(right ? kNotePageRight : kNotePageLeft, false); continue; }
+                const uint8_t n = uint8_t(mode * 2 + (right ? 1 : 0));   // Select 0 / 1, Nudge 2 / 3, Markers 4 / 5
+                sendMidi({0x91, n, 127});
+                sendMidi({0x81, n, 0});
+            }
+            break;
+        }
         if (s >= kStrips) return;
         const int delta = uf8frames::vpotDelta(d[4]);
         if (delta == 0) break;
@@ -354,6 +414,19 @@ void paintVpots()
     g_dev.send(uf8::buildVPotReadoutBar(focus < 0 ? g_panPos : g_focusPos));
     g_dev.send(uf8::buildVPotMode(modes));
     if (focus < 0) for (int s = 0; s < kStrips; ++s) { if (!g_panLine[s].empty()) g_dev.send(uf8::buildValueLine(uint8_t(s), g_panLine[s])); }
+}
+void paintEncPicker()
+{
+    for (int s = 0; s < kStrips; ++s) {
+        const int i = g_encPick + (s - 3);
+        g_dev.send(uf8::buildStripTextUpper(uint8_t(s), i >= 0 && i < kEncModes ? kEncNames[i] : ""));
+        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s == 3 ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
+    }
+}
+void paintEncLeds()
+{
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nav, g_encMode == kEncMarkers));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nudge, g_encMode == kEncNudge));
 }
 void paintSelMode()
 {
@@ -642,6 +715,18 @@ void onMidiIn(std::vector<unsigned char>& msg)
 
 // Show the last state Cubase sent (names, colours, pan, dB texts, faders, LEDs) again: after a reopen, and
 // after a jump during which the UF8 was frozen.
+// The track names again (after the mode picker wrote over them): the last names Cubase sent.
+void restoreStripNames()
+{
+    std::map<int, std::vector<unsigned char>> cache;
+    { std::lock_guard<std::mutex> lk(g_uf8CacheMx); cache = g_uf8Cache; }
+    for (int s = 0; s < kStrips; ++s) {
+        auto it = cache.find(0x10000 + (0x01 << 8) + s);
+        if (it != cache.end()) { auto msg = it->second; onMidiIn(msg); }
+        else g_dev.send(uf8::buildStripTextUpper(uint8_t(s), ""));
+    }
+}
+
 void replayUf8Cache()
 {
     std::map<int, std::vector<unsigned char>> cache;
