@@ -211,7 +211,6 @@ function sendCellInfo(activeDevice, index, cell) {
 // The header's CHANNEL field in PLUGIN without an SSL plug-in: what the Quick Controls belong to (SysEx 56), so it is
 // clear which plug-in the V-pots work.
 var qcSourceSent = null
-var qcTitleLogs = 0   // temporary: what Cubase reports as a Quick Control's titles
 function sendQcSource(activeDevice) {
 	var src = ''
 	for (var i = 0; i < 4 && !src; ++i) if (sendCells[i] && sendCells[i].qcObject) src = sendCells[i].qcObject
@@ -237,7 +236,6 @@ function attachSendFeedback(surfaceValue, number) {
 		title = valueTitle || objectTitle || ''
 		cell.qcTitle = title
 		cell.qcObject = valueTitle ? (objectTitle || '') : ''   // what the Quick Control belongs to (a plug-in's name)
-		if (qcActive && qcTitleLogs < 16) { ++qcTitleLogs; out('[CubaseSixty UF1] Quick Control ' + number + ' title: object "' + objectTitle + '", value "' + valueTitle + '"') }
 		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
