@@ -82,6 +82,8 @@ for (var i = 0; i < STRIPS; ++i) {
 	strip.faderTouch = surface.makeCustomValueVariable('faderTouch' + (i + 1))
 	strip.vpush = surface.makeButton(x, 12, 2, 1)
 	strip.softKey = surface.makeButton(x, 13, 2, 1)
+	// SEL in the AUTO selection mode (the bridge sends it on its own note): the track's automation Write.
+	strip.autoWrite = surface.makeButton(x, 15, 2, 1)
 
 	strip.select.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
@@ -95,6 +97,9 @@ for (var i = 0; i < STRIPS; ++i) {
 	strip.softKey.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
 		.bindToNote(0, 48 + i)
+	strip.autoWrite.mSurfaceValue.mMidiBinding
+		.setInputPort(midiInput).setOutputPort(midiOutput)
+		.bindToNote(0, 112 + i)
 	strip.vpush.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
 		.bindToNote(0, 32 + i)
@@ -185,6 +190,10 @@ for (var i = 0; i < STRIPS; ++i) {
 		.setTypeToggle()
 	// Top soft key = record-enable for the track (its LED shows the state).
 	page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
+		.setTypeToggle()
+	// SEL in AUTO (note 112 + strip from the bridge): the track's automation Write; its LED feedback goes back
+	// on the same note, and the bridge shows it on SEL (red).
+	page.makeValueBinding(strip.autoWrite.mSurfaceValue, channel.mValue.mAutomationWrite)
 		.setTypeToggle()
 	// Meters: left and right VU level to the bridge as CC 80 + strip (left) and CC 88 + strip (right),
 	// 0..127. A mono channel only reports the left side; the bridge then shows it on both.

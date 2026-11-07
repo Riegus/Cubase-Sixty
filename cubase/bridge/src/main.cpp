@@ -71,6 +71,14 @@ std::mutex        g_paletteMx;
 bool g_trace8 = false;
 std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (group, folder, FX): dark and ignored
 std::atomic<bool> g_recOn[8] = {};
+// Selection mode (Rea-Sixty's NORM / REC / AUTO keys, ids 0x70 / 0x71 / 0x72): what SEL does. NORM selects the
+// track, REC toggles its record-enable (as the top soft key), AUTO toggles its automation Write. The SEL LED shows
+// what SEL does: the selection (NORM), or red for armed (REC) / writing automation (AUTO).
+enum { kSelNorm = 0, kSelRec = 1, kSelAuto = 2 };
+std::atomic<int> g_selMode{kSelNorm};
+std::atomic<bool> g_selOn[8] = {}, g_autoW[8] = {};
+void paintSel(int strip);
+void paintSelMode();
 void setLed(int strip, int cls, bool on);
 void sendLedFrames(const uf8::LedColourFrames& frames);
 std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
@@ -163,6 +171,22 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
+        if (d[3] >= 0x70 && d[3] <= 0x72) {   // NORM / REC / AUTO: the selection mode
+            if (pressed) {
+                g_selMode = d[3] - 0x70;
+                paintSelMode();
+                for (int i = 0; i < kStrips; ++i) paintSel(i);
+                if (g_trace8) std::printf("UF8 selection mode %s\n", g_selMode == kSelNorm ? "NORM" : g_selMode == kSelRec ? "REC" : "AUTO");
+            }
+            break;
+        }
+        if (d[3] >= 0x20 && d[3] <= 0x37 && (d[3] - 0x20) % 3 == 2 && g_selMode != kSelNorm) {
+            // SEL in REC / AUTO: arm (the top soft key's note) or automation Write.
+            const int s = (d[3] - 0x20) / 3;
+            if (g_selMode == kSelRec) { if (!g_noRec[s]) note(uint8_t(kNoteTopSoft + s), pressed); }
+            else note(uint8_t(kNoteAutoSel + s), pressed);
+            break;
+        }
         if (auto n = buttonToNote(d[3])) {
             // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
             // which started the transport. Ignore the foot switches for the first seconds.
@@ -207,9 +231,12 @@ void sendLedFrames(const uf8::LedColourFrames& frames)
 void setLed(int strip, int cls, bool on)
 {
     switch (cls) {
-    case 0: case 1: case 2:
+    case 0: case 1:
         sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on));
-        if (cls == 2 && strip >= 0 && strip < 8) {
+        break;
+    case 2:
+        if (strip >= 0 && strip < 8) { g_selOn[strip] = on; paintSel(strip); }
+        if (strip >= 0 && strip < 8) {
             // SEL: tell the UF1 which UF8 strip holds the selected track (its channel-number box shows it).
             static bool selOn[8] = {};
             selOn[strip] = on;
@@ -226,11 +253,31 @@ void setLed(int strip, int cls, bool on)
         sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(strip),
             (strip >= 0 && strip < 8 && g_noRec[strip]) ? uf8::TopSoftKeyState::Off
                 : on ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourRed()));   // record-enable = red
+        if (strip >= 0 && strip < 8 && g_selMode == kSelRec) paintSel(strip);
+        break;
+    case 6:
+        if (strip >= 0 && strip < 8) { g_autoW[strip] = on; if (g_selMode == kSelAuto) paintSel(strip); }
         break;
     case 4: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoRead, on)); break;
     case 5: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoWrite, on)); break;
     default: break;
     }
+}
+
+void paintSel(int strip)
+{
+    if (strip < 0 || strip >= kStrips) return;
+    const int mode = g_selMode;
+    if (mode == kSelNorm) { sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, g_selOn[strip])); return; }
+    const bool on = mode == kSelRec ? (g_recOn[strip] && !g_noRec[strip]) : g_autoW[strip].load();
+    sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, on && !g_stripEmpty[strip], uf8::ledColourRed()));
+}
+void paintSelMode()
+{
+    const int mode = g_selMode;
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Norm, mode == kSelNorm));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Rec, mode == kSelRec));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Auto, mode == kSelAuto));
 }
 
 void pushPalette()
@@ -308,6 +355,8 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 // Its SOLO / CUT / SEL LEDs keep the previous track's state (Cubase sends nothing for an
                 // empty strip), so switch them off.
                 for (int cls = 0; cls < 3; ++cls) setLed(n->strip, cls, false);
+                g_autoW[n->strip] = false;
+                paintSel(n->strip);
             }
         } else if (m.size() >= 7 && m[4] == 0x0C && m[5] < kStrips) {
             // Fader level text -> the strip's dB readout (6 characters + "dB").
@@ -586,6 +635,7 @@ int main(int argc, char** argv)
             uf8Ok = true;
             g_uf8Running = true;
             cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
+            paintSelMode();
         }
     }
     const bool uf1Ok = cs::uf1Start();
@@ -645,6 +695,7 @@ int main(int argc, char** argv)
             g_meterShown = {};
             replayUf8Cache();
             cs::autoModePressed(0);
+            paintSelMode();
             std::printf("UF8 reopened.\n");
         }
     }
