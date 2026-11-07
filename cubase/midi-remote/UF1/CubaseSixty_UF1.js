@@ -1019,7 +1019,7 @@ function plugRescan(activeDevice) {
 		if (!kind) continue
 		// The insert slot it sits in (slots titled "1".."16", under the track's inserts): for opening its window.
 		var slotIndex = -1, pa = objects[i].parent
-		if (pa >= 0 && objects[pa].type === 'Slot' && objects[pa].parent >= 0 && /Insert/.test(objects[objects[pa].parent].type)) {
+		if (pa >= 0 && objects[pa].type === 'Slot') {   // (as the UC1 script finds it for its 360 key)
 			try { slotIndex = parseInt(plugDa.getObjectTitle(plugAm, objects[pa].id), 10) - 1 } catch (e) {}
 			if (!(slotIndex >= 0 && slotIndex < 16)) slotIndex = -1
 		}
@@ -1088,7 +1088,7 @@ function plugRescan(activeDevice) {
 				plug.params.push({ tag: tag, title: t, lower: String(t).toLowerCase() })
 			}
 		}
-		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters)' : 'no SSL plug-in, V-pots on Quick Controls'))
+		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters, insert slot ' + (found.slot >= 0 ? found.slot + 1 : 'not found') + ')' : 'no SSL plug-in, V-pots on Quick Controls'))
 	}
 	plugPaint(activeDevice, true)
 }
@@ -1255,10 +1255,10 @@ try {
 	editWin.viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { editWin.name = name || '' }
 } catch (e) { out('[CubaseSixty UF1] plug-in window switch could not be set up: ' + e) }
 function windowToggle(activeDevice) {
-	if (!editWin.viewer || !plugAm || plug.obj < 0) return
+	if (!editWin.viewer || !plugAm || plug.obj < 0) { out('[CubaseSixty UF1] plug-in window: no plug-in shown'); return }
 	var slot = -1
 	for (var i = 0; i < (plug.all || []).length; ++i) if (plug.all[i].id === plug.obj) slot = plug.all[i].slot
-	if (slot < 0) return
+	if (slot < 0) { out('[CubaseSixty UF1] plug-in window: the insert slot of "' + plug.title + '" is not known'); return }
 	try {
 		editWin.viewer.mAction.mReset.trigger(plugAm)
 		for (var k = 0; k < slot; ++k) editWin.viewer.mAction.mNext.trigger(plugAm)
@@ -1276,6 +1276,7 @@ function windowIdle(activeDevice) {
 		return
 	}
 	editWin.job = null
+	out('[CubaseSixty UF1] plug-in window: "' + job.title + '", viewer on "' + editWin.name + '" after ' + job.tries + ' extra steps, window ' + (editWin.open >= 0.5 ? 'open: closing' : 'closed: opening'))
 	if (job.tries >= 32) { out('[CubaseSixty UF1] plug-in window: "' + job.title + '" not found in the inserts'); return }
 	try {
 		if (editWin.open >= 0.5) editWin.viewer.mEdit.decrement(plugAm)
