@@ -724,6 +724,7 @@ int main(int argc, char** argv)
             // The helper's ports: its channel names go straight on to the UF8 script.
             g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
                 if (cs::scriptLogSysex(msg.data(), msg.size())) return;
+                if (msg.size() >= 7 && msg[0] == 0xF0 && msg[4] == 0x1D) { cs::uf1SetSoloActive(msg[5] != 0); return; }   // anything soloed
                 if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
                 std::lock_guard<std::mutex> lk(g_outMx);
                 try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }

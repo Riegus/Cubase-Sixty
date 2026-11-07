@@ -37,6 +37,7 @@
 #include "SslPresets.h"
 
 namespace cs {
+void paintSoloActive();   // below, outside the anonymous namespace
 bool netInit();      // NetInit.cpp
 int stopSslCore();   // SslCoreGuard.cpp
 namespace {
@@ -103,6 +104,9 @@ std::atomic<int> g_plugPage{0}, g_plugPages{1}, g_plugOrd{0};
 // FINE (quick key 2, as in Rea-Sixty): the V-pots move a quarter as far per detent. Shown in the header's FINE
 // CTRL field (the UF1 prints "FINE CTRL 2" over the key itself).
 std::atomic<bool> g_fine{false};
+// Something in the project is soloed (from the helper script, through main.cpp): the firmware's "SOLO ACTIVE"
+// under its SOLO CLR 1 caption (cell 0x0120, Rea-Sixty's kSoloActive: non-zero = shown) and quick key 1 lit.
+std::atomic<bool> g_soloActive{false};
 // The preset browser (SHIFT + 5-8, Rea-Sixty's channel-view browser): the SSL plug-in's presets in the big display,
 // V-pot 4 scrolls, its push loads, soft key 3 goes back. Drawn by the cycle thread (see browserFrame).
 std::atomic<bool> g_presetsOpen{false};
@@ -390,7 +394,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         // Quick key 2 (without SHIFT): FINE on / off.
         if (ev.id == 0x35) {
-            if (ev.pressed) { g_fine = !g_fine; paintHeader(); if (g_trace) std::printf("UF1 FINE %s\n", g_fine ? "on" : "off"); }
+            if (ev.pressed) {
+                g_fine = !g_fine;
+                paintHeader();
+                setLed(uf1m::Led{0x1D, 0xFFFFFF}, g_fine);   // the key lit while FINE is on
+                if (g_trace) std::printf("UF1 FINE %s\n", g_fine ? "on" : "off");
+            }
             break;
         }
         if (auto n = uf1m::buttonToNote(ev.id)) note(*n, ev.pressed);
@@ -1294,6 +1303,7 @@ void restoreChannelView()
     put(0x0102, {0x00});
     paintHeader(true);   // the header row carried the meter readouts
     paintCsType(true);
+    paintSoloActive();
     paintEq(true);
     screenText(::uf1::scr::kChSoftKey, "BYPASS");
     { std::lock_guard<std::mutex> lk(g_lineMx); g_barStyleShown = 0x00; }   // the bar style goes out again
@@ -1351,6 +1361,8 @@ bool uf1OpenDevice()
         // Cells inside the colour bar that the UF1's start-up state leaves filled: the text cell (Rea-Sixty
         // writes 12 spaces for "nothing" - never empty, that drops the layer) and the channel number.
         paintCsType(true);
+        paintSoloActive();
+        setLed(uf1m::Led{0x1D, 0xFFFFFF}, g_fine);
         screenText(::uf1::scr::kChNumber, "");
         screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
         paintSoftKeys();   // the four display soft keys: blank and dark until MODE is held
@@ -1414,6 +1426,24 @@ void uf1Stop()
 }
 
 void uf1SetTrace(bool on) { g_trace = on; }
+
+void paintSoloActive()
+{
+    if (!g_open) return;
+    const bool on = g_soloActive;
+    setLed(uf1m::Led{0x1C, 0xFFFF00}, on);   // quick key 1 (Solo Clear) lit yellow while something is soloed
+    if (g_view == kViewMeter || g_presetsOpen) return;   // the meter / browser layouts use 0x0120 themselves
+    const uint8_t v = on ? 0xFF : 0x00;
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kSoloActive, std::span<const uint8_t>(&v, 1)));
+}
+
+void uf1SetSoloActive(bool on)
+{
+    if (g_soloActive.exchange(on) != on) {
+        if (g_trace) std::printf("UF1 solo active: %s\n", on ? "yes" : "no");
+        paintSoloActive();
+    }
+}
 
 void uf1SetStripNumber(int n)
 {
