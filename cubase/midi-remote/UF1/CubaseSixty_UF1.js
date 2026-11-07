@@ -543,6 +543,11 @@ var jogRight = pulseButton(3, 43)
 page.makeCommandBinding(trackPrev.mSurfaceValue, 'Project', 'Select Track: Prev')
 page.makeCommandBinding(trackNext.mSurfaceValue, 'Project', 'Select Track: Next')
 page.makeCommandBinding(jogLeft.mSurfaceValue, 'Transport', 'Nudge Cursor Left')
+// Quick key 1 (without SHIFT) = clear every solo, as in Rea-Sixty: MIDI channel 2, note 20 (channel 1's notes
+// near the transport keys started playback, see the key above the display).
+var soloClear = surface.makeButton(12, 6, 1, 1)
+soloClear.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 20)
+page.makeCommandBinding(soloClear.mSurfaceValue, 'Edit', 'Deactivate All Solo')
 page.makeCommandBinding(jogRight.mSurfaceValue, 'Transport', 'Nudge Cursor Right')
 // With SCRUB on, the bridge sends the jog as notes 63 / 64: Cubase's own jog (scrubs the audio).
 var scrubLeft = pulseButton(10, 63)
