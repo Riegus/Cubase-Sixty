@@ -339,9 +339,19 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id == 0x24 || ev.id == 0x26) {
             if (!ev.pressed) break;
-            // PLUGIN with an SSL plug-in: ◄ ► page through its controls (as in Rea-Sixty). The channel encoder
-            // still steps the track.
+            // PLUGIN: ◄ ► page (as in Rea-Sixty): through the SSL plug-in's controls, or without one between
+            // Quick Controls 1-4 and 5-8 (as the 5-8 key does). The channel encoder still steps the track.
             if (plugActive() && !g_shift) { plugEvent(3, ev.id == 0x26 ? 1 : 0, 0); break; }
+            if (g_view == kViewPlugin && !g_shift) {
+                const bool want58 = ev.id == 0x26;
+                if (want58 != g_sends58) {
+                    g_sends58 = want58;
+                    sendVpotPage();
+                    setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
+                    paintHeader();
+                }
+                break;
+            }
             // SHIFT + ARROW: step back / forward one bar (81 / 82).
             const uint8_t n = g_shift ? (ev.id == 0x26 ? 82 : 81) : (ev.id == 0x26 ? 41 : 40);
             note(n, true);
