@@ -94,7 +94,18 @@ const char* const kSoftKeyLabels[6][8] = {
     { "GATE REL","GATE THR", "GATE RANGE", "GATE HOLD", "GATE F.ATK","GATE/EXP", "HQ MODE",  "OUT TRIM" },
 };
 // Keys with a label but nothing Cubase can reach (A/B, HQ MODE: the plug-in's saved state in Rea-Sixty).
-bool softKeyLive(int bank, int slot) { const std::string l = kSoftKeyLabels[bank][slot]; return !l.empty() && l != "A/B" && l != "HQ MODE"; }
+// The bus comp pages (Q2; Rea-Sixty's kBcLabels): two pages, the other four empty.
+const char* const kBcSoftKeyLabels[6][8] = {
+    { "THR",     "ATTACK",   "RELEASE",    "RATIO",     "S/C HPF",  "MIX",       "EXT S/C",  "BUS COMP" },
+    { "OUTGAIN", "",         "",           "",          "",         "",          "",         "" },
+    { "", "", "", "", "", "", "", "" }, { "", "", "", "", "", "", "", "" },
+    { "", "", "", "", "", "", "", "" }, { "", "", "", "", "", "", "", "" },
+};
+std::atomic<int> g_skDomain{0};   // 0 = channel strip (Q1), 1 = bus comp (Q2)
+const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
+// A focus key: domain * 48 + bank * 8 + slot.
+const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
+bool softKeyLive(int domain, int bank, int slot) { const std::string l = skLabel(domain, bank, slot); return !l.empty() && l != "A/B" && l != "HQ MODE"; }
 std::atomic<int> g_skBank{0};
 std::atomic<int> g_focus{-1};   // bank * 8 + slot of the focused parameter, -1 = none (V-pots on pan)
 // Pan as the script last sent it (shown again when the focus ends), and the focused parameter per strip.
@@ -304,20 +315,24 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
+        if (d[3] == 0x43 || d[3] == 0x44) {   // Q1 / Q2: the soft keys on the channel strip / the bus comp
+            if (pressed) { g_skDomain = d[3] == 0x44 ? 1 : 0; paintSoftKeys(); }
+            break;
+        }
         if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
             if (pressed) { g_skBank = d[3] - 0x68; paintSoftKeys(); }
             break;
         }
         if (d[3] >= 0x18 && d[3] <= 0x1F) {   // top soft key: focus / unfocus its parameter
             if (!pressed) break;
-            const int slot = d[3] - 0x18, key = g_skBank * 8 + slot;
-            if (!softKeyLive(g_skBank, slot)) break;
+            const int slot = d[3] - 0x18, key = g_skDomain * 48 + g_skBank * 8 + slot;
+            if (!softKeyLive(g_skDomain, g_skBank, slot)) break;
             const int f = g_focus == key ? -1 : key;
             if (f >= 0 && g_routeSelSends) { g_routeSelSends = false; applyRoute(); }   // the V-pots go to the parameter
             g_focus = f;
             if (f < 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, 0x7F, 0x7F, 0xF7});
-            else sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, uint8_t(f / 8), uint8_t(f % 8), 0xF7});
-            if (g_trace8) std::printf("UF8 soft key: %s\n", f < 0 ? "focus off (pan)" : kSoftKeyLabels[f / 8][f % 8]);
+            else sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, uint8_t(f % 48 / 8 + (f >= 48 ? 8 : 0)), uint8_t(f % 8), 0xF7});   // bank + 8 = bus comp
+            if (g_trace8) std::printf("UF8 soft key: %s\n", f < 0 ? "focus off (pan)" : skLabelOfKey(f));
             paintSoftKeys();
             paintVpots();
             break;
@@ -466,13 +481,15 @@ void paintSel(int strip)
 }
 void paintSoftKeys()
 {
-    const int bank = g_skBank, focus = g_focus;
+    const int bank = g_skBank, focus = g_focus, dom = g_skDomain;
     for (int s = 0; s < kStrips; ++s) {
-        const bool live = softKeyLive(bank, s);
+        const bool live = softKeyLive(dom, bank, s);
         sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), !live ? uf8::TopSoftKeyState::Off
-            : focus == bank * 8 + s ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
-        g_dev.send(uf8::buildPluginSlotName(uint8_t(s), kSoftKeyLabels[bank][s]));
+            : focus == dom * 48 + bank * 8 + s ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
+        g_dev.send(uf8::buildPluginSlotName(uint8_t(s), skLabel(dom, bank, s)));
     }
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick1, dom == 0));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick2, dom == 1));
     static const uf8::Uf8GlobalLed kBankLeds[6] = { uf8::Uf8GlobalLed::VPotBank, uf8::Uf8GlobalLed::Soft1, uf8::Uf8GlobalLed::Soft2,
                                                      uf8::Uf8GlobalLed::Soft3, uf8::Uf8GlobalLed::Soft4, uf8::Uf8GlobalLed::Soft5 };
     for (int b = 0; b < 6; ++b) sendLedFrames(uf8::buildUf8GlobalLed(kBankLeds[b], b == bank));
@@ -737,7 +754,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_focusMode[size_t(s)] = has ? (m[8] == 2 ? 2 : 1) : 3;
             g_focusPos[size_t(s)] = !has ? 0 : m[8] == 2 ? uf8::vpotPosBipolar(v * 2.0 - 1.0) : uf8::vpotPosUnipolar(v);
             std::string val = has ? std::string(m.begin() + 9, m.end() - 1) : std::string("-");
-            std::string name = kSoftKeyLabels[f / 8][f % 8];
+            std::string name = skLabelOfKey(f);
             if (val.size() > 9) val.resize(9);
             if (name.size() + val.size() > 18) name.resize(18 - val.size());
             std::string line = name;

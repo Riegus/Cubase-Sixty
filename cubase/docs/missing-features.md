@@ -6,8 +6,7 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. UF8 soft keys: the bus comp pages (Q2), so the top row works on Bus Compressor 2 as on the channel strips.
-2. Known issue: ◀ ▶ track stepping does not skip hidden tracks.
+1. Known issue: ◀ ▶ track stepping does not skip hidden tracks.
 
 ## UF8
 
@@ -16,8 +15,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 - **CHANNEL encoder modes** (16 in Rea-Sixty): Channel Select, Nudge, Markers, Bank by 1 and CS / BC favourite cycle are done (hold the push
   and turn to pick; NAV / NUDGE switch to Markers / Nudge); missing are Mousewheel, Last Touched Param, Instance /
   FX Cycle (also across tracks), FX Move, Selset Cycle, focused favourite cycle, Lanes.
-- **Soft keys on the top row**: SSL's channel-strip pages are done (V-POT, 1-5); missing are the Q1-Q3 sets (SSL bus
-  comp pages, user sets), user bindings and layers, dynamic soft-key banks.
+- **Soft keys on the top row**: SSL's channel-strip pages are done (V-POT, 1-5); the bus comp pages (Q2) too; missing are
+  Q3 and the user sets, user bindings and layers, dynamic soft-key banks.
 - **SSL Strip Mode / UF8 Plug-in Mode**: Strip Mode's faders are done (PLUGIN); missing are its V-pots on the strip's
   pan, the CS name in the colour bar, and UF8 Plug-in Mode (one plug-in's controls across the eight strips).
 - **Send and Receive views**: the send views are done (Send N on the faders, the selected track's sends on the
