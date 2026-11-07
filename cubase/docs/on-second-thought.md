@@ -11,6 +11,10 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   (V-POT / 1–5 pages, a key puts its parameter on the V-pots), and NORM / REC / AUTO set what SEL does. Differences
   left: AUTO toggles the track's Write (W) instead of stepping a per-track automation mode (Cubase has none); Q1–Q3,
   the bus-comp pages, user banks and REC + MON are not there yet (see Missing features).
+- **SSL Strip Mode** (partly). As Rea-Sixty: PLUGIN puts each fader on its track's SSL channel strip fader, tracks
+  without one keep volume. Not yet: the V-pots on the strip's pan, the strip's name in the colour bar. FLIP (chosen) is a
+  plain swap there too: faders on the track's pan, V-pots on its volume, strip mode paused until FLIP is off
+  (Rea-Sixty leaves the fader on the strip's fader); the send views also take the fader while they are on. The fader moves the parameter's range in a straight line.
 - **Send views** (forced, partly). As Rea-Sixty: SEND / PLUGIN 1–8 put send N of each track on the faders, a long
   FLIP the selected track's sends on the V-pots, CHANNEL is home. Differences: no send pan (the API has none), so the
   V-pot stays on the track's pan in Send N and FLIP does not swap a send's level and pan; SOLO stays the track's solo
