@@ -42,6 +42,7 @@ constexpr uint8_t kNoteAutoOff = 58, kNoteAutoTrim = 59, kNoteAutoLatch = 60, kN
 constexpr uint8_t kNoteAutoRead = 56, kNoteAutoWrite = 57;
 constexpr uint8_t kNoteFoot1 = 62, kNoteFoot2 = 63;
 constexpr uint8_t kCcVPot = 16;
+constexpr uint8_t kNoteAutoSel = 112;   // 112..119: strip 1..8's automation Write (SEL in the AUTO selection mode)
 
 // What a UF8 button id (FF 22 03 <id> 00 <state>) means on the wire.
 // Per-strip ids: V-pot push 0x08..0x0F, SOLO/CUT/SEL 0x20..0x37 (3 per strip),
@@ -85,12 +86,13 @@ inline uint8_t vpotToCc(int delta)
 }
 
 // Which LED a Cubase feedback note drives.
-// cls: 0 solo, 1 cut, 2 sel (per strip), 3 top soft key (per strip: channel editor open),
-//      4 automation Read, 5 automation Write (global, strip = 0).
+// cls: 0 solo, 1 cut, 2 sel (per strip), 3 top soft key (per strip: record-enable),
+//      4 automation Read, 5 automation Write (global, strip = 0), 6 the strip's automation Write (AUTO mode SEL).
 struct LedTarget { int strip; int cls; };
 inline std::optional<LedTarget> noteToLed(uint8_t note)
 {
     if (note >= kNoteTopSoft && note < kNoteTopSoft + kStrips) return LedTarget{note - kNoteTopSoft, 3};
+    if (note >= kNoteAutoSel && note < kNoteAutoSel + kStrips) return LedTarget{note - kNoteAutoSel, 6};
     if (note == kNoteAutoRead)  return LedTarget{0, 4};
     if (note == kNoteAutoWrite) return LedTarget{0, 5};
     if (note >= kNoteSolo && note < kNoteSolo + kStrips) return LedTarget{note - kNoteSolo, 0};

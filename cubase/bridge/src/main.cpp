@@ -71,6 +71,38 @@ std::mutex        g_paletteMx;
 bool g_trace8 = false;
 std::atomic<bool> g_noRec[8] = {};   // strips whose top soft key cannot arm (group, folder, FX): dark and ignored
 std::atomic<bool> g_recOn[8] = {};
+// Selection mode (Rea-Sixty's NORM / REC / AUTO keys, ids 0x70 / 0x71 / 0x72): what SEL does. NORM selects the
+// track, REC toggles its record-enable (as the top soft key), AUTO toggles its automation Write. The SEL LED shows
+// what SEL does: the selection (NORM), or red for armed (REC) / writing automation (AUTO).
+enum { kSelNorm = 0, kSelRec = 1, kSelAuto = 2 };
+std::atomic<int> g_selMode{kSelNorm};
+std::atomic<bool> g_selOn[8] = {}, g_autoW[8] = {};
+void paintSel(int strip);
+void paintSelMode();
+
+// SSL soft keys (Rea-Sixty's default for the top soft keys, as SSL 360): six pages of eight of the channel strip's
+// parameters, picked with the bank keys V-POT and 1-5 (ids 0x68..0x6D). A top soft key focuses its parameter: the
+// eight V-pots then work it on each strip's SSL channel strip (the script does that: SysEx 21 / 22 / 23 out, 20
+// back), until the key is pressed again. Labels (Rea-Sixty's softkey::kCsLabels) in each strip's slot cell.
+const char* const kSoftKeyLabels[6][8] = {
+    { "BYPASS",  "IN TRIM",  "PHASE",      "PRE",       "MIC/DRV",  "",          "IMP IN",   "IMP" },
+    { "WIDTH",   "",         "",           "A/B",       "HPF",      "LPF",       "EQ",       "EQ TYPE" },
+    { "LF FREQ", "LF GAIN",  "LF TYPE",    "",          "LMF FREQ", "LMF GAIN",  "LMF Q",    "" },
+    { "HMF FREQ","HMF GAIN", "HMF Q",      "",          "",         "HF FREQ",   "HF GAIN",  "HF TYPE" },
+    { "DYNAMICS","COMP MIX", "COMP RATIO", "COMP THR",  "COMP REL", "COMP F.ATK","PEAK/RMS", "" },
+    { "GATE REL","GATE THR", "GATE RANGE", "GATE HOLD", "GATE F.ATK","GATE/EXP", "HQ MODE",  "OUT TRIM" },
+};
+// Keys with a label but nothing Cubase can reach (A/B, HQ MODE: the plug-in's saved state in Rea-Sixty).
+bool softKeyLive(int bank, int slot) { const std::string l = kSoftKeyLabels[bank][slot]; return !l.empty() && l != "A/B" && l != "HQ MODE"; }
+std::atomic<int> g_skBank{0};
+std::atomic<int> g_focus{-1};   // bank * 8 + slot of the focused parameter, -1 = none (V-pots on pan)
+// Pan as the script last sent it (shown again when the focus ends), and the focused parameter per strip.
+std::array<uint16_t, 8> g_panPos{};
+std::string g_panLine[8];
+std::array<uint16_t, 8> g_focusPos{};
+std::array<uint8_t, 8> g_focusMode{};
+void paintSoftKeys();
+void paintVpots();
 void setLed(int strip, int cls, bool on);
 void sendLedFrames(const uf8::LedColourFrames& frames);
 std::atomic<bool> g_uf8Running{false};   // the UF8 and its ports are open
@@ -163,13 +195,50 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
+        if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
+            if (pressed) { g_skBank = d[3] - 0x68; paintSoftKeys(); }
+            break;
+        }
+        if (d[3] >= 0x18 && d[3] <= 0x1F) {   // top soft key: focus / unfocus its parameter
+            if (!pressed) break;
+            const int slot = d[3] - 0x18, key = g_skBank * 8 + slot;
+            if (!softKeyLive(g_skBank, slot)) break;
+            const int f = g_focus == key ? -1 : key;
+            g_focus = f;
+            if (f < 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, 0x7F, 0x7F, 0xF7});
+            else sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, uint8_t(f / 8), uint8_t(f % 8), 0xF7});
+            if (g_trace8) std::printf("UF8 soft key: %s\n", f < 0 ? "focus off (pan)" : kSoftKeyLabels[f / 8][f % 8]);
+            paintSoftKeys();
+            paintVpots();
+            break;
+        }
+        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus >= 0) {   // V-pot push with a focused parameter: to the script
+            if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x23, uint8_t(d[3] - 0x08), 0xF7});
+            break;
+        }
+        if (d[3] >= 0x70 && d[3] <= 0x72) {   // NORM / REC / AUTO: the selection mode
+            if (pressed) {
+                g_selMode = d[3] - 0x70;
+                paintSelMode();
+            paintSoftKeys();
+                for (int i = 0; i < kStrips; ++i) paintSel(i);
+                if (g_trace8) std::printf("UF8 selection mode %s\n", g_selMode == kSelNorm ? "NORM" : g_selMode == kSelRec ? "REC" : "AUTO");
+            }
+            break;
+        }
+        if (d[3] >= 0x20 && d[3] <= 0x37 && (d[3] - 0x20) % 3 == 2 && g_selMode != kSelNorm) {
+            // SEL in REC / AUTO: arm (the top soft key's note) or automation Write.
+            const int s = (d[3] - 0x20) / 3;
+            if (g_selMode == kSelRec) { if (!g_noRec[s]) note(uint8_t(kNoteTopSoft + s), pressed); }
+            else note(uint8_t(kNoteAutoSel + s), pressed);
+            break;
+        }
         if (auto n = buttonToNote(d[3])) {
             // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
             // which started the transport. Ignore the foot switches for the first seconds.
             static const auto t0 = std::chrono::steady_clock::now();
             const bool foot = (*n == 62 || *n == 63);
             if (foot && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(4)) break;
-            if (*n >= kNoteTopSoft && *n < kNoteTopSoft + kStrips && g_noRec[*n - kNoteTopSoft]) break;   // cannot arm
             if (*n == kNoteBankRight && userBankRight(pressed)) break;
             note(*n, pressed);
             if (pressed && *n >= kNoteAutoOff && *n <= kNoteAutoTouch) cs::autoModePressed(*n);
@@ -180,7 +249,9 @@ void handleFrame(const uf8frames::Frame& fr)
         const uint8_t s = d[3];
         if (s >= kStrips) return;
         const int delta = uf8frames::vpotDelta(d[4]);
-        if (delta != 0) sendMidi({0xB0, uint8_t(kCcVPot + s), vpotToCc(delta)});
+        if (delta == 0) break;
+        if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
+        else sendMidi({0xB0, uint8_t(kCcVPot + s), vpotToCc(delta)});
         break;
     }
     default: break;
@@ -207,9 +278,12 @@ void sendLedFrames(const uf8::LedColourFrames& frames)
 void setLed(int strip, int cls, bool on)
 {
     switch (cls) {
-    case 0: case 1: case 2:
+    case 0: case 1:
         sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on));
-        if (cls == 2 && strip >= 0 && strip < 8) {
+        break;
+    case 2:
+        if (strip >= 0 && strip < 8) { g_selOn[strip] = on; paintSel(strip); }
+        if (strip >= 0 && strip < 8) {
             // SEL: tell the UF1 which UF8 strip holds the selected track (its channel-number box shows it).
             static bool selOn[8] = {};
             selOn[strip] = on;
@@ -223,14 +297,64 @@ void setLed(int strip, int cls, bool on)
             g_recOn[strip] = on;
             if (g_trace8) std::printf("UF8 rec strip %d: Cubase says %s\n", strip + 1, on ? "ON" : "OFF");
         }
-        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(strip),
-            (strip >= 0 && strip < 8 && g_noRec[strip]) ? uf8::TopSoftKeyState::Off
-                : on ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourRed()));   // record-enable = red
+        // Record-enable (the top soft keys are the SSL soft keys now): shown on SEL in REC.
+        if (strip >= 0 && strip < 8 && g_selMode == kSelRec) paintSel(strip);
+        break;
+    case 6:
+        if (strip >= 0 && strip < 8) { g_autoW[strip] = on; if (g_selMode == kSelAuto) paintSel(strip); }
         break;
     case 4: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoRead, on)); break;
     case 5: sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::AutoWrite, on)); break;
     default: break;
     }
+}
+
+void paintSel(int strip)
+{
+    if (strip < 0 || strip >= kStrips) return;
+    const int mode = g_selMode;
+    if (mode == kSelNorm) { sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, g_selOn[strip])); return; }
+    if (mode == kSelRec) {
+        // As the top soft keys: dark where the track cannot be armed, dim red where it can, red when armed.
+        const bool can = !g_noRec[strip] && !g_stripEmpty[strip];
+        const bool armed = can && g_recOn[strip];
+        sendLedFrames(can ? uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true,
+                                                    armed ? uf8::ledColourRed() : uf8::ledColourForTrackRgb(0x5A0000))
+                          : uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, false, uf8::ledColourRed()));
+        return;
+    }
+    const bool on = g_autoW[strip].load();
+    sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, on && !g_stripEmpty[strip], uf8::ledColourRed()));
+}
+void paintSoftKeys()
+{
+    const int bank = g_skBank, focus = g_focus;
+    for (int s = 0; s < kStrips; ++s) {
+        const bool live = softKeyLive(bank, s);
+        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), !live ? uf8::TopSoftKeyState::Off
+            : focus == bank * 8 + s ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
+        g_dev.send(uf8::buildPluginSlotName(uint8_t(s), kSoftKeyLabels[bank][s]));
+    }
+    static const uf8::Uf8GlobalLed kBankLeds[6] = { uf8::Uf8GlobalLed::VPotBank, uf8::Uf8GlobalLed::Soft1, uf8::Uf8GlobalLed::Soft2,
+                                                     uf8::Uf8GlobalLed::Soft3, uf8::Uf8GlobalLed::Soft4, uf8::Uf8GlobalLed::Soft5 };
+    for (int b = 0; b < 6; ++b) sendLedFrames(uf8::buildUf8GlobalLed(kBankLeds[b], b == bank));
+}
+// The V-pot rings and value lines: pan, or the focused parameter.
+void paintVpots()
+{
+    const int focus = g_focus;
+    std::array<uint8_t, kStrips> modes{};
+    for (int s = 0; s < kStrips; ++s) modes[size_t(s)] = focus < 0 ? 1 : g_focusMode[size_t(s)];
+    g_dev.send(uf8::buildVPotReadoutBar(focus < 0 ? g_panPos : g_focusPos));
+    g_dev.send(uf8::buildVPotMode(modes));
+    if (focus < 0) for (int s = 0; s < kStrips; ++s) { if (!g_panLine[s].empty()) g_dev.send(uf8::buildValueLine(uint8_t(s), g_panLine[s])); }
+}
+void paintSelMode()
+{
+    const int mode = g_selMode;
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Norm, mode == kSelNorm));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Rec, mode == kSelRec));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Auto, mode == kSelAuto));
 }
 
 void pushPalette()
@@ -308,6 +432,8 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 // Its SOLO / CUT / SEL LEDs keep the previous track's state (Cubase sends nothing for an
                 // empty strip), so switch them off.
                 for (int cls = 0; cls < 3; ++cls) setLed(n->strip, cls, false);
+                g_autoW[n->strip] = false;
+                paintSel(n->strip);
             }
         } else if (m.size() >= 7 && m[4] == 0x0C && m[5] < kStrips) {
             // Fader level text -> the strip's dB readout (6 characters + "dB").
@@ -413,10 +539,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
             }).detach();
         } else if (m.size() >= 8 && m[4] == 0x06 && m[5] < kStrips) {
             // Pan position 0..127 -> the readout bar under the strip (a single line, like SSL's pan).
-            static std::array<uint16_t, kStrips> pos{};
             static bool modeSent = false;
-            pos[m[5]] = uf8::vpotPosPan(m[6] / 127.0 * 2.0 - 1.0);
-            g_dev.send(uf8::buildVPotReadoutBar(pos));
+            g_panPos[m[5]] = uf8::vpotPosPan(m[6] / 127.0 * 2.0 - 1.0);
+            if (g_focus >= 0) return;   // the V-pots show the focused parameter
+            g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
             if (!modeSent) { modeSent = true; g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); }
         } else if (m.size() >= 7 && m[4] == 0x07 && m[5] < kStrips) {
             // Pan text -> value line: "Pan" left, Cubase's value right, 19 characters.
@@ -425,7 +551,27 @@ void onMidiIn(std::vector<unsigned char>& msg)
             std::string line = "Pan";
             line.append(19 - line.size() - v.size(), ' ');
             line += v;
-            g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+            g_panLine[m[5]] = line;
+            if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+        } else if (m.size() >= 10 && m[4] == 0x20 && m[5] < kStrips) {
+            // The focused parameter on one strip: has (0 = no SSL channel strip / not on this model),
+            // position 0..127, ring (1 unipolar, 2 bipolar), the value text.
+            const int s = m[5], f = g_focus;
+            if (f < 0) return;
+            const bool has = m[6] != 0;
+            const double v = m[7] / 127.0;
+            g_focusMode[size_t(s)] = has ? (m[8] == 2 ? 2 : 1) : 3;
+            g_focusPos[size_t(s)] = !has ? 0 : m[8] == 2 ? uf8::vpotPosBipolar(v * 2.0 - 1.0) : uf8::vpotPosUnipolar(v);
+            std::string val = has ? std::string(m.begin() + 9, m.end() - 1) : std::string("-");
+            std::string name = kSoftKeyLabels[f / 8][f % 8];
+            if (val.size() > 9) val.resize(9);
+            if (name.size() + val.size() > 18) name.resize(18 - val.size());
+            std::string line = name;
+            line.append(19 - line.size() - val.size(), ' ');
+            line += val;
+            g_dev.send(uf8::buildValueLine(uint8_t(s), line));
+            g_dev.send(uf8::buildVPotReadoutBar(g_focusPos));
+            g_dev.send(uf8::buildVPotMode(g_focusMode));
         } else if (auto c = parseColour(m)) {
             { std::lock_guard<std::mutex> lk(g_paletteMx); g_palette[c->strip] = colourToPalette(c->r, c->g, c->b); }
             pushPalette();
@@ -476,7 +622,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const int s = m[1] - kNoteNoRec;
             g_noRec[s] = status == 0x90 && m[2] > 0;
             if (g_trace8) std::printf("UF8 rec strip %d: %s\n", s + 1, g_noRec[s] ? "cannot be armed" : "can be armed");
-            setLed(s, 3, g_recOn[s]);
+            setLed(s, 3, g_recOn[s]);   // (also redraws SEL in REC)
             return;
         }
         if (auto t = noteToLed(m[1])) {
@@ -586,6 +732,8 @@ int main(int argc, char** argv)
             uf8Ok = true;
             g_uf8Running = true;
             cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
+            paintSelMode();
+            paintSoftKeys();
         }
     }
     const bool uf1Ok = cs::uf1Start();
@@ -645,6 +793,8 @@ int main(int argc, char** argv)
             g_meterShown = {};
             replayUf8Cache();
             cs::autoModePressed(0);
+            paintSelMode();
+            paintSoftKeys();
             std::printf("UF8 reopened.\n");
         }
     }

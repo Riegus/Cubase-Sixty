@@ -7,11 +7,10 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 
 ## UF8
 
-- **Top soft keys** (chosen). Rea-Sixty (as SSL 360): each key is the SSL plug-in's soft key for that strip in the
-  current page bank, picked with the bank keys (V-POT, 1–5), and every key can be rebound; the Quick keys Q1–Q3 switch
-  between soft-key sets (SSL channel strip, SSL bus comp, the user's own). Record-arm is SEL in the REC selection mode
-  (NORM / REC / AUTO keys). Cubase-Sixty: the top soft keys are record-enable for their strip (red, dark on strips
-  that cannot record); the bank keys, Q1–Q3 and the NORM / REC / AUTO selection modes are not used.
+- **Top soft keys and selection modes** (matches Rea-Sixty since 7.11.2026). The top soft keys are SSL's soft keys
+  (V-POT / 1–5 pages, a key puts its parameter on the V-pots), and NORM / REC / AUTO set what SEL does. Differences
+  left: AUTO toggles the track's Write (W) instead of stepping a per-track automation mode (Cubase has none); Q1–Q3,
+  the bus-comp pages, user banks and REC + MON are not there yet (see Missing features).
 - **V-pot push** (chosen). Rea-Sixty: centre the pan. Cubase-Sixty: open the channel editor.
 - **Zoom pad centre** (chosen). Rea-Sixty: zoom to fit the project. Cubase-Sixty: open / close the editor.
 
