@@ -476,8 +476,9 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
-		stepJob = { dir: m[5] ? 1 : -1, tries: 0, checkAt: 0, until: Date.now() + 1500 }
-		stepTrack(stepJob.dir)
+		var dir = m[5] ? 1 : -1
+		if (stepJob) stepQueue = Math.max(-16, Math.min(16, stepQueue + dir))
+		else stepStart(dir)
 		return
 	}
 	if (m[4] === 0x57 && m.length >= 8) {
@@ -510,23 +511,37 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 // Track stepping past the tracks hidden in the MixConsole (track-stepping = mixconsole, cubase\settings.txt): the
 // bridge asks for a step (SysEx 5C <1 forward / 0 back>); the script selects the next / previous track (the track
 // selection's own action) and, once the new one is selected, steps again while the MixConsole hides it.
+// Clicks that come while a step is still going past hidden tracks wait (stepQueue: + forward, - back) and are taken
+// one by one after it, so a quick turn does not mix with the extra steps.
 var stepJob = null   // { dir, tries, checkAt, until }
+var stepQueue = 0
+function stepStart(dir) {
+	stepJob = { dir: dir, tries: 0, checkAt: 0, until: Date.now() + 1500 }
+	stepTrack(dir)
+}
+function stepDone() {
+	stepJob = null
+	if (!stepQueue) return
+	var d = stepQueue > 0 ? 1 : -1
+	stepQueue -= d
+	stepStart(d)
+}
 function stepTrack(dir) {
-	if (!plugAm) return
+	if (!plugAm) { stepJob = null; return }
 	try { (dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack).trigger(plugAm) }
-	catch (e) { out('[CubaseSixty UF1] track step: ' + e); stepJob = null }
+	catch (e) { out('[CubaseSixty UF1] track step: ' + e); stepJob = null; stepQueue = 0 }
 }
 function stepIdle(activeDevice) {
 	var j = stepJob
 	if (!j) return
 	var now = Date.now()
-	if (now > j.until) { stepJob = null; out('[CubaseSixty UF1] track step: no new track seen'); return }   // no further track (the first / last), or no title change
+	if (now > j.until) { out('[CubaseSixty UF1] track step: no new track seen'); stepDone(); return }   // no further track (the first / last), or no title change
 	if (!j.checkAt || now < j.checkAt) return
 	j.checkAt = 0
 	var visible = true, base = -1, why = ''
 	try { base = plugDa.getBaseObjectID(plugAm); visible = plugDa.isMixerChannelVisible(plugAm, base) } catch (e) { why = ' (' + e + ')' }
 	out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + base + ') ' + (visible ? 'visible' : 'hidden in the MixConsole: on') + why)
-	if (visible || j.tries >= 64) { stepJob = null; return }
+	if (visible || j.tries >= 64) { stepDone(); return }
 	++j.tries
 	j.until = now + 1500
 	stepTrack(j.dir)
