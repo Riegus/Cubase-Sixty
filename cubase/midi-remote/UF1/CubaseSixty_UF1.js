@@ -208,9 +208,20 @@ function sendCellInfo(activeDevice, index, cell) {
 }
 // A Quick Control's cell from what its callbacks last reported (name, value, position). Built again on each of
 // them, because Cubase reports a new name and a new value separately (and not at all when it did not change).
+// The header's CHANNEL field in PLUGIN without an SSL plug-in: what the Quick Controls belong to (SysEx 56), so it is
+// clear which plug-in the V-pots work.
+var qcSourceSent = null
+function sendQcSource(activeDevice) {
+	var src = ''
+	for (var i = 0; i < 4 && !src; ++i) if (sendCells[i] && sendCells[i].qcObject) src = sendCells[i].qcObject
+	if (src === qcSourceSent) return
+	qcSourceSent = src
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x56], toAscii7(src || '-'), [0xF7]))
+}
 function sendQcCell(activeDevice, index) {
 	var c = sendCells[index]
 	if (!c) return
+	if (qcActive) sendQcSource(activeDevice)
 	var name = c.qcTitle || '', v = c.qcValue || ''
 	qcCells[index] = [0x51, index, c.qcPos || 0, name || v ? 2 : 0].concat(toAscii7(name || v ? cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + v : ''))
 	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
@@ -224,6 +235,7 @@ function attachSendFeedback(surfaceValue, number) {
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
 		title = valueTitle || objectTitle || ''
 		cell.qcTitle = title
+		cell.qcObject = valueTitle ? (objectTitle || '') : ''   // what the Quick Control belongs to (a plug-in's name)
 		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {

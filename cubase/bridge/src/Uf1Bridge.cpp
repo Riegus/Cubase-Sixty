@@ -441,6 +441,7 @@ struct PlugKey { std::vector<uint8_t> label; uint8_t state = 2; };   // state 0 
 std::array<PlugKey, 4> g_plugKeys;
 std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
 std::string g_plugTitle;   // the plug-in's name in Cubase (for its preset folder)
+std::string g_qcSource;    // what the Quick Controls belong to (SysEx 56; "" = not known)
 uf1eq::Model g_cubaseEq;   // Cubase's own channel EQ + input filter, from the script (SysEx 55); off = flat
 
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
@@ -800,8 +801,22 @@ void paintHeader(bool force)
     if (!g_open || g_view == kViewMeter || g_presetsOpen) return;
     static std::array<uint8_t, 200> shown{};
     std::array<uint8_t, 200> h{};
-    const char* name = "Cubase-Sixty";
-    std::memcpy(h.data(), name, std::strlen(name));
+    // Field 0 (under CHANNEL): in PLUGIN, what the V-pots work - the SSL plug-in, or what the Quick Controls belong
+    // to; elsewhere the program's name.
+    std::string name = "Cubase-Sixty";
+    if (g_view == kViewPlugin) {
+        std::lock_guard<std::mutex> lk(g_cellMx);
+        if (g_plugPresent) {
+            name = g_plugTitle;
+            for (const char* pre : {"SSL Native ", "SSL "})
+                if (name.rfind(pre, 0) == 0) { name.erase(0, std::strlen(pre)); break; }
+            if (name.empty()) name = g_plugModel;
+        } else {
+            name = g_qcSource.empty() ? std::string("Quick Controls") : g_qcSource;
+        }
+    }
+    name = sslpresets::latin1(name);
+    std::memcpy(h.data(), name.data(), std::min<size_t>(name.size(), 24));
     const bool plug = plugActive();
     const std::string page = plug ? std::to_string(g_plugPage + 1) + "/" + std::to_string(int(g_plugPages))
                                   : std::string(g_sends58 ? "2/2" : "1/2");
@@ -1082,6 +1097,10 @@ void onSysex(const std::vector<unsigned char>& m)
         std::lock_guard<std::mutex> lk(g_cellMx);
         if (model.bands.size() != g_cubaseEq.bands.size()) std::printf("UF1 EQ graph: Cubase EQ, %zu band(s) on\n", model.bands.size());
         g_cubaseEq = model;
+    } else if (m[4] == 0x56) {
+        // What the Quick Controls belong to ("-" = not known), for the header in PLUGIN.
+        { std::lock_guard<std::mutex> lk(g_cellMx); g_qcSource.assign(m.begin() + 5, m.end() - 1); if (g_qcSource == "-") g_qcSource.clear(); }
+        paintHeader();
     } else if (m[4] == 0x54) {
         // The script (re)started: it begins on the sends, so tell it the V-pot page of the view shown.
         sendVpotPage();
