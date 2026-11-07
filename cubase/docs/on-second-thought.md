@@ -57,9 +57,10 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   Cubase-Sixty: a tap on SCRUB still turns scrubbing on / off (as before); the step is Cubase's nudge value (forced:
   the Nudge commands use it). Razor edit is Cubase's range selection. The mode shows in the header's first field
   (DAW / SENDS always, PLUGIN for 2 s), where "Cubase-Sixty" was.
-- **Channel encoder** (not yet). Rea-Sixty: push opens / closes the plug-in window, SHIFT + turn steps through the
-  plug-in instances, and other encoder modes can be picked (shown in the header). Cubase-Sixty: turn steps the
-  track; nothing else yet.
+- **Channel encoder** (partly). As Rea-Sixty: turn steps the track, push opens / closes the plug-in window, SHIFT +
+  turn steps through the plug-ins. Differences: SHIFT + turn steps through the track's SSL plug-ins only, then "none"
+  (Quick Controls), because the PLUGIN view can show nothing else; without an SSL plug-in the push opens the channel
+  editor. The other encoder modes are not there yet.
 - **Quick keys 1 and 2** (match Rea-Sixty): 1 clears every solo, 2 is FINE (a quarter of the step, shown in the
   header's FINE CTRL field). With SHIFT they are Latch / Touch.
 - **5-8** (chosen). Rea-Sixty in PLUGIN: nothing on a plain press. Cubase-Sixty: Quick Controls 1–4 / 5–8 there,
