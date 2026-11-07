@@ -27,3 +27,6 @@ Behaviour that is fixed in code today but should become a setting once Cubase-Si
   (right path, renumbered to 8); order 10 left out.
 - **Knob step size.** Now: 1/64 of the range per click, Fine = a quarter of that.
 - **7-segment.** Now: the MixConsole number, leading zeros blank. Rea-Sixty shows leading zeros ("007").
+- **Favourites.** Now: listed by hand in `cubase\favourites.txt` (eight channel strips, eight bus comps). Rea-Sixty
+  picks them in its Settings window (eight slots per domain, a dropdown of mapped plug-ins), with named sets, a
+  per-project base bank, copy / own settings per domain and which channel strip sections a swap carries.

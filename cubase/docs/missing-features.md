@@ -6,16 +6,15 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. UC1 favourites.
-2. UF1 jog modes.
+1. UF1 jog modes.
 
 ## UF8
 
 - **Selection modes**: NORM / REC / AUTO are done; REC + MON and the V-pot cycle modes (FX Cycle, Instance Cycle)
   are not.
-- **CHANNEL encoder modes** (16 in Rea-Sixty): Channel Select, Nudge, Markers and Bank by 1 are done (hold the push
+- **CHANNEL encoder modes** (16 in Rea-Sixty): Channel Select, Nudge, Markers, Bank by 1 and CS / BC favourite cycle are done (hold the push
   and turn to pick; NAV / NUDGE switch to Markers / Nudge); missing are Mousewheel, Last Touched Param, Instance /
-  FX Cycle (also across tracks), FX Move, Selset Cycle, CS / BC / focused favourite cycle, Lanes.
+  FX Cycle (also across tracks), FX Move, Selset Cycle, focused favourite cycle, Lanes.
 - **Soft keys on the top row**: SSL's channel-strip pages are done (V-POT, 1-5); missing are the Q1-Q3 sets (SSL bus
   comp pages, user sets), user bindings and layers, dynamic soft-key banks.
 - **SSL Strip Mode / UF8 Plug-in Mode**: a channel strip's or a plug-in's controls across the eight V-pots (and
@@ -30,8 +29,9 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## UC1
 
-- **Favourites** for the channel strip and the bus comp: slots and sets, A/B (copy to favourite N), copying values or
-  restoring each favourite's own settings, several tracks at once.
+- **Favourites**: stepping with the CHANNEL encoder (CS Fav / BC Fav) and carrying the settings are done; missing are
+  sets, the Settings page (now a text file), A/B (copy to favourite N), "own settings" (each favourite's last
+  settings), the Focused Domain cycle, the favourite soft-key banks, several tracks at once, the bypass state kept.
 - **FX Learn**: non-SSL plug-ins mapped onto the UC1 (and the UF1 layer), with knob travel / curves, stepped
   parameters, a multi-instance picker.
 - **GR calibration** and GR meter override.

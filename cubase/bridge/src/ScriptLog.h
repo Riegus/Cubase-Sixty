@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <string>
 // The MIDI Remote scripts' log lines, sent to the bridge as SysEx 7E, written to a file (cubase\logs\scripts.log)
 // so nobody has to copy them out of Cubase's script console.
@@ -15,6 +16,8 @@ void bridgeLogInit(const char* argv0);
 // connect and what they announce) to the temp folder; this points the temp folder of the bridge process at
 // cubase\logs, so they land next to the others. Call before anything starts.
 void redirectTempToLogs(const char* argv0);
+// cubase\logs (created if missing), from the bridge's own path.
+std::filesystem::path logDir(const char* argv0);
 // A line from the bridge itself.
 void scriptLogLine(const std::string& source, const std::string& text);
 }
