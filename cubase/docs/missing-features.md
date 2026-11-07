@@ -6,7 +6,9 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. UF1 jog modes.
+1. UF1 CHANNEL encoder: push = open / close the plug-in window, SHIFT + turn = the track's plug-ins.
+2. UF8 Send view: one send across the eight strips.
+3. Fader on the channel strip's output gain (UF1 strip mode).
 
 ## UF8
 
@@ -40,7 +42,11 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## UF1
 
-- **Jog modes**: the jog wheel and nav cross for nudge, time selections, fades and more. Cubase-Sixty: scrub only.
+- **Jog modes**: Playhead, Scrub, Items, Envelope, Range and Fades are done; missing are Lanes (Cubase has no lane
+  commands), the Range's top / bottom edge (Nudge Top / Bottom did nothing in the Project window), the Envelope points' value (no command; Nudge Up / Down moves them to another lane;
+  later: try two Project Logical Editor presets, Trim > Multiply by slightly above / below 1 on selected automation,
+  run by the jog: steps would be percentages, and one forum report says such a preset changed every point), pulling a time selection with the jog, fine steps, dragging with the centre key held, the fade type, Items
+  on the fader, the copy / cross-axis modifiers, the ring's order and visibility (a setting).
 - **METER**: the Analogue, RTA and Loudness screens, the V-pot meter settings, FINE / PRESETS on the meter.
 - **DAW view**: four track volumes on the V-pots and the user's soft-key banks (see On second thought).
 - **Receives** in the SENDS view; send solo / cut.

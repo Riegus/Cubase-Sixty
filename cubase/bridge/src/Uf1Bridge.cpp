@@ -175,6 +175,117 @@ void showScrubLed()
     setLed(uf1m::Led{0x0F, g_shuttle ? 0xFF8000u : 0xFFFFFFu}, g_scrub || g_shuttle);
 }
 
+// Jog modes (Rea-Sixty's jog objects): what the jog wheel and the nav cross work on. Hold SCRUB and turn the jog
+// to pick one (the header's first field shows it); a tap on SCRUB still turns scrubbing on / off. Scrub is a mode
+// of its own in the ring, kept as g_scrub (Cubase's Mackie scrub follows it); g_jogMode is the other object.
+// The cross selects, the jog moves (Cubase's Nudge / Navigate / fade commands, MIDI channel 2 notes 30-55 to the
+// UF1 script). Playhead and Scrub keep the zoom cross.
+enum { kJogPlayhead = 0, kJogScrub, kJogItems, kJogEnvelope, kJogRange, kJogFades, kJogModes };
+const char* const kJogNames[kJogModes] = { "Playhead", "Scrub", "Items", "Envelope", "Range", "Fades" };
+std::atomic<int> g_jogMode{kJogPlayhead};
+bool g_scrubHeld = false, g_scrubTurned = false;
+std::atomic<long long> g_jogShowUntil{0};   // the mode stays in the header (also in PLUGIN) until then
+int g_rangeAim = 0;          // 0 the whole range, 1 left, 2 right edge (Nudge Top / Bottom did nothing in the Project
+                             // window, so ↑ ↓ aim at nothing)
+int g_fadeAim = 0;           // 0 fade-in, 1 fade-out
+bool g_fadeWalk = false;     // Fades: the cross walks the events instead of aiming
+bool g_envPlayhead = false;  // Envelope: the jog is on the play cursor instead of the points
+bool g_itemsZoomed = false;  // Items: the centre key zoomed to the selection (the next press zooms back)
+int jogShown() { return g_scrub ? kJogScrub : g_jogMode.load(); }
+void cmd2(uint8_t n)   // one of the UF1 script's channel-2 commands
+{
+    sendMidi({0x91, n, 127});
+    sendMidi({0x81, n, 0});
+}
+// The nav cross's LEDs show what is aimed at: the range edge, the fade, walking (centre), the play cursor in
+// Envelope (centre). Order up, left, centre, right, down (LEDs 0x10-0x14, Rea-Sixty).
+void paintNavLeds()
+{
+    int lit = -1;
+    const int mode = jogShown();
+    if (mode == kJogRange) { static const int byAim[3] = {2, 1, 3}; lit = byAim[g_rangeAim]; }
+    else if (mode == kJogFades) lit = g_fadeWalk ? 2 : g_fadeAim == 0 ? 1 : 3;
+    else if (mode == kJogEnvelope && g_envPlayhead) lit = 2;
+    static int shown = -2;
+    if (lit == shown) return;
+    shown = lit;
+    for (int i = 0; i < 5; ++i) setLed(uf1m::Led{uint8_t(0x10 + i), 0xFFFFFF}, i == lit);
+}
+void setScrub(bool on)
+{
+    if (on == g_scrub) return;
+    g_scrub = on;
+    if (on && g_shuttle) { g_shuttle = false; shuttleStop(); }
+    if (g_mcuOpen) { mcuSend({0x90, 0x65, 0x7F}); mcuSend({0x90, 0x65, 0x00}); }   // Cubase's scrub follows
+    showScrubLed();
+}
+void showJogMode()
+{
+    g_jogShowUntil = nowMs() + 2000;
+    paintHeader();
+    paintNavLeds();
+    if (g_trace) std::printf("UF1 jog mode: %s\n", kJogNames[jogShown()]);
+    std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(2100)); if (nowMs() >= g_jogShowUntil) paintHeader(); }).detach();
+}
+void pickJogMode(int step)
+{
+    const int next = std::clamp(jogShown() + step, 0, kJogModes - 1);
+    if (next == kJogScrub) setScrub(true);
+    else { setScrub(false); g_jogMode = next; }
+    showJogMode();
+}
+// One jog step in the current mode (not scrub / shuttle). Returns false for Playhead (the caller nudges the cursor).
+bool jogStep(bool right)
+{
+    switch (g_jogMode.load()) {
+    case kJogItems: cmd2(right ? 31 : 30); return true;
+    case kJogEnvelope:
+        // The points in time (Nudge Left / Right). Cubase has no command for their value: Nudge Up / Down moves
+        // them to another automation lane (tested).
+        if (g_envPlayhead) return false;
+        cmd2(right ? 31 : 30);
+        return true;
+    case kJogRange: {
+        static const uint8_t left[3] = {30, 34, 36}, rightN[3] = {31, 35, 37};
+        cmd2(right ? rightN[g_rangeAim] : left[g_rangeAim]);
+        return true;
+    }
+    case kJogFades: cmd2(g_fadeAim == 0 ? (right ? 43 : 42) : (right ? 45 : 44)); return true;
+    default: return false;
+    }
+}
+// A nav cross key in the current mode. Returns false where the cross zooms (Playhead, Scrub; the caller sends it).
+bool jogNav(uint8_t id)   // 0x28 up, 0x29 left, 0x2A centre, 0x2B right, 0x2C down; on press
+{
+    const int mode = jogShown();
+    auto navigate = [&](bool addOk) {   // Navigate Up / Left / Right / Down (SHIFT: add to the selection)
+        const uint8_t n = id == 0x28 ? 48 : id == 0x29 ? 46 : id == 0x2B ? 47 : 49;
+        cmd2(uint8_t(n + (addOk && g_shift ? 4 : 0)));
+    };
+    switch (mode) {
+    case kJogItems:
+        if (id == 0x2A) { cmd2(g_itemsZoomed ? 55 : 54); g_itemsZoomed = !g_itemsZoomed; }
+        else { navigate(true); g_itemsZoomed = false; }
+        return true;
+    case kJogEnvelope:
+        if (id == 0x2A) g_envPlayhead = !g_envPlayhead;
+        else navigate(id == 0x29 || id == 0x2B);
+        break;
+    case kJogRange:
+        if (id == 0x28 || id == 0x2C) return true;
+        g_rangeAim = id == 0x2A ? 0 : id == 0x29 ? 1 : 2;
+        break;
+    case kJogFades:
+        if (id == 0x2A) g_fadeWalk = !g_fadeWalk;
+        else if (g_fadeWalk) navigate(true);
+        else if (id == 0x29 || id == 0x2B) g_fadeAim = id == 0x2B ? 1 : 0;
+        break;
+    default: return false;
+    }
+    paintNavLeds();
+    return true;
+}
+
 void onUf1Event(const ::uf1::InputEvent& ev)
 {
     using K = ::uf1::InputKind;
@@ -207,7 +318,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             const int k = ev.id - 5;
             // SCRUB: the jog nudges the cursor on every detent (fast positioning). Cubase's own Jog Left / Right
             // commands were tried for this and played choppy, jumpy audio.
-            const int perPulse = (ev.id == 6 && g_scrub && !g_shift) ? 1 : kDetentsPerPulse[k];
+            const int perPulse = (ev.id == 6 && g_scrub && !g_shift && !g_scrubHeld) ? 1 : kDetentsPerPulse[k];
             if ((acc[k] > 0) != (ev.delta > 0)) acc[k] = 0;  // direction change restarts the count
             acc[k] += ev.delta;
             // Jog: nudge the cursor (42 / 43); with SHIFT held, previous / next marker (79 / 80); in SCRUB,
@@ -217,6 +328,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             while (acc[k] >= perPulse || acc[k] <= -perPulse) {
                 const bool right = acc[k] > 0;
                 acc[k] += right ? -perPulse : perPulse;
+                if (jog && g_scrubHeld) { g_scrubTurned = true; pickJogMode(right ? 1 : -1); continue; }   // picking a mode
                 if (jog && g_shuttle && !g_shift) { shuttleStep(right ? 1 : -1); continue; }
                 if (jog && g_scrub && !g_shift && g_mcuOpen) {
                     // Mackie jog wheel, one tick: CC 60, 0x01 = clockwise, 0x41 = counter-clockwise. In
@@ -224,6 +336,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     mcuSend({0xB0, 0x3C, uint8_t(right ? 0x01 : 0x41)});
                     continue;
                 }
+                if (jog && !g_scrub && !g_shift && jogStep(right)) continue;
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }
@@ -274,17 +387,27 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         // SHIFT + SCRUB toggles SHUTTLE instead: the jog then sets a shuttle speed (stopping when it goes
         // back through zero). SCRUB and SHUTTLE exclude each other; the LED is white for scrub, orange for shuttle.
+        // Held and the jog turned: the jog picks the jog mode (above), and the release does nothing more.
         if (ev.id == 0x27) {
-            if (!ev.pressed) break;
-            if (g_shift) { g_shuttle = !g_shuttle; if (g_shuttle) g_scrub = false; else shuttleStop(); }
-            else {
-                g_scrub = !g_scrub;
-                if (g_scrub && g_shuttle) { g_shuttle = false; shuttleStop(); }
-                // Cubase's Mackie scrub mode follows: its SCRUB button (note 101) toggles it.
-                if (g_mcuOpen) { mcuSend({0x90, 0x65, 0x7F}); mcuSend({0x90, 0x65, 0x00}); }
+            if (ev.pressed && g_shift) {
+                g_shuttle = !g_shuttle;
+                if (g_shuttle) { if (g_scrub) setScrub(false); } else shuttleStop();
+                showScrubLed();
+                break;
             }
-            showScrubLed();
+            if (ev.pressed) { g_scrubHeld = true; g_scrubTurned = false; break; }
+            if (!g_scrubHeld) break;
+            g_scrubHeld = false;
+            if (g_scrubTurned) break;
+            setScrub(!g_scrub);   // a tap: scrub on / off (Cubase's Mackie scrub mode follows)
+            paintHeader();
+            paintNavLeds();
             break;
+        }
+        // The nav cross in the jog modes that use it (Items, Envelope, Range, Fades); else zoom (below).
+        if (ev.id >= 0x28 && ev.id <= 0x2C && !g_shuttle) {
+            if (!ev.pressed) { if (jogShown() != kJogPlayhead && jogShown() != kJogScrub) break; }
+            else if (jogNav(ev.id)) break;
         }
         // MODE: while held, the four display soft keys pick the view (as in Rea-Sixty): 1 PLUGIN (V-pots on
         // Cubase's Quick Controls), 2 DAW (V-pots on the sends), 3 METER (the SSL Meter's Overview), 4 SENDS.
@@ -819,8 +942,8 @@ void paintHeader(bool force)
     std::array<uint8_t, 200> h{};
     // Field 0 (under CHANNEL): in PLUGIN, what the V-pots work - the SSL plug-in, or what the Quick Controls belong
     // to; elsewhere the program's name.
-    std::string name = "Cubase-Sixty";
-    if (g_view == kViewPlugin) {
+    std::string name = std::string("JOG ") + kJogNames[jogShown()];
+    if (g_view == kViewPlugin && nowMs() >= g_jogShowUntil) {
         std::lock_guard<std::mutex> lk(g_cellMx);
         if (g_plugPresent) {
             name = g_plugTitle;
@@ -1399,6 +1522,8 @@ void onMcuIn(std::vector<unsigned char>& m)
             g_scrub = on;
             if (on && g_shuttle) { g_shuttle = false; shuttleStop(); }
             showScrubLed();
+            paintHeader();
+            paintNavLeds();
         }
     }
 }

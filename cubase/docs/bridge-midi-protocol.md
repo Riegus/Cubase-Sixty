@@ -82,7 +82,8 @@ The UF1 is a single strip that controls the selected track, and uses the UF8's s
 | Transport | Notes 91 / 92 / 93 / 94 / 95 / 86 / 87 | both | Rwd, ffw, stop, play, rec, cycle, click; Cubase → bridge sets the LED. |
 | ARROW ◀ / ▶ | Note 40 / 41 | bridge → Cubase | One channel-encoder step: previous / next track. |
 | BANK ◀ / ▶ | UF8 note 46 / 47 | bridge → Cubase (UF8 port) | Banks the UF8. Without a UF8: eight steps of note 40 / 41, 40 ms apart. |
-| NAV cross | Notes 48–52 | bridge → Cubase | Up, left, centre, right, down: vertical zoom in, zoom out, open / close editor, zoom in, vertical zoom out. |
+| NAV cross | Notes 48–52 | bridge → Cubase | Up, left, centre, right, down: vertical zoom in, zoom out, open / close editor, zoom in, vertical zoom out. In the Playhead and Scrub jog modes only. |
+| Jog modes | Channel 2, notes 30–55 | bridge → Cubase | The jog and nav cross in the Items / Envelope / Range / Fades jog modes (the mode, the aim and SHIFT are kept in the bridge). 30–33 Nudge Left / Right / Up / Down, 34–41 Nudge Start Left / Right, End Left / Right, Top Up / Down, Bottom Up / Down (38–41 bound but unused: they did nothing in the Project window), 42–45 Decrement / Increment Fade In Length, Decrement / Increment Fade Out Length, 46–49 Navigate Left / Right / Up / Down, 50–53 Navigate Add Left / Right / Up / Down, 54 Zoom to Selection, 55 Undo Zoom. Nav cross LEDs 0x10–0x14 (up, left, centre, right, down) show the aim. |
 
 ## SysEx: names, colours and display
 
