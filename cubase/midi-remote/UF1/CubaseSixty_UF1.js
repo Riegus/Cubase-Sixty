@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.21.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.22.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -520,11 +520,12 @@ function stepIdle(activeDevice) {
 	var j = stepJob
 	if (!j) return
 	var now = Date.now()
-	if (now > j.until) { stepJob = null; return }   // no further track (the first / last), or no title change
+	if (now > j.until) { stepJob = null; out('[CubaseSixty UF1] track step: no new track seen'); return }   // no further track (the first / last), or no title change
 	if (!j.checkAt || now < j.checkAt) return
 	j.checkAt = 0
-	var visible = true
-	try { visible = plugDa.isMixerChannelVisible(plugAm, plugDa.getBaseObjectID(plugAm)) } catch (e) {}
+	var visible = true, base = -1, why = ''
+	try { base = plugDa.getBaseObjectID(plugAm); visible = plugDa.isMixerChannelVisible(plugAm, base) } catch (e) { why = ' (' + e + ')' }
+	out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + base + ') ' + (visible ? 'visible' : 'hidden in the MixConsole: on') + why)
 	if (visible || j.tries >= 64) { stepJob = null; return }
 	++j.tries
 	j.until = now + 1500
