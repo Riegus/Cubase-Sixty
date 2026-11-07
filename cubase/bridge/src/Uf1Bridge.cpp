@@ -239,9 +239,10 @@ bool jogStep(bool right)
     switch (g_jogMode.load()) {
     case kJogItems: cmd2(right ? 31 : 30); return true;
     case kJogEnvelope:
+        // The points in time (Nudge Left / Right). Cubase has no command for their value: Nudge Up / Down moves
+        // them to another automation lane (tested).
         if (g_envPlayhead) return false;
-        if (g_shift) cmd2(right ? 31 : 30);   // SHIFT: the points in time
-        else cmd2(right ? 32 : 33);           // their value: Nudge Up / Down
+        cmd2(right ? 31 : 30);
         return true;
     case kJogRange: {
         static const uint8_t left[5] = {30, 34, 36, 38, 40}, rightN[5] = {31, 35, 37, 39, 41};
@@ -333,7 +334,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     mcuSend({0xB0, 0x3C, uint8_t(right ? 0x01 : 0x41)});
                     continue;
                 }
-                if (jog && !g_scrub && (!g_shift || g_jogMode == kJogEnvelope) && jogStep(right)) continue;
+                if (jog && !g_scrub && !g_shift && jogStep(right)) continue;
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }

@@ -43,7 +43,7 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 ## UF1
 
 - **Jog modes**: Playhead, Scrub, Items, Envelope, Range and Fades are done; missing are Lanes (Cubase has no lane
-  commands), pulling a time selection with the jog, fine steps, dragging with the centre key held, the fade type, Items
+  commands), the Envelope points' value (no command; Nudge Up / Down moves them to another lane), pulling a time selection with the jog, fine steps, dragging with the centre key held, the fade type, Items
   on the fader, the copy / cross-axis modifiers, the ring's order and visibility (a setting).
 - **METER**: the Analogue, RTA and Loudness screens, the V-pot meter settings, FINE / PRESETS on the meter.
 - **DAW view**: four track volumes on the V-pots and the user's soft-key banks (see On second thought).

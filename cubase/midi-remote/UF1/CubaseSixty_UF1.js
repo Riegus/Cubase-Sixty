@@ -594,8 +594,8 @@ for (var n = 0; n < navKeys.length; ++n) {
 // ---------------------------------------------------------------------------
 // Jog modes (Rea-Sixty's jog objects; the bridge keeps the mode, aims the nav cross and sends one of these per
 // detent or key press): MIDI channel 2, notes 30-55. Items: Nudge Left / Right moves the selected events, the
-// cross selects (Navigate). Envelope: Nudge Up / Down changes the selected automation points' value, Left / Right
-// moves them. Range: the edge the cross aims at (Nudge Start / End / Top / Bottom), or the whole range (Nudge
+// cross selects (Navigate). Envelope: Nudge Left / Right moves the selected automation points in time (Nudge Up / Down
+// would move them to another lane; there is no command for their value). Range: the edge the cross aims at (Nudge Start / End / Top / Bottom), or the whole range (Nudge
 // Left / Right). Fades: the fade-in / fade-out length of the selected events.
 // ---------------------------------------------------------------------------
 
