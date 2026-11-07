@@ -53,6 +53,10 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   Controls 1–4 / 5–8); SHIFT + arrow steps a bar.
 - **BANK** (chosen). Rea-Sixty: eight tracks back / forward. Cubase-Sixty: banks the UF8 (eight tracks only when
   there is no UF8).
+- **Jog modes** (chosen / forced). Rea-Sixty: SCRUB is only a hold (turn to pick); the step is a quarter of the grid.
+  Cubase-Sixty: a tap on SCRUB still turns scrubbing on / off (as before); the step is Cubase's nudge value (forced:
+  the Nudge commands use it). Razor edit is Cubase's range selection. The mode shows in the header's first field
+  (DAW / SENDS always, PLUGIN for 2 s), where "Cubase-Sixty" was.
 - **Channel encoder** (not yet). Rea-Sixty: push opens / closes the plug-in window, SHIFT + turn steps through the
   plug-in instances, and other encoder modes can be picked (shown in the header). Cubase-Sixty: turn steps the
   track; nothing else yet.

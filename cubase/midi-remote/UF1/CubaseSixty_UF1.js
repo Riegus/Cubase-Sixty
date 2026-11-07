@@ -592,6 +592,30 @@ for (var n = 0; n < navKeys.length; ++n) {
 }
 
 // ---------------------------------------------------------------------------
+// Jog modes (Rea-Sixty's jog objects; the bridge keeps the mode, aims the nav cross and sends one of these per
+// detent or key press): MIDI channel 2, notes 30-55. Items: Nudge Left / Right moves the selected events, the
+// cross selects (Navigate). Envelope: Nudge Up / Down changes the selected automation points' value, Left / Right
+// moves them. Range: the edge the cross aims at (Nudge Start / End / Top / Bottom), or the whole range (Nudge
+// Left / Right). Fades: the fade-in / fade-out length of the selected events.
+// ---------------------------------------------------------------------------
+
+var jogCommands = [
+	[30, 'Nudge', 'Left'], [31, 'Nudge', 'Right'], [32, 'Nudge', 'Up'], [33, 'Nudge', 'Down'],
+	[34, 'Nudge', 'Start Left'], [35, 'Nudge', 'Start Right'], [36, 'Nudge', 'End Left'], [37, 'Nudge', 'End Right'],
+	[38, 'Nudge', 'Top Up'], [39, 'Nudge', 'Top Down'], [40, 'Nudge', 'Bottom Up'], [41, 'Nudge', 'Bottom Down'],
+	[42, 'Audio', 'Decrement Fade In Length'], [43, 'Audio', 'Increment Fade In Length'],
+	[44, 'Audio', 'Decrement Fade Out Length'], [45, 'Audio', 'Increment Fade Out Length'],
+	[46, 'Navigate', 'Left'], [47, 'Navigate', 'Right'], [48, 'Navigate', 'Up'], [49, 'Navigate', 'Down'],
+	[50, 'Navigate', 'Add Left'], [51, 'Navigate', 'Add Right'], [52, 'Navigate', 'Add Up'], [53, 'Navigate', 'Add Down'],
+	[54, 'Zoom', 'Zoom to Selection'], [55, 'Zoom', 'Undo Zoom']
+]
+for (var jc = 0; jc < jogCommands.length; ++jc) {
+	var jogKey = surface.makeButton(jc % 13, 14 + Math.floor(jc / 13), 1, 1)
+	jogKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, jogCommands[jc][0])
+	page.makeCommandBinding(jogKey.mSurfaceValue, jogCommands[jc][1], jogCommands[jc][2])
+}
+
+// ---------------------------------------------------------------------------
 // SHIFT + transport soft keys (the bridge sends notes 56-61): the automation keys printed on them.
 // < READ / > WRITE act on the selected track; CYCLE = Cross-Over, CLICK = Trim, 1 = Latch, 2 = Touch set
 // Cubase's global automation mode (the same commands as the UF8's automation keys).
