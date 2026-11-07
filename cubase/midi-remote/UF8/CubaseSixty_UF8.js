@@ -883,11 +883,11 @@ var SK_PAGES = [
 		skp('s', 28, null, 45, 49, 34), skp('s', 27, 37, 46, 50, 33), SK_NONE, skp('b', 39, 7, 8, 14, 37)]
 ]
 // The bus comp pages (Q2; Rea-Sixty's kBcBanks): THR, ATTACK, RELEASE, RATIO, S/C HPF, MIX, EXT S/C, BUS COMP, then
-// OUTGAIN; the other pages empty. Parameter indices for Bus Compressor 2 / the 360 Link Bus Compressor (as the UC1
+// OUTGAIN; the other pages empty. BUS COMP is the plug-in's bypass, shown the other way round ('si': On = compressing). Parameter indices for Bus Compressor 2 / the 360 Link Bus Compressor (as the UC1
 // script's map), or a parameter name; null = that model has none.
 function bcp(kind, bc2, lbc) { return { kind: kind, idx: { bc2: bc2, lbc: lbc } } }
 var SK_PAGES_BC = [
-	[bcp('u', 2, 1), bcp('u', 4, 3), bcp('u', 5, 4), bcp('u', 6, 5), bcp('u', 7, 6), bcp('u', 8, 7), bcp('s', 'External S/C', null), bcp('s', 10, 0)],
+	[bcp('u', 2, 1), bcp('u', 4, 3), bcp('u', 5, 4), bcp('u', 6, 5), bcp('u', 7, 6), bcp('u', 8, 7), bcp('s', 'External S/C', null), bcp('si', 10, 0)],
 	[bcp('u', 3, 2), SK_NONE, SK_NONE, SK_NONE, SK_NONE, SK_NONE, SK_NONE, SK_NONE],
 	[], [], [], []
 ]
@@ -970,6 +970,7 @@ function skReport(activeDevice, index) {
 		var units = ''
 		try { units = t.da.getParameterDisplayUnits(skAm, t.obj, t.tag) || '' } catch (e) {}
 		if (units && text.indexOf(units) < 0) text += units
+		if (t.kind === 'si') { v = v >= 0.5 ? 0 : 1; text = v ? 'On' : 'Off' }
 		body = [0x20, index, 1, Math.max(0, Math.min(127, Math.round(v * 127))), t.kind === 'b' ? 2 : 1].concat(toAscii7(text.replace(/\s+/g, ' ').trim()))
 	}
 	var key = body.join(',')
@@ -1052,12 +1053,13 @@ function skMessage(activeDevice, m) {
 	if (!t) return
 	var st = skStrip[index], v
 	if (m[4] === 0x23) {   // push
-		if (t.kind === 's') v = t.da.getParameterProcessValue(skAm, t.obj, t.tag) >= 0.5 ? 0 : 1
+		if (t.kind === 's' || t.kind === 'si') v = t.da.getParameterProcessValue(skAm, t.obj, t.tag) >= 0.5 ? 0 : 1
 		else if (t.kind === 'b') v = 0.5
 		else return
 	} else {               // turn
 		var delta = m[6] - 64
 		if (t.kind === 's') v = delta > 0 ? 1 : 0
+		else if (t.kind === 'si') v = delta > 0 ? 0 : 1   // turned right = compressing
 		else {
 			// A stepped parameter snaps a small change back, so a turn is added up while it goes on (< 1 s).
 			var now = Date.now(), w = st.wanted
