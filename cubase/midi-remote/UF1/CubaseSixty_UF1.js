@@ -515,21 +515,31 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 var stepMix = null
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
-var stepListed = false
+var stepListed = false   // (the channel list is logged once, when the selected track is not in it)
+// Every track channel in the MixConsole, in MixConsole order. Channels in a folder sit deeper in the tree than the
+// top level, so the whole tree is walked (not into the channels themselves); the same channel can be listed twice.
 function stepChannels() {
-	var list = []
-	var base = stepMix.getBaseObjectID(plugAm)
-	var n = stepMix.getNumberOfChildObjects(plugAm, base)
-	for (var i = 0; i < n; ++i) {
-		var id = stepMix.getChildObjectID(plugAm, base, i)
+	var list = [], seen = {}, count = 0
+	function rec(id, depth) {
+		if (seen[id] || count > 2000) return
+		seen[id] = true
+		++count
 		var type = ''
 		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
-		if (!/Channel$/.test(type) || /Input|Output|ControlRoom|Monitor/.test(type)) continue   // tracks only
-		var vis = true, idx = i
-		try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
-		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
-		list.push({ id: id, vis: vis, idx: idx })
+		if (/Channel$/.test(type)) {
+			if (/Input|Output|ControlRoom|Monitor/.test(type)) return   // tracks only
+			var vis = true, idx = list.length
+			try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
+			try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
+			list.push({ id: id, vis: vis, idx: idx })
+			return
+		}
+		if (depth >= 6) return
+		var n = 0
+		try { n = stepMix.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
+		for (var i = 0; i < n && i < 512; ++i) rec(stepMix.getChildObjectID(plugAm, id, i), depth + 1)
 	}
+	rec(stepMix.getBaseObjectID(plugAm), 0)
 	list.sort(function (a, b) { return a.idx - b.idx })
 	return list
 }
