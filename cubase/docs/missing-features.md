@@ -6,7 +6,6 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. Fader on the channel strip's output gain (UF1 strip mode).
 
 ## UF8
 
@@ -53,7 +52,7 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
   stepping through plug-ins that are not SSL's.
 - **PLUGIN**: Cubase's own channel strip in pages (tried and rolled back), jump to the page of a control touched in
   the plug-in window, HQ MODE / A/B, the Harrison 32C.
-- Fader on the channel strip's output gain (strip mode).
+- Strip mode: the pan knob on the strip's pan (the fader is done).
 
 ## General
 

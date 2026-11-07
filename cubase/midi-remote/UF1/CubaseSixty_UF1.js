@@ -445,7 +445,9 @@ fader.mSurfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueT
 }
 fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
 	dbg('display value: [' + value + '] units=[' + units + ']')
-	if (flipActive) panText(activeDevice, value, units); else levelText(activeDevice, value)
+	if (flipActive) panText(activeDevice, value, units)
+	trackLevelText = value
+	if (!stripMode.sent) levelText(activeDevice, value)   // in strip mode the dB field is the strip's fader
 }
 fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 	if (flipActive) panPos(activeDevice, value)
@@ -523,6 +525,7 @@ if (mainOut) {
 }
 function stripActivated(activeDevice, master, flip) {
 	masterActive = master
+	stripModeSend(activeDevice)
 	if (flip !== flipActive) { flipActive = flip; lastPanText = lastPanPos = lastLevelText = null }
 	showStrip(activeDevice)
 }
@@ -1091,6 +1094,7 @@ function plugRescan(activeDevice) {
 		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters, insert slot ' + (found.slot >= 0 ? found.slot + 1 : 'not found') + ')' : 'no SSL plug-in, V-pots on Quick Controls'))
 	}
 	plugPaint(activeDevice, true)
+	stripModeSend(activeDevice)
 }
 
 function plugSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
@@ -1144,6 +1148,7 @@ function plugPaint(activeDevice, force) {
 		var p = key.param ? plugParam(key.param) : null
 		if (p) watch[p.tag] = true
 		var st = !p ? 2 : plugValue(p) >= 0.5 ? 1 : 0
+		if (key.label === 'PLUG-IN' && stripFaderParam()) st = stripMode.on ? 1 : 0   // strip mode (below)
 		var label = []
 		for (var c = 0; c < key.label.length; ++c) { var code = key.label.charCodeAt(c); label.push(code === 0xD8 ? 0x7F : code < 0x80 ? code : 0x3F) }
 		var body = [0x52, k, st].concat(label)
@@ -1201,8 +1206,10 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 		plugCell(activeDevice, a, slot)
 		return
 	}
+	if (kind === 6) { stripFaderMove(activeDevice, (a << 7) | b); return }
 	if (kind === 2) {
 		var key = plugKeys()[a]
+		if (key && key.label === 'PLUG-IN' && stripFaderParam()) { stripMode.on = !stripMode.on; stripModeSend(activeDevice); plugPaint(activeDevice, false); return }
 		var q = key && key.param ? plugParam(key.param) : null
 		if (!q) return
 		plugDa.setParameterProcessValue(plugAm, plug.obj, q.tag, plugValue(q) >= 0.5 ? 0 : 1)
@@ -1210,11 +1217,58 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 	}
 }
 
+// Strip mode (Rea-Sixty's SSL Strip Mode on the UF1, the PLUG-IN key on the PLUGIN view's first page): the fader is
+// on the SSL channel strip's own fader / output gain instead of the track's volume. The bridge sends the hand's
+// position as PLUGIN event kind 6 (14 bit in a / b) and ignores Cubase's volume while it is on (SysEx 5A <0/1>); the
+// strip's fader comes back as SysEx 5B <msb> <lsb> for the motor, its value in the dB field. On a track without
+// an SSL channel strip (or one without such a parameter) the fader stays on volume; the mode stays on for the next.
+var stripMode = { on: false, sent: false, param: null }
+var trackLevelText = null
+var STRIP_FADER_NAMES = ['Fader Level', 'Fader', 'Output Gain', 'Out Gain', 'Output Level']
+function stripFaderParam() {
+	if (plug.obj < 0 || !plug.kind || !plug.kind.strip) return null
+	for (var i = 0; i < STRIP_FADER_NAMES.length; ++i) {
+		var want = STRIP_FADER_NAMES[i].toLowerCase()
+		for (var j = 0; j < plug.params.length; ++j) if (plug.params[j].lower === want) return plug.params[j]
+	}
+	return null
+}
+function stripModeSend(activeDevice) {
+	var p = stripMode.on && !masterActive ? stripFaderParam() : null
+	var on = !!p
+	stripMode.param = p
+	if (on !== stripMode.sent) {
+		stripMode.sent = on
+		plugSend(activeDevice, [0x5A, on ? 1 : 0])
+		out('[CubaseSixty UF1] strip mode: fader on ' + (on ? '"' + p.title + '" of "' + plug.title + '"' : 'the track\'s volume'))
+		if (!on) { lastLevelText = null; if (trackLevelText !== null) levelText(activeDevice, trackLevelText) }
+	}
+	if (on) stripFaderSend(activeDevice)
+}
+function stripFaderSend(activeDevice) {
+	var p = stripMode.param
+	if (!p || !plugAm) return
+	var v = Math.round(Math.max(0, Math.min(1, plugValue(p))) * 16383)
+	plugSend(activeDevice, [0x5B, (v >> 7) & 0x7F, v & 0x7F])
+	var text = ''
+	try { text = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag)) } catch (e) {}
+	sendLevel(activeDevice, text)
+}
+function stripFaderMove(activeDevice, v14) {
+	var p = stripMode.param
+	if (!p || !plugAm) return
+	plugDa.setParameterProcessValue(plugAm, plug.obj, p.tag, v14 / 16383)
+	var text = ''
+	try { text = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag)) } catch (e) {}
+	sendLevel(activeDevice, text)
+}
+
 if (plugDa) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		plugAm = activeMapping
 		// Only a parameter on show repaints (a plug-in can report many changes, e.g. under automation).
 		if (objectID === plug.obj && (!plug.watch || plug.watch[tag])) plugPaint(activeDevice, false)
+		if (objectID === plug.obj && stripMode.sent && stripMode.param && tag === stripMode.param.tag) stripFaderSend(activeDevice)
 		if (objectID === cubaseEq.eq || objectID === cubaseEq.filter) cubaseEqSend(activeDevice)
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {

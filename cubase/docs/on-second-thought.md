@@ -88,7 +88,9 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 - **PLUGIN page jump** (not yet). Rea-Sixty jumps to the page of a control touched in the plug-in window.
 - **PLUGIN strips** (not yet). Rea-Sixty also has the Harrison 32C and FX-Learned plug-ins, and Cubase-Sixty does not
   show Cubase's own channel strip here yet.
-- **Fader in strip mode** (not yet). Rea-Sixty can put the fader on the channel strip's output gain.
+- **Strip mode** (partly). As Rea-Sixty: PLUG-IN puts the fader on the SSL channel strip's own fader / output gain
+  (lit while on; a track without one keeps volume). Not yet: the pan knob on the strip's pan. The fader moves the
+  parameter's 0–1 range in a straight line (Cubase's volume taper does not apply).
 - **METER view V-pots** (not yet). Rea-Sixty: the meter's settings. Cubase-Sixty: they do nothing in METER (so they
   cannot change sends unseen). FINE, PRESETS and the Analogue / RTA / Loudness screens are not there yet.
 - **METER bar scale** (forced, for now). Rea-Sixty reads the plug-in's Digital Type; Cubase-Sixty always uses the
