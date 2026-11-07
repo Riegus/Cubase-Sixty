@@ -12,4 +12,7 @@ bool uc1NeedsReopen();
 std::string uc1LastError();
 // Close and open the UC1 again (keeps the MIDI ports, replays the last state).
 bool uc1Reopen();
+// One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL
+// encoder: on to the UC1 script (SysEx 44), which shows and swaps them.
+void uc1FavouriteStep(int domain, int dir);
 }

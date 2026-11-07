@@ -91,3 +91,6 @@ analysis/*.lua
 
 # Cubase-Sixty script logs (written by the bridge)
 cubase/logs/
+
+# Cubase-Sixty user files
+cubase/favourites.txt

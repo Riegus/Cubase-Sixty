@@ -32,6 +32,7 @@
 #include "Uf8Fader.h"
 #include "Uf8Frames.h"
 #include "Uf1Bridge.h"
+#include "Favourites.h"
 #include "Uc1Bridge.h"
 #include "ScriptLog.h"
 namespace cs { int stopSslCore(); }
@@ -112,8 +113,8 @@ void paintVpots();
 // (MIDI channel 2, notes 0-5, or the Page notes for Bank by 1). Picked as in Rea-Sixty: hold the encoder's push
 // (id 0x76) and turn; the scribble strips list the modes, the current one on strip 4 with its top soft key lit;
 // letting go keeps the mode. NAV (0x73) and NUDGE (0x74) switch to Markers / Nudge directly and back (lit while on).
-enum { kEncSelect = 0, kEncNudge, kEncMarkers, kEncBank, kEncModes };
-const char* const kEncNames[kEncModes] = { "Ch Sel", "Nudge", "Markers", "Bank 1" };
+enum { kEncSelect = 0, kEncNudge, kEncMarkers, kEncBank, kEncCsFav, kEncBcFav, kEncModes };
+const char* const kEncNames[kEncModes] = { "Ch Sel", "Nudge", "Markers", "Bank 1", "CS Fav", "BC Fav" };
 std::atomic<int> g_encMode{kEncSelect};
 std::atomic<bool> g_encHeld{false};
 int g_encPick = 0;
@@ -305,6 +306,7 @@ void handleFrame(const uf8frames::Frame& fr)
             const int mode = g_encMode;
             for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
                 if (mode == kEncBank) { note(right ? kNotePageRight : kNotePageLeft, true); note(right ? kNotePageRight : kNotePageLeft, false); continue; }
+                if (mode == kEncCsFav || mode == kEncBcFav) { cs::uc1FavouriteStep(mode == kEncBcFav, right ? 1 : -1); continue; }
                 const uint8_t n = uint8_t(mode * 2 + (right ? 1 : 0));   // Select 0 / 1, Nudge 2 / 3, Markers 4 / 5
                 sendMidi({0x91, n, 127});
                 sendMidi({0x81, n, 0});
@@ -780,6 +782,7 @@ int main(int argc, char** argv)
 {
     cs::redirectTempToLogs(argc > 0 ? argv[0] : nullptr);
     cs::bridgeLogInit(argc > 0 ? argv[0] : nullptr);
+    cs::favourites::init(argc > 0 ? argv[0] : nullptr);
     cs::stopSslCore();   // SSL360Core.exe takes the devices and the SSL plug-ins (SslCoreGuard.cpp)
     // --no-script-log: the scripts' log lines (SysEx 7E) are dropped instead of written to cubase\logs\scripts.log.
     bool scriptLog = true;

@@ -53,6 +53,8 @@ add_executable(cubase_sixty_bridge
     src/Uf1Bridge.cpp
     src/Uf1Bridge.h
     src/SslPresets.cpp
+    src/Favourites.cpp
+    src/Favourites.h
     src/SslPresets.h
     src/Uf1Meter.cpp
     src/Uf1Meter.h

@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.11.1-dev'
+var SCRIPT_VERSION = '0.12.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -316,21 +316,34 @@ function rescan(activeDevice) {
 	try { base = da.getBaseObjectID(am) } catch (e) { log('getBaseObjectID failed: ' + e); return }
 	var objects = walk(da, base, 4, 400, SKIP_TYPES_TRACK)
 	++scans
+	// For the favourites: the insert slots (empty ones, and the last one in use) and a favourite the UC1 has no map
+	// for (it is still stepped from).
+	state.insertSlots = []   // in order: { id, used }
+	state.favOn = { cs: null, bc: null }
+	for (var s = 0; s < objects.length; ++s) {
+		var so = objects[s]
+		if (so.type !== 'Slot' || so.parent < 0 || !/Insert/.test(objects[so.parent].type)) continue
+		state.insertSlots.push({ id: so.id, used: s + 1 < objects.length && objects[s + 1].parent === s })
+	}
 	for (var i = 0; i < objects.length; ++i) {
 		var id = objects[i].id
 		var o = info(da, id)
 		if (o.params < 4 || !o.title) continue
+		var slotAbove = objects[i].parent >= 0 && objects[objects[i].parent].type === 'Slot' ? objects[objects[i].parent].id : -1
+		for (var fd in fav.lists) if (!state.favOn[fd] && slotAbove >= 0 && favIndex(fd, o.title) >= 0)
+			state.favOn[fd] = { acc: da, obj: id, slotObj: slotAbove, name: o.title }
 		var bc = findMap(BUS_COMPS, o.title)
 		// Each SSL strip / bus comp's position among them on the track (insert order): the order they connect to
 		// SSL 360 Core in, which is how the bridge finds their gain-reduction streams.
 		var csMatch = bc ? null : findMap(CHANNEL_STRIPS, o.title)
 		var sslOrd = bc || (csMatch && csMatch.label) ? sslCount++ : -1
-		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); state.bcSelected.sslOrd = bcCount; dumpParams(da, id, o.title) }
+		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); state.bcSelected.sslOrd = bcCount; state.bcSelected.slotObj = slotAbove; dumpParams(da, id, o.title) }
 		if (bc) { ++bcCount; continue }
 		var cs = csMatch
 		if (cs && cs.label) {
 			var t = makeTarget(da, id, cs, o.title)
 			t.sslOrd = sslOrd
+			t.slotObj = slotAbove
 			// The insert slot it sits in (slots are titled "1".."16"), for opening its window (360 key).
 			var slotAt = objects[i].parent
 			if (slotAt >= 0 && objects[slotAt].type === 'Slot') t.insertIndex = parseInt(info(da, objects[slotAt].id).title, 10) - 1
@@ -349,6 +362,7 @@ function rescan(activeDevice) {
 	var choice = state.csChoice[base]
 	state.cs = list.length ? list[0] : null
 	for (var c = 0; c < list.length; ++c) if (list[c].key === choice) state.cs = list[c]
+	favApplyPending(activeDevice, list.concat(state.bcSelected ? [state.bcSelected] : []))
 	log('selected track: channel strip ' + (state.cs ? '"' + state.cs.name + '"' : 'none')
 		+ ', bus comp ' + (state.bcSelected ? '"' + state.bcSelected.name + '" #' + state.bcSelected.obj : 'none'))
 	showNumber(activeDevice, base)
@@ -744,6 +758,7 @@ function scanMixer(activeDevice) {
 			t.output = output
 			t.channelObj = channelObj
 			t.sslOrd = sslOnChannel[channelObj] - 1
+			t.slotObj = o.parent >= 0 && objects[o.parent].type === 'Slot' ? objects[o.parent].id : -1
 			list.push(t)
 		}
 	}
@@ -751,6 +766,7 @@ function scanMixer(activeDevice) {
 		log('MixConsole: ' + objects.length + ' objects, ' + list.length + ' bus comps'
 			+ (list.length ? ': ' + list.map(function (b) { return '"' + b.track + '" #' + b.obj }).join(', ') : ''))
 	state.bcList = list
+	favApplyPending(activeDevice, list)
 	showBcNames(activeDevice)
 	paintAll(activeDevice)
 }
@@ -793,6 +809,202 @@ function onBcEncoder(activeDevice, steps) {
 	sysex(activeDevice, [0x39].concat(encodeName(list[next].header)))
 	sysex(activeDevice, [0x35, ZONE_BC])
 	paintAll(activeDevice)
+}
+
+// ---------------------------------------------------------------------------
+// Favourites (Rea-Sixty's CS / BC favourites): up to eight channel strips and eight bus comps, listed in
+// cubase\favourites.txt; the bridge reads the file and sends the two lists (SysEx 43 <0 = CS, 1 = BC> <names,
+// 7F 7F 7F between>) when asked (SysEx 42, on activation and when stepping after a pause). The UF8's CHANNEL
+// encoder in CS Fav / BC Fav mode steps through them (SysEx 44 <domain> <1 = forward, 0 = back>): the UC1's name
+// rows show the previous / current / next favourite at once, and half a second after the last step the plug-in in
+// the slot is replaced by the one shown (one load per pause, not one per notch). The controls both plug-ins have
+// on the UC1 are carried across (by value, in their units), so the sound stays. On a track with none, the
+// favourite goes into the first free insert slot after the last plug-in.
+// The channel strip domain is the strip the UC1 is on (state.cs), the bus comp domain the Bus Comp section's.
+// ---------------------------------------------------------------------------
+var fav = {
+	lists: { cs: [], bc: [] },   // names, as in the file
+	askedAt: 0,
+	uids: {},                    // plug-in name -> class id (from the plug-in manager's collections)
+	pick: null,                  // while stepping: { domain, index, slotObj, until }
+	commitAt: 0,
+	pending: null                // after a swap: { slotObj, name, values, until }
+}
+function favIndex(domain, name) {
+	var list = fav.lists[domain] || []
+	for (var i = 0; i < list.length; ++i) if (list[i].toLowerCase() === String(name).toLowerCase()) return i
+	return -1
+}
+function favShort(name) {
+	var m = findMap(CHANNEL_STRIPS, name) || findMap(BUS_COMPS, name)
+	return m && m.label ? m.label : name.replace(/^SSL (Native )?/, '')
+}
+function favAsk(activeDevice) {
+	fav.askedAt = Date.now()
+	sysex(activeDevice, [0x42])
+}
+function onFavList(message) {
+	var domain = message[5] === 0 ? 'cs' : 'bc'
+	var names = decodeName(message, 6).filter(function (n) { return n.length > 0 }).slice(0, 8)
+	if (names.join('|') !== fav.lists[domain].join('|')) log('favourites (' + domain + '): ' + (names.length ? names.join(', ') : 'none'))
+	fav.lists[domain] = names
+}
+// What a step acts on: the plug-in in the domain and the slot it sits in, or a free insert slot to put one in.
+function favContext(domain) {
+	var t = domain === 'cs' ? (state.cs && state.cs.key !== 'cubase' ? state.cs : null) : busComp()
+	var on = state.favOn ? state.favOn[domain] : null
+	if (t && t.slotObj >= 0) return { acc: t.da, slotObj: t.slotObj, name: t.name, target: t, track: domain === 'bc' && t.track ? t.track : state.trackName }
+	if (on) return { acc: on.acc, slotObj: on.slotObj, name: on.name, target: null, track: state.trackName }
+	// None on the track: the first free insert slot after the last one in use, else the first free one.
+	var slots = state.insertSlots || [], free = null
+	for (var i = 0; i < slots.length; ++i) if (!slots[i].used && !free) free = slots[i]; else if (slots[i].used) free = null
+	if (!free) for (var j = 0; j < slots.length; ++j) if (!slots[j].used) { free = slots[j]; break }
+	return free ? { acc: da, slotObj: free.id, name: '', target: null, track: state.trackName, insert: true } : null
+}
+function favShow(activeDevice, domain, index, track) {
+	var list = fav.lists[domain]
+	var sep = [0x7F, 0x7F, 0x7F]
+	sysex(activeDevice, [0x38].concat(encodeName(index > 0 ? favShort(list[index - 1]) : ''), sep,
+		encodeName(favShort(list[index])), sep, encodeName(index + 1 < list.length ? favShort(list[index + 1]) : '')))
+	sysex(activeDevice, [0x39].concat(encodeName(track || '')))
+	sysex(activeDevice, [0x35, domain === 'cs' ? ZONE_CS : ZONE_BC])
+	state.restoreBcAt = Date.now() + 1600
+}
+function favStep(activeDevice, domain, dir) {
+	if (Date.now() - fav.askedAt > 5000) favAsk(activeDevice)   // the file may have changed; the next step has it
+	var list = fav.lists[domain]
+	var zone = domain === 'cs' ? ZONE_CS : ZONE_BC
+	if (!list.length) { readout(activeDevice, zone, 'No favourites', 'favourites.txt'); return }
+	var ctx = favContext(domain)
+	if (!ctx) { readout(activeDevice, zone, 'No free slot', ''); return }
+	var cur = fav.pick && fav.pick.domain === domain && fav.pick.slotObj === ctx.slotObj ? fav.pick.index : favIndex(domain, ctx.name)
+	var next
+	if (cur < 0) next = dir > 0 ? 0 : list.length - 1
+	else next = ((cur + dir) % list.length + list.length) % list.length
+	fav.pick = { domain: domain, index: next, slotObj: ctx.slotObj }
+	fav.commitAt = Date.now() + 500
+	favShow(activeDevice, domain, next, ctx.track)
+}
+function favUid(acc, slotObj, name) {
+	if (fav.uids[name]) return fav.uids[name]
+	var pm = acc.mPluginManager
+	var n = 0
+	try { n = pm.getNumberOfPluginCollections(am, slotObj) } catch (e) { log('plug-in collections: ' + e) }
+	for (var c = 0; c < n; ++c) {
+		var col = null
+		try { col = pm.getPluginCollectionByIndex(am, slotObj, c) } catch (e) {}
+		var entries = col && col.mEntries ? col.mEntries : []
+		for (var e = 0; e < entries.length; ++e) if (entries[e].mPluginName) fav.uids[entries[e].mPluginName] = entries[e].mPluginUID
+		if (fav.uids[name]) return fav.uids[name]
+	}
+	for (var k in fav.uids) if (k.toLowerCase() === name.toLowerCase()) return fav.uids[k]
+	return null
+}
+// Numbers in a parameter's own unit, made comparable: Hz, seconds, the rest as shown.
+function plainOf(display, units) {
+	var n = leadingNumber(display)
+	if (isNaN(n)) return NaN
+	var u = ((units || '') + ' ' + String(display).replace(/^\s*[-+]?\d*\.?\d+(e[-+]?\d+)?/i, '')).toLowerCase()
+	if (/khz|\dk\b|^\s*k\b/.test(u)) return n * 1000
+	if (/\bms\b|^\s*ms/.test(u)) return n / 1000
+	return n
+}
+function readPlain(acc, obj, tag) {
+	var d = '', u = ''
+	try { d = acc.getParameterDisplayValue(am, obj, tag) } catch (e) {}
+	try { u = acc.getParameterDisplayUnits(am, obj, tag) || '' } catch (e) {}
+	return plainOf(d, u)
+}
+// Sets a parameter to the value v (Hz, seconds or as shown): the display across the range, then a bisection
+// between the two readings around v (or the nearest end).
+function setPlain(acc, obj, tag, v) {
+	var at = function (n) { acc.setParameterProcessValue(am, obj, tag, n); return readPlain(acc, obj, tag) }
+	var pts = []
+	for (var k = 0; k <= 32; ++k) pts.push({ n: k / 32, num: at(k / 32) })
+	var best = null
+	for (var q = 0; q < pts.length; ++q) if (!isNaN(pts[q].num) && (!best || Math.abs(pts[q].num - v) < Math.abs(best.num - v))) best = pts[q]
+	if (!best) return false
+	for (var z = 0; z + 1 < pts.length; ++z) {
+		var p0 = pts[z], p1 = pts[z + 1]
+		if (isNaN(p0.num) || isNaN(p1.num) || (p0.num - v) * (p1.num - v) > 0) continue
+		var a = p0.n, b = p1.n, asc = p1.num > p0.num
+		for (var it = 0; it < 14; ++it) {
+			var n = (a + b) / 2, num = at(n)
+			if (isNaN(num)) break
+			if (Math.abs(num - v) < Math.abs(best.num - v)) best = { n: n, num: num }
+			if ((num < v) === asc) a = n; else b = n
+		}
+		break
+	}
+	acc.setParameterProcessValue(am, obj, tag, best.n)
+	return true
+}
+// The controls of a mapped plug-in, by UC1 control: knobs as values, keys (and IN) as on / off.
+function favSnapshot(t) {
+	var out = { knobs: {}, buttons: {}, bypass: null }
+	try {
+		for (var k in t.knobs) {
+			var rf = t.knobs[k]
+			var proc = t.da.getParameterProcessValue(am, rf.obj, rf.tag)
+			out.knobs[k] = { num: readPlain(t.da, rf.obj, rf.tag), proc: rf.invert ? 1 - proc : proc }
+		}
+		for (var b in t.buttons) out.buttons[b] = t.da.getParameterProcessValue(am, t.buttons[b].obj, t.buttons[b].tag) >= 0.5
+		if (t.bypass) out.bypass = t.da.getParameterProcessValue(am, t.bypass.obj, t.bypass.tag)
+	} catch (e) { log('favourite: reading the settings failed: ' + e) }
+	return out
+}
+function favCarry(t, values) {
+	var set = 0, missed = []
+	for (var k in values.knobs) {
+		var rf = t.knobs[k]
+		if (!rf) continue
+		var v = values.knobs[k]
+		try {
+			if (!isNaN(v.num) && setPlain(t.da, rf.obj, rf.tag, v.num)) ++set
+			else { t.da.setParameterProcessValue(am, rf.obj, rf.tag, rf.invert ? 1 - v.proc : v.proc); ++set }
+		} catch (e) { missed.push(k) }
+	}
+	for (var b in values.buttons) {
+		if (!t.buttons[b]) continue
+		try { t.da.setParameterProcessValue(am, t.buttons[b].obj, t.buttons[b].tag, values.buttons[b] ? 1 : 0); ++set } catch (e) { missed.push('key ' + b) }
+	}
+	if (values.bypass !== null && t.bypass) try { t.da.setParameterProcessValue(am, t.bypass.obj, t.bypass.tag, values.bypass) } catch (e) {}
+	log('favourite "' + t.name + '": ' + set + ' controls carried' + (missed.length ? ', not: ' + missed.join(', ') : ''))
+}
+function favCommit(activeDevice) {
+	var p = fav.pick
+	fav.commitAt = 0
+	if (!p) return
+	var domain = p.domain
+	var zone = domain === 'cs' ? ZONE_CS : ZONE_BC
+	var ctx = favContext(domain)
+	fav.pick = null
+	if (!ctx || ctx.slotObj !== p.slotObj) { log('favourite: the track changed before the swap; not done'); return }
+	var name = fav.lists[domain][p.index]
+	if (!name || favIndex(domain, ctx.name) === p.index) return
+	var uid = favUid(ctx.acc, ctx.slotObj, name)
+	if (!uid) { log('favourite "' + name + '": not in Cubase\'s plug-in list (check the name in favourites.txt)'); readout(activeDevice, zone, favShort(name), 'NOT FOUND'); return }
+	var values = ctx.target ? favSnapshot(ctx.target) : null
+	var ok = false
+	try { ok = ctx.acc.mPluginManager.trySetSlotPlugin(am, ctx.slotObj, uid, true) } catch (e) { log('trySetSlotPlugin failed: ' + e) }
+	log('favourite: "' + (ctx.name || '(empty slot)') + '" -> "' + name + '": ' + (ok ? 'done' : 'refused'))
+	if (!ok) { readout(activeDevice, zone, favShort(name), 'FAILED'); return }
+	fav.pending = values ? { slotObj: ctx.slotObj, name: name, values: values, until: Date.now() + 4000 } : null
+	state.rescanAt = Date.now() + 300
+	state.mixScanAt = Date.now() + 400
+}
+// After a swap: once the new plug-in shows up in its slot, the old one's settings go onto it.
+function favApplyPending(activeDevice, targets) {
+	var p = fav.pending
+	if (!p) return
+	if (Date.now() > p.until) { fav.pending = null; log('favourite "' + p.name + '": not seen after the swap; settings not carried'); return }
+	for (var i = 0; i < targets.length; ++i) {
+		var t = targets[i]
+		if (!t || t.slotObj !== p.slotObj || t.name.toLowerCase() !== p.name.toLowerCase()) continue
+		fav.pending = null
+		favCarry(t, p.values)
+		return
+	}
 }
 
 // The channel strip's routing switches for the bridge's ROUTING screen (SysEx 3F; 7F = no routing).
@@ -1200,6 +1412,8 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (message.length < 7 || message[4] === undefined) return
 	var cmd = message[4]
 	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
+	if (cmd === 0x43) { onFavList(message); return }
+	if (cmd === 0x44 && am) { try { favStep(activeDevice, message[5] === 0 ? 'cs' : 'bc', message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) } return }
 	if (cmd === 0x3E && am && message.length >= 11) { try { setRouting(activeDevice, message) } catch (e) { log('routing: ' + e) } return }
 	if (cmd !== 0x20 && cmd !== 0x21) return
 	if (!am) { if (++sysexErrors <= 3) log('UC1 event before the page was active; ignored'); return }
@@ -1275,6 +1489,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	grShown = null
 	labelShown = null
 	log('page active')
+	favAsk(activeDevice)
 	state.rescanAt = Date.now() + 100
 	state.mixScanAt = Date.now() + 200
 	numberShown = -2
@@ -1289,6 +1504,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		numberCheckAt = now + 1000
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
 	}
+	if (fav.commitAt && now >= fav.commitAt) { try { favCommit(activeDevice) } catch (e) { log('favourite swap: ' + e) } }
 	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0
 		try { rescan(activeDevice) } catch (e) { log('scan failed: ' + e) }

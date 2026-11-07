@@ -61,6 +61,7 @@
 #include "Palette.h"
 #include "UC1Device.h"
 #include "UC1Protocol.h"
+#include "Favourites.h"
 #include "ScriptLog.h"
 #include "SslCoreImpersonator.h"
 #include "SslPresets.h"
@@ -564,6 +565,9 @@ void onSysex(const std::vector<unsigned char>& m)
         }
         break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
+    case 0x42:   // the script asks for the favourites (cubase\favourites.txt)
+        for (auto& f : favourites::messages()) sendMidi(std::move(f));
+        break;
     case 0x41:
         // The channel strip picked with the magnifier key: on to the UF1 script (SysEx 57), so the UF1's PLUGIN
         // view shows the same one.
@@ -582,7 +586,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
@@ -1033,6 +1037,11 @@ void uc1Stop()
 }
 
 void uc1SetTrace(bool on) { g_trace = on; }
+
+void uc1FavouriteStep(int domain, int dir)
+{
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x44, uint8_t(domain ? 1 : 0), uint8_t(dir > 0 ? 1 : 0), 0xF7});
+}
 
 bool uc1NeedsReopen() { return g_open && g_dev.needsReopen(); }
 
