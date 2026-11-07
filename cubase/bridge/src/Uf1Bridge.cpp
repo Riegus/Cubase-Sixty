@@ -812,7 +812,7 @@ void paintHeader(bool force)
                 if (name.rfind(pre, 0) == 0) { name.erase(0, std::strlen(pre)); break; }
             if (name.empty()) name = g_plugModel;
         } else {
-            name = g_qcSource.empty() ? std::string("Quick Ctrls") : g_qcSource;   // the field shows 13 characters
+            name = g_qcSource.empty() ? std::string("Cubase QC") : g_qcSource;   // the field shows 13 characters
         }
     }
     name = sslpresets::latin1(name);
