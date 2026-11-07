@@ -476,7 +476,13 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (m[4] === 0x57 && m.length >= 8) {
 		// From the UC1 script, via the bridge: the strip its magnifier key picked.
 		var choice = { kind: m[5], ord: m[6] }
-		if (!uc1Choice || uc1Choice.kind !== choice.kind || uc1Choice.ord !== choice.ord) { uc1Choice = choice; plug.pick = null; plug.rescanAt = Date.now() + 50 }
+		// A real change (the magnifier key) takes over from SHIFT + the CHANNEL encoder's pick; the UC1 repeating its
+		// choice (it does after every repaint, and after a track title change cleared it here) does not.
+		if (!uc1Choice || uc1Choice.kind !== choice.kind || uc1Choice.ord !== choice.ord) {
+			if (uc1Choice) plug.pick = null
+			uc1Choice = choice
+			plug.rescanAt = Date.now() + 50
+		}
 		return
 	}
 	if ((m[4] === 0x3C || m[4] === 0x3D) && m.length >= 7) {
