@@ -1080,6 +1080,7 @@ if (plugDa) {
 }
 page.mOnActivate = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
+	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
 	plug.obj = -2   // look again and send everything
 	plug.rescanAt = Date.now() + 200
 }

@@ -126,12 +126,13 @@ void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
 void paintSoftKeys();
 // The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
-void sendVpotPage()
+void sendVpotPage_(int view)
 {
-    const uint8_t n = g_view == kViewPlugin ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
+    const uint8_t n = view == kViewPlugin ? (g_sends58 ? 89 : 88) : (g_sends58 ? 54 : 53);
     note(n, true);
     note(n, false);
 }
+void sendVpotPage() { sendVpotPage_(g_view); }
 
 // Shuttle: speed index -7..7 (0 = stopped). Negative = reverse. Notes 65..71 = reverse 8x .. 1/8x,
 // 72..78 = forward 1/8x .. 8x (Cubase's "Shuttle Play" commands); stop = the STOP key's note.
@@ -287,10 +288,11 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (!ev.pressed || !g_modeHeld) break;
             {
                 const int view = ev.id - 0x19;
+                // The V-pot page goes out on every pick, also of the view already shown: after the scripts are
+                // reloaded, Cubase starts on the sends while the bridge still shows the view it had.
+                sendVpotPage_(view);
                 if (view != g_view) {
-                    const bool pageChanges = (view == kViewPlugin) != (g_view == kViewPlugin);
                     g_view = view;
-                    if (pageChanges) sendVpotPage();
                     paintSendCells(true);
                     paintHeader();
                     if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
@@ -935,6 +937,9 @@ void onSysex(const std::vector<unsigned char>& m)
         // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
         // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
         if (g_view == kViewSends) paintSendCells(false);
+    } else if (m[4] == 0x54) {
+        // The script (re)started: it begins on the sends, so tell it the V-pot page of the view shown.
+        sendVpotPage();
     } else if (m[4] == 0x50 && m.size() >= 11) {
         // PLUGIN view: the SSL plug-in on the selected track (present, page, pages, EQ in, ordinal, model).
         const bool present = m[5] != 0;
