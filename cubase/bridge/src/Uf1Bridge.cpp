@@ -118,6 +118,11 @@ void plugEvent(uint8_t kind, uint8_t a, uint8_t b)
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x53, kind, a, b, uint8_t(g_fine ? 1 : 0), 0xF7});
 }
 bool plugActive() { return g_view == kViewPlugin && g_plugPresent; }
+// Strip mode (SysEx 5A from the script): the fader is on the SSL channel strip's fader, not the track's volume.
+// The hand's position goes to the script (PLUGIN event kind 6), Cubase's volume is ignored, and the strip's value
+// (SysEx 5B) drives the motor. g_volPos keeps Cubase's last volume for the way back.
+std::atomic<bool> g_stripFader{false};
+std::atomic<int> g_volPos{-1};
 void paintHeader(bool force = false);
 void paintCsType(bool force);
 void paintEq(bool force);
@@ -290,6 +295,19 @@ bool jogNav(uint8_t id)   // 0x28 up, 0x29 left, 0x2A centre, 0x2B right, 0x2C d
     return true;
 }
 
+// The motor to a 14-bit fader value (as Cubase's pitch bend).
+void motorTo(uint16_t v14)
+{
+    const uint16_t pos = uf1m::midi14ToPos15(v14);
+    bool first;
+    { std::lock_guard<std::mutex> lk(g_engMx); first = !g_engaged; g_engaged = true; }
+    if (first) {
+        g_dev.send(::uf1::buildMotorPosition(pos));
+        g_dev.send(::uf1::buildMotorEnable(true));
+    }
+    g_dev.send(::uf1::buildMotorPosition(pos));
+}
+
 void onUf1Event(const ::uf1::InputEvent& ev)
 {
     using K = ::uf1::InputKind;
@@ -307,7 +325,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
     case K::FaderPosition: {
         if (!g_touched) break;   // otherwise it is only the motor reporting back
         const uint16_t v = uf1m::pos15ToMidi14(ev.position);
-        sendMidi({0xE0, uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
+        if (g_stripFader) plugEvent(6, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F));
+        else sendMidi({0xE0, uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
         g_dev.send(::uf1::buildMotorPosition(ev.position));   // keep the target under the hand
         break;
     }
@@ -1268,6 +1287,12 @@ void onSysex(const std::vector<unsigned char>& m)
         paintHeader();
     } else if (m[4] == 0x59 && m.size() >= 8) {
         uc1FollowStrip(m[5], m[6]);   // SHIFT + CHANNEL picked a strip: the UC1 follows
+    } else if (m[4] == 0x5A && m.size() >= 7) {
+        g_stripFader = m[5] != 0;
+        if (g_trace) std::printf("UF1 strip mode: fader on %s\n", g_stripFader ? "the channel strip" : "the track's volume");
+        if (!g_stripFader && g_volPos >= 0 && !g_touched) motorTo(uint16_t(g_volPos.load()));
+    } else if (m[4] == 0x5B && m.size() >= 8) {
+        if (g_stripFader && !g_touched) motorTo(uint16_t((m[5] << 7) | m[6]));
     } else if (m[4] == 0x58 && m.size() >= 7) {
         g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
         if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
@@ -1410,8 +1435,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
         return;
     }
     if (status == 0xE0 && (m[0] & 0x0F) == 0) {   // fader from Cubase
-        if (g_touched) return;
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
+        g_volPos = v;
+        if (g_touched || g_stripFader) return;
         const uint16_t pos = uf1m::midi14ToPos15(v);
         bool first;
         { std::lock_guard<std::mutex> lk(g_engMx); first = !g_engaged; g_engaged = true; }
