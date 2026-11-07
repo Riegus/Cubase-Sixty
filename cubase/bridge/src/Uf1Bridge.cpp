@@ -538,13 +538,13 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             }
             break;
         }
-        // The CHANNEL encoder's push: open / close the window of the plug-in the PLUGIN view is on (channel 2, note
-        // 60 + its insert slot; the script toggles the slot's edit switch), or without one the track's channel
-        // editor (the SEL note, which toggles it).
+        // The CHANNEL encoder's push: open / close the window of the plug-in the PLUGIN view is on (the script's
+        // insert viewer, channel 2: 60 = first slot, 61 = next slot, once per slot, 62 = toggle its window), or
+        // without one the track's channel editor (the SEL note, which toggles it).
         if (ev.id == 0x0D) {
             if (!ev.pressed) break;
             const int slot = g_plugSlot;
-            if (slot >= 0) cmd2(uint8_t(60 + slot));
+            if (slot >= 0) { cmd2(60); for (int i = 0; i < slot; ++i) cmd2(61); cmd2(62); }
             else { note(kNoteSel, true); note(kNoteSel, false); }
             break;
         }

@@ -1089,7 +1089,7 @@ function plugRescan(activeDevice) {
 
 function plugSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
 // The insert slot of the plug-in the PLUGIN view is on (SysEx 58 <slot 0-15, 7F = none>): the CHANNEL encoder's push
-// opens / closes its window (the bridge sends channel 2 note 60 + slot), or the track's channel editor without one.
+// opens / closes its window (the bridge steers the insert viewer below to it), or the track's channel editor without one.
 var slotReported = null
 function plugReportSlot(activeDevice, slot) {
 	var v = slot >= 0 ? slot : 0x7F
@@ -1232,16 +1232,20 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	}
 }
 
-// The insert slots' edit switches (open / close the plug-in's window): MIDI channel 2, notes 60-75, each press
-// toggles (the bridge sends the one for the slot the PLUGIN view is on, SysEx 58).
+// The plug-in window: one insert viewer (16 fixed-slot viewers made every track change lag). On the CHANNEL
+// encoder's push the bridge points it at the PLUGIN view's slot and toggles its edit switch: MIDI channel 2,
+// note 60 = first slot, 61 = next slot (once per slot), 62 = open / close.
 try {
-	for (var es = 0; es < 16; ++es) {
-		var editKey = surface.makeButton(es % 13, 16 + Math.floor(es / 13), 1, 1)
-		editKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 60 + es)
-		var editViewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyEdit' + es).accessSlotAtIndex(es)
-		page.makeValueBinding(editKey.mSurfaceValue, editViewer.mEdit).setTypeToggle()
+	var editViewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyEdit')
+	var editKeys = []
+	for (var es = 0; es < 3; ++es) {
+		editKeys.push(surface.makeButton(es, 16, 1, 1))
+		editKeys[es].mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 60 + es)
 	}
-} catch (e) { out('[CubaseSixty UF1] plug-in window switches could not be bound: ' + e) }
+	page.makeActionBinding(editKeys[0].mSurfaceValue, editViewer.mAction.mReset)
+	page.makeActionBinding(editKeys[1].mSurfaceValue, editViewer.mAction.mNext)
+	page.makeValueBinding(editKeys[2].mSurfaceValue, editViewer.mEdit).setTypeToggle()
+} catch (e) { out('[CubaseSixty UF1] plug-in window switch could not be bound: ' + e) }
 
 // ---------------------------------------------------------------------------
 // Presets: the bridge's preset browser (SHIFT + 5-8) reads the SSL preset file and sends each value (SysEx 3C <section>
