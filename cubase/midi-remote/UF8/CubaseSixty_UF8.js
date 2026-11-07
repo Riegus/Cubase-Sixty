@@ -198,12 +198,13 @@ for (var i = 0; i < STRIPS; ++i) {
 	page.makeValueBinding(strip.autoWrite.mSurfaceValue, channel.mValue.mAutomationWrite)
 		.setTypeToggle()
 	;(function (index, ch) {
-		skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null }
+		skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null, tag: -1, sent: null }
 		try { skDa[index] = page.mHostAccess.makeDirectAccess(ch) } catch (e) { if (index === 0) out('[CubaseSixty] no Direct Access, the SSL soft keys do nothing: ' + e) }
 		if (!skDa[index]) return
 		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 			skAm = activeMapping
-			if (skFocus && objectID === skStrip[index].obj) skReport(activeDevice, index)
+			// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
+			if (skFocus && objectID === skStrip[index].obj && tag === skStrip[index].tag) skReport(activeDevice, index)
 		}
 		skDa[index].mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 			skAm = activeMapping
@@ -836,9 +837,14 @@ function skTarget(index) {
 	var idx = slot.idx[st.model]
 	if (idx === null || idx === undefined) return null
 	var da = skDa[index]
-	try { return { da: da, obj: st.obj, tag: da.getParameterTagByIndex(skAm, st.obj, idx), kind: slot.kind } } catch (e) { return null }
+	try {
+		var tag = da.getParameterTagByIndex(skAm, st.obj, idx)
+		st.tag = tag
+		return { da: da, obj: st.obj, tag: tag, kind: slot.kind }
+	} catch (e) { return null }
 }
 function skReport(activeDevice, index) {
+	skStrip[index].tag = -1
 	var t = skTarget(index)
 	var body
 	if (!t) body = [0x20, index, 0, 0, 1].concat(toAscii7('-'))
@@ -850,13 +856,16 @@ function skReport(activeDevice, index) {
 		if (units && text.indexOf(units) < 0) text += units
 		body = [0x20, index, 1, Math.max(0, Math.min(127, Math.round(v * 127))), t.kind === 'b' ? 2 : 1].concat(toAscii7(text.replace(/\s+/g, ' ').trim()))
 	}
+	var key = body.join(',')
+	if (key === skStrip[index].sent) return   // unchanged
+	skStrip[index].sent = key
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7]))
 }
 function skReportAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) skReport(activeDevice, i) }
 function skMessage(activeDevice, m) {
 	if (m[4] === 0x21 && m.length >= 8) {
 		skFocus = m[5] === 0x7F ? null : { bank: m[5], slot: m[6] }
-		for (var i = 0; i < STRIPS; ++i) skStrip[i].wanted = null
+		for (var i = 0; i < STRIPS; ++i) { skStrip[i].wanted = null; skStrip[i].sent = null }
 		if (skFocus) skReportAll(activeDevice)
 		return
 	}

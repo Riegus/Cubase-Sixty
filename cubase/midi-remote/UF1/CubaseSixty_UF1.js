@@ -1049,7 +1049,9 @@ function plugPaint(activeDevice, force) {
 	if (force) { plug.sentInfo = null; plug.sentCells = [null, null, null, null]; plug.sentKeys = [null, null, null, null] }
 	var present = plug.obj >= 0 ? 1 : 0
 	var eqIn = 0
-	if (present && plug.kind.strip) { var eq = plugParam('EQ In'); eqIn = eq && plugValue(eq) >= 0.5 ? 1 : 0 }
+	// The parameters on show (EQ In, the cells, the keys): only their changes repaint (mOnParameterChange).
+	var watch = {}
+	if (present && plug.kind.strip) { var eq = plugParam('EQ In'); eqIn = eq && plugValue(eq) >= 0.5 ? 1 : 0; if (eq) watch[eq.tag] = true }
 	var info = [0x50, present, plug.page, plugPages(), eqIn, plug.ordinal & 0x7F].concat(toAscii7(present ? plug.kind.model : ''), [0x00], toAscii7(present ? plug.title : ''))
 	var infoKey = info.join(',')
 	if (infoKey !== plug.sentInfo) {
@@ -1060,11 +1062,13 @@ function plugPaint(activeDevice, force) {
 	}
 	if (!present) return
 	var pots = plugVpots()
-	for (var i = 0; i < 4; ++i) plugCell(activeDevice, i, pots[i])
+	for (var i = 0; i < 4; ++i) { plugCell(activeDevice, i, pots[i]); var cp = pots[i] ? plugParam(pots[i].param) : null; if (cp) watch[cp.tag] = true }
 	var keys = plugKeys()
+	plug.watch = watch
 	for (var k = 0; k < 4; ++k) {
 		var key = keys[k]
 		var p = key.param ? plugParam(key.param) : null
+		if (p) watch[p.tag] = true
 		var st = !p ? 2 : plugValue(p) >= 0.5 ? 1 : 0
 		var label = []
 		for (var c = 0; c < key.label.length; ++c) { var code = key.label.charCodeAt(c); label.push(code === 0xD8 ? 0x7F : code < 0x80 ? code : 0x3F) }
@@ -1133,7 +1137,8 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 if (plugDa) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		plugAm = activeMapping
-		if (objectID === plug.obj) plugPaint(activeDevice, false)
+		// Only a parameter on show repaints (a plug-in can report many changes, e.g. under automation).
+		if (objectID === plug.obj && (!plug.watch || plug.watch[tag])) plugPaint(activeDevice, false)
 		if (objectID === cubaseEq.eq || objectID === cubaseEq.filter) cubaseEqSend(activeDevice)
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
@@ -1150,11 +1155,12 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 var eqPollAt = 0
 page.mOnIdle = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
-	// Cubase's EQ is also read here, ten times a second: its changes do not reliably arrive as parameter changes.
+	// Cubase's EQ is also read here, about seven times a second: its changes do not reliably arrive as parameter
+	// changes.
 	// Only a changed band list is sent.
 	var t = Date.now()
 	if (t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
-		eqPollAt = t + 100
+		eqPollAt = t + 150
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
 	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
