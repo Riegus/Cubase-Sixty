@@ -920,8 +920,10 @@ var SOFT_KEYS = {
 }
 var PLUG_STEP = 0.02   // per detent (Rea-Sixty's kUf1CsVPotStep: about 50 detents end to end)
 
-var plug = { obj: -1, kind: null, title: '', ordinal: 0, page: 0, params: [], byName: {}, rescanAt: 0,
+var plug = { obj: -1, kind: null, title: '', ordinal: 0, page: 0, params: [], byName: {}, rescanAt: 0, custom: null, objs: {},
 	sentInfo: null, sentCells: [null, null, null, null], sentKeys: [null, null, null, null], wanted: {}, missing: {} }
+// Cubase's own channel strip on the PLUGIN view (when the UC1 is on it): pages built from its objects (cubasePages).
+var CUBASE_KIND = { type: 'cubase', model: 'Cubase', strip: false }
 
 function plugParam(name) {
 	if (!name || plug.obj < 0) return null
@@ -933,10 +935,16 @@ function plugParam(name) {
 	if (!hit && !plug.missing[name]) { plug.missing[name] = true; out('[CubaseSixty UF1] PLUGIN: "' + plug.title + '" has no parameter "' + name + '"') }
 	return hit
 }
-function plugValue(p) { return plugDa.getParameterProcessValue(plugAm, plug.obj, p.tag) }
-function plugPages() { return plug.kind ? PLUG_PAGES[plug.kind.type] : 1 }
-function plugVpots() { return plug.kind ? (VPOT_PAGES[plug.kind.type][plug.page] || EMPTY4) : EMPTY4 }
+// A slot's parameter: its own ref (Cubase's strip), else the plug-in's parameter of that name.
+function slotRef(slot) { return !slot ? null : slot.ref || plugParam(slot.param) }
+function plugValue(p) { return plugDa.getParameterProcessValue(plugAm, p.obj, p.tag) }
+function plugPages() { return plug.custom ? plug.custom.pages.length : plug.kind ? PLUG_PAGES[plug.kind.type] : 1 }
+function plugVpots() {
+	if (plug.custom) return plug.custom.pages[plug.page] || EMPTY4
+	return plug.kind ? (VPOT_PAGES[plug.kind.type][plug.page] || EMPTY4) : EMPTY4
+}
 function plugKeys() {
+	if (plug.custom) return plug.custom.keys[plug.page] || SK_EMPTY
 	if (!plug.kind) return SK_EMPTY
 	var keys = (SOFT_KEYS[plug.kind.type][plug.page] || SK_EMPTY).slice()
 	// 4K G: key 1 of the LF and HF pages follows the EQ colour (Pink = the G EQ, whose ÷3 / ×3 switches it is).
@@ -953,18 +961,19 @@ function plugKeys() {
 var PLUG_SKIP = { QuickControls: 1, Panner: 1, Modulators: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
 function plugWalk(base) {
 	var list = [], seen = {}
-	function rec(id, depth, parentType) {
+	function rec(id, depth, parentType, parent) {
 		if (list.length >= 300 || seen[id]) return
 		seen[id] = true
 		var type = ''
 		try { type = plugDa.getObjectTypeName(plugAm, id) } catch (e) {}
-		list.push({ id: id, type: type })
+		list.push({ id: id, type: type, parent: parent })
+		var me = list.length - 1
 		if (depth >= 4 || (/Channel$/.test(parentType) && PLUG_SKIP[type])) return
 		var n = 0
 		try { n = plugDa.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
-		for (var i = 0; i < n && i < 256; ++i) rec(plugDa.getChildObjectID(plugAm, id, i), depth + 1, type)
+		for (var i = 0; i < n && i < 256; ++i) rec(plugDa.getChildObjectID(plugAm, id, i), depth + 1, type, me)
 	}
-	rec(base, 0, '')
+	rec(base, 0, '', -1)
 	return list
 }
 function plugRescan(activeDevice) {
@@ -973,9 +982,19 @@ function plugRescan(activeDevice) {
 	try { base = plugDa.getBaseObjectID(plugAm) } catch (e) { return }
 	var objects = plugWalk(base)
 	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1, sslOrd = 0, strips = []
+	var compObj = -1, gateObj = -1, compTitle = '', gateTitle = ''
 	for (var i = 0; i < objects.length; ++i) {
 		if (objects[i].type === 'EQ' && eqObj < 0) eqObj = objects[i].id
 		if (objects[i].type === 'InputFilter' && filterObj < 0) filterObj = objects[i].id
+		// Cubase's strip modules sit in slots under the channel's "Strips" (insert plug-ins in slots under "Inserts").
+		var par = objects[i].parent
+		if (objects[i].type !== 'Slot' && par >= 0 && objects[par].type === 'Slot' && objects[par].parent >= 0 && objects[objects[par].parent].type === 'Strips') {
+			var mt = ''
+			try { mt = plugDa.getObjectTitle(plugAm, objects[i].id) } catch (e) {}
+			if (/gate/i.test(mt) && gateObj < 0) { gateObj = objects[i].id; gateTitle = mt }
+			else if (/comp/i.test(mt) && compObj < 0) { compObj = objects[i].id; compTitle = mt }
+			continue
+		}
 		var title = '', n = 0
 		try { title = plugDa.getObjectTitle(plugAm, objects[i].id) } catch (e) {}
 		try { n = plugDa.getNumberOfParameters(plugAm, objects[i].id) } catch (e) {}
@@ -993,6 +1012,8 @@ function plugRescan(activeDevice) {
 	if (uc1Choice && uc1Choice.kind === 2) { strip = null; busComp = null }
 	else if (uc1Choice && uc1Choice.kind === 1) for (var si = 0; si < strips.length; ++si) if (strips[si].sslOrd === uc1Choice.ord) strip = strips[si]
 	var found = strip || busComp
+	var cubaseId = eqObj >= 0 ? eqObj : filterObj
+	if (uc1Choice && uc1Choice.kind === 2 && cubaseId >= 0) found = { id: cubaseId, kind: CUBASE_KIND, title: 'Cubase', ordinal: 0 }
 	var id = found ? found.id : -1
 	// Cubase's own channel EQ and input filter, for the EQ graph on tracks without an SSL channel strip.
 	cubaseEq.eq = eqObj
@@ -1018,7 +1039,12 @@ function plugRescan(activeDevice) {
 	var eqWhere = (eqObj >= 0 ? 'EQ' : 'no EQ') + ', ' + (filterObj >= 0 ? 'input filter' : 'no input filter')
 	if (!strip && eqWhere !== cubaseEq.logged) { cubaseEq.logged = eqWhere; out('[CubaseSixty UF1] EQ graph: Cubase channel (' + eqWhere + ', ' + Object.keys(cubaseEq.tags).length + ' parameters)') }
 	cubaseEqSend(activeDevice)
-	if (id !== plug.obj) {
+	var wasCustom = !!plug.custom
+	plug.custom = found && found.kind === CUBASE_KIND ? cubasePages(filterObj, eqObj, compObj, compTitle, gateObj, gateTitle) : null
+	plug.objs = {}
+	if (plug.custom) { plug.objs = plug.custom.objs; if (plug.page >= plug.custom.pages.length) plug.page = 0 }
+	else if (id >= 0) plug.objs[id] = true
+	if (id !== plug.obj || wasCustom !== !!plug.custom) {
 		plug.obj = id
 		plug.kind = found ? found.kind : null
 		plug.title = found ? found.title : ''
@@ -1027,16 +1053,17 @@ function plugRescan(activeDevice) {
 		plug.byName = {}
 		plug.wanted = {}
 		plug.params = []
-		if (found) {
+		if (found && !plug.custom) {
 			var count = plugDa.getNumberOfParameters(plugAm, id)
 			for (var p = 0; p < count && p < 256; ++p) {
 				var tag = plugDa.getParameterTagByIndex(plugAm, id, p)
 				var t = ''
 				try { t = plugDa.getParameterTitle(plugAm, id, tag, 48) } catch (e) {}
-				plug.params.push({ tag: tag, title: t, lower: String(t).toLowerCase() })
+				plug.params.push({ obj: id, tag: tag, title: t, lower: String(t).toLowerCase() })
 			}
 		}
-		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters)' : 'no SSL plug-in, V-pots on Quick Controls'))
+		out('[CubaseSixty UF1] PLUGIN: ' + (plug.custom ? "Cubase's channel strip (" + plug.custom.pages.length + ' pages: ' + plug.custom.names.join(', ') + ')'
+			: found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters)' : 'no SSL plug-in, V-pots on Quick Controls'))
 	}
 	plugPaint(activeDevice, true)
 }
@@ -1061,8 +1088,8 @@ function plugPaint(activeDevice, force) {
 	var keys = plugKeys()
 	for (var k = 0; k < 4; ++k) {
 		var key = keys[k]
-		var p = key.param ? plugParam(key.param) : null
-		var st = !p ? 2 : plugValue(p) >= 0.5 ? 1 : 0
+		var p = key.ref || (key.param ? plugParam(key.param) : null)
+		var st = !p ? 2 : (plugValue(p) >= 0.5) !== !!key.invert ? 1 : 0
 		var label = []
 		for (var c = 0; c < key.label.length; ++c) { var code = key.label.charCodeAt(c); label.push(code === 0xD8 ? 0x7F : code < 0x80 ? code : 0x3F) }
 		var body = [0x52, k, st].concat(label)
@@ -1073,14 +1100,14 @@ function plugPaint(activeDevice, force) {
 	}
 }
 function plugCell(activeDevice, i, slot) {
-	var p = slot ? plugParam(slot.param) : null
+	var p = slotRef(slot)
 	var body
 	if (!p) body = [0x51, i, 0, 0]
 	else {
 		var v = plugValue(p)
-		var value = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag))
+		var value = String(plugDa.getParameterDisplayValue(plugAm, p.obj, p.tag))
 		var units = ''
-		try { units = plugDa.getParameterDisplayUnits(plugAm, plug.obj, p.tag) || '' } catch (e) {}
+		try { units = plugDa.getParameterDisplayUnits(plugAm, p.obj, p.tag) || '' } catch (e) {}
 		if (units && value.indexOf(units) < 0) value += units
 		body = [0x51, i, Math.max(0, Math.min(100, Math.round(v * 100))), (slot.bipolar ? 1 : 0) | 2].concat(toAscii7(slot.label + '|' + value))
 	}
@@ -1100,7 +1127,7 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 	}
 	if (kind === 0 || kind === 1) {
 		var slot = plugVpots()[a]
-		var p = slot ? plugParam(slot.param) : null
+		var p = slotRef(slot)
 		if (!p) return
 		var v
 		if (kind === 1) {
@@ -1109,20 +1136,21 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 		} else {
 			// A parameter with a few steps (a ratio) snaps a small change back, so while the V-pot turns (steps less
 			// than 1 s apart) the turn is added up here instead of read back from the plug-in.
-			var now = Date.now(), w = plug.wanted[p.tag]
+			var now = Date.now(), wk = p.obj + ':' + p.tag, w = plug.wanted[wk]
 			var from = w && now - w.at < 1000 ? w.value : plugValue(p)
 			v = Math.max(0, Math.min(1, from + (b - 64) * PLUG_STEP * (fine ? 0.25 : 1)))
-			plug.wanted[p.tag] = { value: v, at: now }
+			plug.wanted[wk] = { value: v, at: now }
 		}
-		plugDa.setParameterProcessValue(plugAm, plug.obj, p.tag, v)
+		plugDa.setParameterProcessValue(plugAm, p.obj, p.tag, v)
+		if (slot.enable && plugValue(slot.enable) < 0.5) { plugDa.setParameterProcessValue(plugAm, slot.enable.obj, slot.enable.tag, 1); plugPaint(activeDevice, false) }
 		plugCell(activeDevice, a, slot)
 		return
 	}
 	if (kind === 2) {
 		var key = plugKeys()[a]
-		var q = key && key.param ? plugParam(key.param) : null
+		var q = key ? key.ref || (key.param ? plugParam(key.param) : null) : null
 		if (!q) return
-		plugDa.setParameterProcessValue(plugAm, plug.obj, q.tag, plugValue(q) >= 0.5 ? 0 : 1)
+		plugDa.setParameterProcessValue(plugAm, q.obj, q.tag, plugValue(q) >= 0.5 ? 0 : 1)
 		plugPaint(activeDevice, false)
 	}
 }
@@ -1130,7 +1158,7 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 if (plugDa) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		plugAm = activeMapping
-		if (objectID === plug.obj) plugPaint(activeDevice, false)
+		if (plug.objs[objectID]) plugPaint(activeDevice, false)
 		if (objectID === cubaseEq.eq || objectID === cubaseEq.filter) cubaseEqSend(activeDevice)
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
@@ -1347,5 +1375,87 @@ function cubaseEqSend(activeDevice) {
 function asciiAll(text) {
 	var r = []
 	for (var i = 0; i < text.length; ++i) { var c = text.charCodeAt(i); r.push(c >= 0x20 && c < 0x80 ? c : 0x3F) }
+	return r
+}
+
+// ---------------------------------------------------------------------------
+// Cubase's own channel strip on the PLUGIN view, in pages like an SSL strip: INPUT (input gain, low / high cut), the
+// four EQ bands (gain, frequency, Q), then the strip's compressor and gate modules when loaded (their adjustable
+// parameters in order, four to a page; the switches are left out). Soft keys: polarity / cut switches / EQ on the
+// input page, band on / invert / EQ on the EQ pages, the module's on switch on its pages.
+// ---------------------------------------------------------------------------
+function cubaseParams(obj) {
+	var out = []
+	if (obj < 0) return out
+	var n = 0
+	try { n = plugDa.getNumberOfParameters(plugAm, obj) } catch (e) {}
+	for (var i = 0; i < n && i < 80; ++i) {
+		var tag = plugDa.getParameterTagByIndex(plugAm, obj, i)
+		var t = ''
+		try { t = plugDa.getParameterTitle(plugAm, obj, tag, 32) } catch (e) {}
+		if (t) out.push({ obj: obj, tag: tag, title: t })
+	}
+	return out
+}
+function cubaseFind(list, rx, notRx) {
+	for (var i = 0; i < list.length; ++i) if (rx.test(list[i].title) && !(notRx && notRx.test(list[i].title))) return list[i]
+	return null
+}
+// enable: the switch a turn switches on (an EQ band, a cut filter), as on the UC1.
+function cvp(ref, label, bipolar, enable) { return ref ? { ref: ref, label: label, bipolar: !!bipolar, enable: enable || null } : NONE }
+function csk(ref, label, invert) { return ref ? { ref: ref, label: label, invert: !!invert } : SK0 }
+function cubasePages(filterObj, eqObj, compObj, compTitle, gateObj, gateTitle) {
+	var r = { pages: [], keys: [], names: [], objs: {} }
+	var inList = cubaseParams(filterObj), eqList = cubaseParams(eqObj)
+	var eqOn = csk(cubaseFind(eqList, /^bypass$/i), 'EQ', true)   // lit while the EQ is not bypassed
+	if (filterObj >= 0) {
+		r.objs[filterObj] = true
+		var lcOn = cubaseFind(inList, /^lc-on$/i), hcOn = cubaseFind(inList, /^hc-on$/i)
+		r.pages.push([cvp(cubaseFind(inList, /^pregain$|gain/i), 'In Trim', true), cvp(cubaseFind(inList, /^lc-freq$/i), 'Low Cut', false, lcOn),
+			cvp(cubaseFind(inList, /^hc-freq$/i), 'High Cut', false, hcOn), NONE])
+		r.keys.push([csk(cubaseFind(inList, /^phase$/i), '\u00d8'), csk(lcOn, 'LOW CUT'), csk(hcOn, 'HIGH CUT'), eqOn])
+		r.names.push('input')
+	}
+	if (eqObj >= 0) {
+		r.objs[eqObj] = true
+		var bandNames = ['LF', 'LMF', 'HMF', 'HF']
+		for (var b = 1; b <= 4; ++b) {
+			var bn = bandNames[b - 1], bandOn = cubaseFind(eqList, new RegExp('^EQ ' + b + ' On$', 'i'))
+			r.pages.push([cvp(cubaseFind(eqList, new RegExp('^EQ ' + b + ' Gain$', 'i')), bn + ' Gain', true, bandOn),
+				cvp(cubaseFind(eqList, new RegExp('^EQ ' + b + ' Freq$', 'i')), bn + ' Freq', false, bandOn),
+				cvp(cubaseFind(eqList, new RegExp('^EQ ' + b + ' Q$', 'i')), bn + ' Q', false, bandOn), NONE])
+			r.keys.push([csk(bandOn, bn + ' ON'),
+				csk(cubaseFind(eqList, new RegExp('^Invert ' + b + '$', 'i')), 'INVERT'), SK0, eqOn])
+			r.names.push(bn)
+		}
+	}
+	// A dynamics module: its adjustable parameters (a numeric value; switches read On / Off), four to a page.
+	function module(obj, title, short) {
+		if (obj < 0) return
+		r.objs[obj] = true
+		var list = cubaseParams(obj), knobs = [], onSwitch = null, invert = false
+		for (var i = 0; i < list.length; ++i) {
+			var p = list[i]
+			if (/bypass/i.test(p.title)) { if (!onSwitch) { onSwitch = p; invert = true } continue }
+			if (/^(on|active)$/i.test(p.title)) { if (!onSwitch) onSwitch = p; continue }
+			if (/reset|fastparam|show|^-$/i.test(p.title)) continue
+			var text = ''
+			try { text = String(plugDa.getParameterDisplayValue(plugAm, obj, p.tag)) } catch (e) {}
+			if (/^\s*(on|off)\s*$/i.test(text)) continue
+			knobs.push(p)
+		}
+		var key = csk(onSwitch, short === 'Comp' ? 'DYN' : 'GATE', invert)
+		for (var k = 0; k < knobs.length && k < 12; k += 4) {
+			var page = []
+			for (var j = 0; j < 4; ++j) page.push(knobs[k + j] ? cvp(knobs[k + j], cellName(knobs[k + j].title)) : NONE)
+			r.pages.push(page)
+			r.keys.push([SK0, SK0, SK0, key])
+			r.names.push(title)
+		}
+		if (!knobs.length) { r.pages.push(EMPTY4); r.keys.push([SK0, SK0, SK0, key]); r.names.push(title) }
+	}
+	module(compObj, compTitle, 'Comp')
+	module(gateObj, gateTitle, 'Gate')
+	if (!r.pages.length) { r.pages.push(EMPTY4); r.keys.push(SK_EMPTY); r.names.push('empty') }
 	return r
 }

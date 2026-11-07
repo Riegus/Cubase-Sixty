@@ -835,7 +835,7 @@ void paintCsType(bool force)
     static std::string shown = "\x01";
     std::string t;
     { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent ? g_plugModel : std::string(); }
-    if (t.empty()) t.assign(12, ' ');
+    if (t.empty() || t == "Cubase") t.assign(12, ' ');   // SSL's types only (the firmware knows them)
     if (!force && t == shown) return;
     shown = t;
     std::vector<uint8_t> p{0x00};
@@ -858,7 +858,7 @@ void paintEq(bool force)
     bool drawn = false;
     std::string model;
     { std::lock_guard<std::mutex> lk(g_cellMx); model = g_plugModel; }
-    const bool strip = g_plugPresent && !model.empty() && model != "BC 2";
+    const bool strip = g_plugPresent && !model.empty() && model != "BC 2" && model != "Cubase";   // an SSL channel strip
     if (strip && g_plugEqIn && g_trackNo > 0) {
         ensureSslCore();
         std::vector<float> wire;
