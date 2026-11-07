@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.11.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.12.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -143,27 +143,62 @@ var bankZone = page.mHostAccess.mMixConsole
 	.excludeInputChannels()
 	.excludeOutputChannels()
 
-// FLIP swaps faders and V-pots on all strips (faders on pan, V-pots on volume). Two sub-pages, activated by
-// the bridge with notes 77 (normal) / 78 (flipped).
-var flipArea = page.makeSubPageArea('Flip')
-var flipNormal = flipArea.makeSubPage('Normal')
-var flipFlipped = flipArea.makeSubPage('Flipped')
-var uf8FlipActive = false
+// What the faders and the V-pots are on: two sub-page areas, switched by the bridge (MIDI channel 2):
+//   faders: note 80 = track volume, 81 = track pan (FLIP), 82-89 = send 1-8 of each track (SEND / PLUGIN 1-8,
+//           Rea-Sixty's "Send N -> all tracks"; CUT = that send on / off)
+//   V-pots: note 90 = track pan, 91 = track volume (FLIP), 92 = sends 1-8 of the selected track (long FLIP,
+//           Rea-Sixty's "8 sends of focused track")
+// The strip's name shows the send's destination while a send view is on (the faders' one wins).
+var faderArea = page.makeSubPageArea('Faders')
+var vpotArea = page.makeSubPageArea('VPots')
+var faderVol = faderArea.makeSubPage('Volume')
+var faderPan = faderArea.makeSubPage('Pan')
+var faderSend = []
+for (var fs = 0; fs < 8; ++fs) faderSend.push(faderArea.makeSubPage('Send' + (fs + 1)))
+var vpotPan = vpotArea.makeSubPage('Pan')
+var vpotVol = vpotArea.makeSubPage('Volume')
+var vpotSends = vpotArea.makeSubPage('SelectedSends')
+var route = { fader: 'vol', send: -1, vpot: 'pan' }   // fader: vol / pan / send (send = 0..7); vpot: pan / vol / sends
+var uf8FlipActive = false   // (the fader on pan)
 var flipResets = []
+var sendTitles = []       // [strip][send]: each banked track's send destinations
+var selSendTitles = []    // [send]: the selected track's
+for (var st = 0; st < 8; ++st) sendTitles.push(['', '', '', '', '', '', '', ''])
+var routeSelected = page.mHostAccess.mTrackSelection.mMixerChannel
+function routeChanged(activeDevice) {
+	uf8FlipActive = route.fader === 'pan'
+	for (var r = 0; r < flipResets.length; ++r) flipResets[r]()
+	for (var i = 0; i < STRIPS; ++i) paintStripName(activeDevice, i)
+}
+// The name a strip shows: the send's destination in a send view, else the track's.
+function paintStripName(activeDevice, index) {
+	var text = stripTitles[index] || ''
+	// (A track without that send shows a blank name, not an empty one: the bridge takes an empty name as no track
+	// on the strip and switches its LEDs off.)
+	if (route.fader === 'send') text = text ? (sendTitles[index][route.send] || ' ') : ''
+	else if (route.vpot === 'sends') text = selSendTitles[index] || ' '
+	sendStripName(activeDevice, index, text)
+}
 ;(function () {
-	var normalKey = surface.makeButton(34, 14, 1, 1)
-	var flippedKey = surface.makeButton(35, 14, 1, 1)
-	normalKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 77)
-	flippedKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 78)
-	page.makeActionBinding(normalKey.mSurfaceValue, flipNormal.mAction.mActivate)
-	page.makeActionBinding(flippedKey.mSurfaceValue, flipFlipped.mAction.mActivate)
-	function setFlip(on) {
-		if (on === uf8FlipActive) return
-		uf8FlipActive = on
-		for (var r = 0; r < flipResets.length; ++r) flipResets[r]()
+	function key(note, sub, apply) {
+		var k = surface.makeButton(30 + (note - 80) % 6, 15 + Math.floor((note - 80) / 6), 1, 1)
+		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, note)
+		page.makeActionBinding(k.mSurfaceValue, sub.mAction.mActivate)
+		sub.mOnActivate = function (activeDevice) { apply(); routeChanged(activeDevice) }
 	}
-	flipNormal.mOnActivate = function (activeDevice) { setFlip(false) }
-	flipFlipped.mOnActivate = function (activeDevice) { setFlip(true) }
+	key(80, faderVol, function () { route.fader = 'vol' })
+	key(81, faderPan, function () { route.fader = 'pan' })
+	for (var n = 0; n < 8; ++n) (function (n) { key(82 + n, faderSend[n], function () { route.fader = 'send'; route.send = n }) })(n)
+	key(90, vpotPan, function () { route.vpot = 'pan' })
+	key(91, vpotVol, function () { route.vpot = 'vol' })
+	key(92, vpotSends, function () { route.vpot = 'sends' })
+	for (var s = 0; s < 8; ++s) (function (s) {
+		var slot = routeSelected.mSends.getByIndex(s)
+		slot.mOnTitleChange = function (activeDevice, activeMapping, title) {
+			selSendTitles[s] = title || ''
+			if (route.vpot === 'sends' && route.fader !== 'send') paintStripName(activeDevice, s)
+		}
+	})(s)
 })()
 
 // SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
@@ -173,11 +208,25 @@ for (var i = 0; i < STRIPS; ++i) {
 	var strip = strips[i]
 
 	page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mVolume)
-		.setValueTakeOverModeJump().setSubPage(flipNormal)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(flipNormal)
+		.setValueTakeOverModeJump().setSubPage(faderVol)
 	page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mPan)
-		.setValueTakeOverModeJump().setSubPage(flipFlipped)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(flipFlipped)
+		.setValueTakeOverModeJump().setSubPage(faderPan)
+	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(vpotPan)
+	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(vpotVol)
+	page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mLevel).setSubPage(vpotSends)
+	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderVol)
+	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderPan)
+	for (var sn = 0; sn < 8; ++sn) {
+		var sendSlot = channel.mSends.getByIndex(sn)
+		page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mLevel).setValueTakeOverModeJump().setSubPage(faderSend[sn])
+		page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(faderSend[sn])
+		;(function (index, n) {
+			sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
+				sendTitles[index][n] = title || ''
+				if (route.fader === 'send' && route.send === n) paintStripName(activeDevice, index)
+			}
+		})(i, sn)
+	}
 	page.makeValueBinding(strip.select.mSurfaceValue, channel.mValue.mSelected)
 	;(function (index) {
 		// Which strips are selected: tells two tracks with the same name apart (follow selection, below).
@@ -187,8 +236,6 @@ for (var i = 0; i < STRIPS; ++i) {
 		}
 	})(i)
 	page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
-		.setTypeToggle()
-	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute)
 		.setTypeToggle()
 	// Top soft key = record-enable for the track (its LED shows the state).
 	page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
@@ -246,8 +293,8 @@ for (var i = 0; i < STRIPS; ++i) {
 	;(function (index) {
 		channel.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			dbg('title strip ' + (index + 1) + ': [' + title + ']')
-			sendStripName(activeDevice, index, title)
 			stripTitles[index] = title
+			paintStripName(activeDevice, index)
 			if (skStrip[index]) { skStrip[index].scanned = false; skStrip[index].wanted = null; skAm = activeMapping; skRescanAt = Date.now() + 150 }
 			updateArmable(activeDevice, index)
 			seekOnTitle(activeDevice)
@@ -278,6 +325,19 @@ for (var i = 0; i < STRIPS; ++i) {
 			lastPanPos = pos
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, pos, 0xF7]))
 		}
+		// The V-pot on a send of the selected track: "Send" + its level on the value line, a unipolar ring.
+		function sendText(activeDevice, value, units) {
+			var text = 'S' + String(value) + (units ? units : '')
+			if (text === lastPanText) return
+			lastPanText = text
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(String(value) + (units ? ' ' + units : '')), [0xF7]))
+		}
+		function sendPos(activeDevice, value) {
+			var pos = Math.max(0, Math.min(127, Math.round(value * 127)))
+			if (pos === lastPanPos + 1000) return
+			lastPanPos = pos + 1000
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos, 0xF7]))
+		}
 		function dbText(activeDevice, value) {
 			var text = String(value)
 			if (text === lastDb) return
@@ -285,16 +345,19 @@ for (var i = 0; i < STRIPS; ++i) {
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 		}
 		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-			if (uf8FlipActive) dbText(activeDevice, value); else panText(activeDevice, value, units)
+			if (route.vpot === 'sends') sendText(activeDevice, value, units)
+			else if (route.vpot === 'vol') dbText(activeDevice, value)
+			else panText(activeDevice, value, units)
 		}
 		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-			if (!uf8FlipActive) panPos(activeDevice, value)
+			if (route.vpot === 'sends') sendPos(activeDevice, value)
+			else if (route.vpot === 'pan') panPos(activeDevice, value)
 		}
 		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-			if (uf8FlipActive) panText(activeDevice, value, units); else dbText(activeDevice, value)
+			if (route.fader === 'pan') panText(activeDevice, value, units); else dbText(activeDevice, value)
 		}
 		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-			if (uf8FlipActive) panPos(activeDevice, value)
+			if (route.fader === 'pan') panPos(activeDevice, value)
 		}
 	})(i, strip.vpot, strip.fader)
 

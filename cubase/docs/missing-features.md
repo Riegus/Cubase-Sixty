@@ -6,8 +6,7 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. UF8 Send view: one send across the eight strips.
-2. Fader on the channel strip's output gain (UF1 strip mode).
+1. Fader on the channel strip's output gain (UF1 strip mode).
 
 ## UF8
 
@@ -20,7 +19,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
   comp pages, user sets), user bindings and layers, dynamic soft-key banks.
 - **SSL Strip Mode / UF8 Plug-in Mode**: a channel strip's or a plug-in's controls across the eight V-pots (and
   faders).
-- **Send and Receive views** spread across the strips.
+- **Send and Receive views**: the send views are done (Send N on the faders, the selected track's sends on the
+  V-pots); missing are the Receive views (no receives in the API), send pan, send solo, paging past send 8.
 - **Nav Mode**: markers and regions on the strips (with auto-follow).
 - **Two UF8s** (16 strips); **the UF1 as an extender** (a 9th fader) and Pin Set.
 - **Solo / Mute modifier modes**, the **MIDI CC layer**, the **layer keys**.
