@@ -286,10 +286,18 @@ void handleFrame(const uf8frames::Frame& fr)
     case 0x24: {   // v-pot: FF 24 02 strip raw ck (strip 8 = the CHANNEL encoder)
         const uint8_t s = d[3];
         if (s == 8) {
-            const int delta = uf8frames::vpotDelta(d[4]);
+            // The encoder reports about four counts per notch (Rea-Sixty: kChannelEncoderScale = 4): one step per
+            // four, the rest kept for the next frame (it starts again when the direction changes).
+            static int acc = 0;
+            const int raw = uf8frames::vpotDelta(d[4]);
+            if (raw == 0) break;
+            if ((acc > 0 && raw < 0) || (acc < 0 && raw > 0)) acc = 0;
+            acc += raw;
+            const int delta = acc / 4;
+            acc -= delta * 4;
             if (delta == 0) break;
             if (g_encHeld) {   // picking a mode
-                g_encPick = std::clamp(g_encPick + (delta > 0 ? 1 : -1), 0, kEncModes - 1);
+                g_encPick = std::clamp(g_encPick + delta, 0, kEncModes - 1);
                 paintEncPicker();
                 break;
             }
