@@ -164,6 +164,10 @@ deviceDriver.mOnIdle = function (activeDevice) {
 	flushLog(activeDevice)
 	var now = 0
 	try { now = Date.now() } catch (e) { return }
+	if (qcResendAt && now >= qcResendAt) {
+		qcResendAt = 0
+		if (qcActive) for (var q = 0; q < 4; ++q) sendQcCell(activeDevice, q)
+	}
 	if (now - vpotIdleLast < 1000) return
 	vpotIdleLast = now
 	for (var i = 0; i < 4; ++i) {
@@ -202,6 +206,15 @@ function sendCellInfo(activeDevice, index, cell) {
 	cell.sent = key
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x15, index, cell.pos], toAscii7(text), [0xF7]))
 }
+// A Quick Control's cell from what its callbacks last reported (name, value, position). Built again on each of
+// them, because Cubase reports a new name and a new value separately (and not at all when it did not change).
+function sendQcCell(activeDevice, index) {
+	var c = sendCells[index]
+	if (!c) return
+	var name = c.qcTitle || '', v = c.qcValue || ''
+	qcCells[index] = [0x51, index, c.qcPos || 0, name || v ? 2 : 0].concat(toAscii7(name || v ? cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + v : ''))
+	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
+}
 function attachSendFeedback(surfaceValue, number) {
 	var title = ''
 	var lastText = null
@@ -210,6 +223,8 @@ function attachSendFeedback(surfaceValue, number) {
 	sendCells[number - 1] = cell
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
 		title = valueTitle || objectTitle || ''
+		cell.qcTitle = title
+		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
 		if (!qcActive) {
@@ -221,9 +236,8 @@ function attachSendFeedback(surfaceValue, number) {
 		if (qcActive) {
 			// PLUGIN view without an SSL plug-in: the Quick Control's name and value in the V-pot cell (kept, so
 			// they can be sent again when the SSL plug-in goes away).
-			var qv = String(value) + (units ? units : '')
-			qcCells[number - 1] = [0x51, number - 1, cell.qcPos || 0, title || qv ? 2 : 0].concat(toAscii7(title || qv ? cellName(title || 'QC' + (number + sendOffset)) + '|' + qv : ''))
-			if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[number - 1], [0xF7]))
+			cell.qcValue = String(value) + (units ? units : '')
+			sendQcCell(activeDevice, number - 1)
 		}
 		if (qcActive) {
 			var v = String(value) + (units ? units : '')
@@ -238,7 +252,8 @@ function attachSendFeedback(surfaceValue, number) {
 	}
 	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 		reportVpotPosition(activeDevice, number - 1, value)
-		cell.qcPos = Math.max(0, Math.min(100, Math.round(value * 100)))
+		var qp = Math.max(0, Math.min(100, Math.round(value * 100)))
+		if (qcActive && qp !== cell.qcPos) { cell.qcPos = qp; sendQcCell(activeDevice, number - 1) } else cell.qcPos = qp
 		if (!qcActive) { cell.pos = Math.max(0, Math.min(100, Math.round(value * 100))); sendCellInfo(activeDevice, number - 1, cell) }
 		if (value === lastPos) return
 		lastPos = value
@@ -304,8 +319,11 @@ var sendOffset = 0
 var qcActive = false
 sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false; refreshCellNames(activeDevice) }
 sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false; refreshCellNames(activeDevice) }
-qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true }
-qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true }
+// After a switch between 1-4 and 5-8 the cells are sent once more a moment later, when Cubase has reported the
+// new Quick Controls (the order of its callbacks and the activation is not fixed).
+var qcResendAt = 0
+qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true; qcResendAt = Date.now() + 150 }
+qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true; qcResendAt = Date.now() + 150 }
 activatorButton(2, 53, sends14)
 activatorButton(3, 54, sends58)
 activatorButton(6, 88, qc14)
