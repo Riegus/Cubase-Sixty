@@ -7,9 +7,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 ## Suggested next (value for the effort)
 
 1. More CHANNEL encoder modes: Nudge, Markers, Bank by 1.
-2. UF1 quick key 1 = clear all solos (small).
-3. UC1 favourites.
-4. UF1 jog modes.
+2. UC1 favourites.
+3. UF1 jog modes.
 
 ## UF8
 
@@ -48,7 +47,6 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 - **Receives** in the SENDS view; send solo / cut.
 - **CHANNEL encoder**: push = open / close the plug-in window, SHIFT + turn = step through the track's plug-in
   instances; the encoder modes shown in the header.
-- **Quick key 1** = clear all solos.
 - **PLUGIN**: Cubase's own channel strip in pages (tried and rolled back), jump to the page of a control touched in
   the plug-in window, HQ MODE / A/B, the Harrison 32C.
 - Fader on the channel strip's output gain (strip mode).

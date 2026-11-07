@@ -52,8 +52,8 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 - **Channel encoder** (not yet). Rea-Sixty: push opens / closes the plug-in window, SHIFT + turn steps through the
   plug-in instances, and other encoder modes can be picked (shown in the header). Cubase-Sixty: turn steps the
   track; nothing else yet.
-- **Quick key 1** (not yet). Rea-Sixty: clears every solo. Cubase-Sixty: nothing without SHIFT (SHIFT + 1 = Latch).
-  Quick key 2 is FINE in both (a quarter of the step, shown in the header's FINE CTRL field).
+- **Quick keys 1 and 2** (match Rea-Sixty): 1 clears every solo, 2 is FINE (a quarter of the step, shown in the
+  header's FINE CTRL field). With SHIFT they are Latch / Touch.
 - **5-8** (chosen). Rea-Sixty in PLUGIN: nothing on a plain press. Cubase-Sixty: Quick Controls 1–4 / 5–8 there,
   sends 1–4 / 5–8 in DAW and SENDS. SHIFT + 5-8 opens the preset browser in both.
 - **Preset browser** (chosen). Rea-Sixty also browses REAPER's own presets for plug-ins that are not SSL's and opens

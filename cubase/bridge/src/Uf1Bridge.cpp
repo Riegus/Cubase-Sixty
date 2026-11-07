@@ -382,6 +382,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id >= 0x09 && ev.id <= 0x0C && g_presetsOpen) { if (ev.pressed && ev.id == 0x0C) g_browserLoad = true; break; }   // V-pot 4 = Select
         if (ev.id >= 0x09 && ev.id <= 0x0C && plugActive()) { if (ev.pressed) plugEvent(1, uint8_t(ev.id - 0x09), 0); break; }
+        // Quick key 1 (without SHIFT): clear every solo (MIDI channel 2, note 20; the script runs Cubase's
+        // "Deactivate All Solo").
+        if (ev.id == 0x34) {
+            sendMidi({uint8_t(ev.pressed ? 0x91 : 0x81), 20, uint8_t(ev.pressed ? 127 : 0)});
+            break;
+        }
         // Quick key 2 (without SHIFT): FINE on / off.
         if (ev.id == 0x35) {
             if (ev.pressed) { g_fine = !g_fine; paintHeader(); if (g_trace) std::printf("UF1 FINE %s\n", g_fine ? "on" : "off"); }
