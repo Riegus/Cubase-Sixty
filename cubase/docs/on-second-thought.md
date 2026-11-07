@@ -9,8 +9,10 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 
 - **Top soft keys and selection modes** (matches Rea-Sixty since 7.11.2026). The top soft keys are SSL's soft keys
   (V-POT / 1–5 pages, a key puts its parameter on the V-pots), and NORM / REC / AUTO set what SEL does. Differences
-  left: AUTO toggles the track's Write (W) instead of stepping a per-track automation mode (Cubase has none); Q1–Q3,
-  the bus-comp pages, user banks and REC + MON are not there yet (see Missing features).
+  left: AUTO toggles the track's Write (W) instead of stepping a per-track automation mode (Cubase has none); Q3, user
+  banks and REC + MON are not there yet (see Missing features). Q1 / Q2 switch between the channel strip's and the
+  bus comp's pages; BUS COMP shows the compressor in (On = compressing) where Rea-Sixty shows the plug-in's bypass
+  as it is (chosen).
 - **SSL Strip Mode** (partly). As Rea-Sixty: PLUGIN puts each fader on its track's SSL channel strip fader, tracks
   without one keep volume. Not yet: the V-pots on the strip's pan, the strip's name in the colour bar. FLIP (chosen) is a
   plain swap there too: faders on the track's pan, V-pots on its volume, strip mode paused until FLIP is off

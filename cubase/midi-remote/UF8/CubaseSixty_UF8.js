@@ -254,7 +254,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			skAm = activeMapping
 			if (skStrip[index].faderOn && objectID === skStrip[index].obj && tag === skStrip[index].faderTag) stripFaderSend(activeDevice, index)
 			// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
-			if (skFocus && objectID === skStrip[index].obj && tag === skStrip[index].tag) skReport(activeDevice, index)
+			if (skFocus && objectID === skStrip[index].tagObj && tag === skStrip[index].tag) skReport(activeDevice, index)
 		}
 		skDa[index].mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 			skAm = activeMapping
@@ -882,6 +882,16 @@ var SK_PAGES = [
 	[skp('u', 32, 36, 44, 48, 31), skp('u', 30, 35, 43, 47, 30), skp('u', 31, 34, 42, 46, 29), skp('u', 29, null, null, null, 32),
 		skp('s', 28, null, 45, 49, 34), skp('s', 27, 37, 46, 50, 33), SK_NONE, skp('b', 39, 7, 8, 14, 37)]
 ]
+// The bus comp pages (Q2; Rea-Sixty's kBcBanks): THR, ATTACK, RELEASE, RATIO, S/C HPF, MIX, EXT S/C, BUS COMP, then
+// OUTGAIN; the other pages empty. BUS COMP is the plug-in's bypass, shown the other way round ('si': On = compressing). Parameter indices for Bus Compressor 2 / the 360 Link Bus Compressor (as the UC1
+// script's map), or a parameter name; null = that model has none.
+function bcp(kind, bc2, lbc) { return { kind: kind, idx: { bc2: bc2, lbc: lbc } } }
+var SK_PAGES_BC = [
+	[bcp('u', 2, 1), bcp('u', 4, 3), bcp('u', 5, 4), bcp('u', 6, 5), bcp('u', 7, 6), bcp('u', 8, 7), bcp('s', 'External S/C', null), bcp('si', 10, 0)],
+	[bcp('u', 3, 2), SK_NONE, SK_NONE, SK_NONE, SK_NONE, SK_NONE, SK_NONE, SK_NONE],
+	[], [], [], []
+]
+var BC_MODELS = [['SSL 360 Link Bus', 'lbc'], ['Bus Compressor 2', 'bc2']]
 // The SSL channel strips by name; the first match wins (the Link bus compressor is not a channel strip).
 var SK_MODELS = [['SSL 360 Link Bus', null], ['Channel Strip 2', 'cs2'], ['4K G', 'g'], ['4K E', 'e'], ['4K B', 'b'], ['SSL 360 Link', 'link']]
 var SK_SKIP = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
@@ -892,22 +902,29 @@ function skScan(index) {
 	st.scanned = true
 	st.obj = -1
 	st.model = null
+	st.bcObj = -1
+	st.bcModel = null
 	if (!da || !skAm) return
 	var base
 	try { base = da.getBaseObjectID(skAm) } catch (e) { return }
 	var seen = {}, count = 0
 	function rec(id, depth, parentType) {
-		if (st.obj >= 0 || count > 300 || seen[id]) return
+		if ((st.obj >= 0 && st.bcObj >= 0) || count > 300 || seen[id]) return
 		seen[id] = true
 		++count
 		var type = '', title = ''
 		try { type = da.getObjectTypeName(skAm, id) } catch (e) {}
 		try { title = da.getObjectTitle(skAm, id) } catch (e) {}
-		for (var k = 0; k < SK_MODELS.length; ++k) if (title && title.indexOf(SK_MODELS[k][0]) >= 0) {
-			if (SK_MODELS[k][1]) { st.obj = id; st.model = SK_MODELS[k][1] }
-			break
+		var hit = false
+		for (var b = 0; b < BC_MODELS.length && !hit; ++b) if (title && title.indexOf(BC_MODELS[b][0]) >= 0) {
+			hit = true
+			if (st.bcObj < 0) { st.bcObj = id; st.bcModel = BC_MODELS[b][1] }
 		}
-		if (st.obj >= 0 || depth >= 4 || (/Channel$/.test(parentType) && SK_SKIP[type])) return
+		for (var k = 0; k < SK_MODELS.length && !hit; ++k) if (title && title.indexOf(SK_MODELS[k][0]) >= 0) {
+			hit = true
+			if (SK_MODELS[k][1] && st.obj < 0) { st.obj = id; st.model = SK_MODELS[k][1] }
+		}
+		if (hit || depth >= 4 || (/Channel$/.test(parentType) && SK_SKIP[type])) return
 		var n = 0
 		try { n = da.getNumberOfChildObjects(skAm, id) } catch (e) { return }
 		for (var i = 0; i < n && i < 256; ++i) rec(da.getChildObjectID(skAm, id, i), depth + 1, type)
@@ -917,18 +934,29 @@ function skScan(index) {
 // The focused parameter on strip index: { da, obj, tag, kind } or null.
 function skTarget(index) {
 	if (!skFocus || !skAm) return null
-	var slot = SK_PAGES[skFocus.bank][skFocus.slot]
+	var slot = (skFocus.bc ? SK_PAGES_BC : SK_PAGES)[skFocus.bank][skFocus.slot]
 	if (!slot) return null
 	var st = skStrip[index]
 	if (!st.scanned) skScan(index)
-	if (st.obj < 0) return null
-	var idx = slot.idx[st.model]
+	var obj = skFocus.bc ? st.bcObj : st.obj
+	if (obj < 0) return null
+	var idx = slot.idx[skFocus.bc ? st.bcModel : st.model]
 	if (idx === null || idx === undefined) return null
 	var da = skDa[index]
 	try {
-		var tag = da.getParameterTagByIndex(skAm, st.obj, idx)
+		var tag = -1
+		if (typeof idx === 'number') tag = da.getParameterTagByIndex(skAm, obj, idx)
+		else {   // by name
+			var n = da.getNumberOfParameters(skAm, obj), want = idx.toLowerCase()
+			for (var i = 0; i < n && tag < 0; ++i) {
+				var tg = da.getParameterTagByIndex(skAm, obj, i)
+				if (String(da.getParameterTitle(skAm, obj, tg, 48)).toLowerCase() === want) tag = tg
+			}
+			if (tag < 0) return null
+		}
 		st.tag = tag
-		return { da: da, obj: st.obj, tag: tag, kind: slot.kind }
+		st.tagObj = obj
+		return { da: da, obj: obj, tag: tag, kind: slot.kind }
 	} catch (e) { return null }
 }
 function skReport(activeDevice, index) {
@@ -942,6 +970,7 @@ function skReport(activeDevice, index) {
 		var units = ''
 		try { units = t.da.getParameterDisplayUnits(skAm, t.obj, t.tag) || '' } catch (e) {}
 		if (units && text.indexOf(units) < 0) text += units
+		if (t.kind === 'si') { v = v >= 0.5 ? 0 : 1; text = v ? 'On' : 'Off' }
 		body = [0x20, index, 1, Math.max(0, Math.min(127, Math.round(v * 127))), t.kind === 'b' ? 2 : 1].concat(toAscii7(text.replace(/\s+/g, ' ').trim()))
 	}
 	var key = body.join(',')
@@ -1014,7 +1043,7 @@ function skMessage(activeDevice, m) {
 		return
 	}
 	if (m[4] === 0x21 && m.length >= 8) {
-		skFocus = m[5] === 0x7F ? null : { bank: m[5], slot: m[6] }
+		skFocus = m[5] === 0x7F ? null : { bank: m[5] & 7, slot: m[6], bc: m[5] >= 8 }   // bank + 8 = the bus comp (Q2)
 		for (var i = 0; i < STRIPS; ++i) { skStrip[i].wanted = null; skStrip[i].sent = null }
 		if (skFocus) skReportAll(activeDevice)
 		return
@@ -1024,12 +1053,13 @@ function skMessage(activeDevice, m) {
 	if (!t) return
 	var st = skStrip[index], v
 	if (m[4] === 0x23) {   // push
-		if (t.kind === 's') v = t.da.getParameterProcessValue(skAm, t.obj, t.tag) >= 0.5 ? 0 : 1
+		if (t.kind === 's' || t.kind === 'si') v = t.da.getParameterProcessValue(skAm, t.obj, t.tag) >= 0.5 ? 0 : 1
 		else if (t.kind === 'b') v = 0.5
 		else return
 	} else {               // turn
 		var delta = m[6] - 64
 		if (t.kind === 's') v = delta > 0 ? 1 : 0
+		else if (t.kind === 'si') v = delta > 0 ? 0 : 1   // turned right = compressing
 		else {
 			// A stepped parameter snaps a small change back, so a turn is added up while it goes on (< 1 s).
 			var now = Date.now(), w = st.wanted
