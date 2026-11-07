@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include "Uc1Bridge.h"
 
 #include <algorithm>
 #include <array>
@@ -192,6 +193,9 @@ bool g_fadeWalk = false;     // Fades: the cross walks the events instead of aim
 bool g_envPlayhead = false;  // Envelope: the jog is on the play cursor instead of the points
 bool g_itemsZoomed = false;  // Items: the centre key zoomed to the selection (the next press zooms back)
 int jogShown() { return g_scrub ? kJogScrub : g_jogMode.load(); }
+// The insert slot of the plug-in the PLUGIN view is on (SysEx 58 from the script; -1 = none): the CHANNEL
+// encoder's push opens / closes its window.
+std::atomic<int> g_plugSlot{-1};
 void cmd2(uint8_t n)   // one of the UF1 script's channel-2 commands
 {
     sendMidi({0x91, n, 127});
@@ -325,6 +329,16 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             // Cubase's Jog Left / Right (63 / 64); in SHUTTLE, each step changes the shuttle speed.
             const bool jog = ev.id == 6;
             const uint8_t base = !jog ? 40 : g_shift ? 79 : 42;
+            // SHIFT + the CHANNEL encoder: the next / previous SSL plug-in on the track for the PLUGIN view (Rea-Sixty:
+            // step through the plug-in instances); after the last, Quick Controls.
+            if (!jog && g_shift) {
+                while (acc[k] >= perPulse || acc[k] <= -perPulse) {
+                    const bool right = acc[k] > 0;
+                    acc[k] += right ? -perPulse : perPulse;
+                    plugEvent(4, right ? 1 : 0, 64);
+                }
+                break;
+            }
             while (acc[k] >= perPulse || acc[k] <= -perPulse) {
                 const bool right = acc[k] > 0;
                 acc[k] += right ? -perPulse : perPulse;
@@ -523,6 +537,15 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 setLed(uf1m::Led{0x1D, 0xFFFFFF}, g_fine);   // the key lit while FINE is on
                 if (g_trace) std::printf("UF1 FINE %s\n", g_fine ? "on" : "off");
             }
+            break;
+        }
+        // The CHANNEL encoder's push: open / close the window of the plug-in the PLUGIN view is on (PLUGIN event
+        // kind 5: the script moves an insert viewer to its slot and toggles the window), or without one the
+        // track's channel editor (the SEL note, which toggles it).
+        if (ev.id == 0x0D) {
+            if (!ev.pressed) break;
+            if (g_plugSlot >= 0) plugEvent(5, 0, 64);
+            else { note(kNoteSel, true); note(kNoteSel, false); }
             break;
         }
         if (auto n = uf1m::buttonToNote(ev.id)) note(*n, ev.pressed);
@@ -1243,6 +1266,11 @@ void onSysex(const std::vector<unsigned char>& m)
         // What the Quick Controls belong to ("-" = not known), for the header in PLUGIN.
         { std::lock_guard<std::mutex> lk(g_cellMx); g_qcSource.assign(m.begin() + 5, m.end() - 1); if (g_qcSource == "-") g_qcSource.clear(); }
         paintHeader();
+    } else if (m[4] == 0x59 && m.size() >= 8) {
+        uc1FollowStrip(m[5], m[6]);   // SHIFT + CHANNEL picked a strip: the UC1 follows
+    } else if (m[4] == 0x58 && m.size() >= 7) {
+        g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
+        if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
     } else if (m[4] == 0x54) {
         // The script (re)started: it begins on the sends, so tell it the V-pot page of the view shown.
         sendVpotPage();

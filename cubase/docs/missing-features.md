@@ -6,9 +6,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. UF1 CHANNEL encoder: push = open / close the plug-in window, SHIFT + turn = the track's plug-ins.
-2. UF8 Send view: one send across the eight strips.
-3. Fader on the channel strip's output gain (UF1 strip mode).
+1. UF8 Send view: one send across the eight strips.
+2. Fader on the channel strip's output gain (UF1 strip mode).
 
 ## UF8
 
@@ -50,8 +49,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 - **METER**: the Analogue, RTA and Loudness screens, the V-pot meter settings, FINE / PRESETS on the meter.
 - **DAW view**: four track volumes on the V-pots and the user's soft-key banks (see On second thought).
 - **Receives** in the SENDS view; send solo / cut.
-- **CHANNEL encoder**: push = open / close the plug-in window, SHIFT + turn = step through the track's plug-in
-  instances; the encoder modes shown in the header.
+- **CHANNEL encoder**: push and SHIFT + turn are done; missing are the encoder modes (shown in the header) and
+  stepping through plug-ins that are not SSL's.
 - **PLUGIN**: Cubase's own channel strip in pages (tried and rolled back), jump to the page of a control touched in
   the plug-in window, HQ MODE / A/B, the Harrison 32C.
 - Fader on the channel strip's output gain (strip mode).

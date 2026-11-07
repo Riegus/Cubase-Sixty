@@ -15,4 +15,7 @@ bool uc1Reopen();
 // One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL
 // encoder: on to the UC1 script (SysEx 44), which shows and swaps them.
 void uc1FavouriteStep(int domain, int dir);
+// The UF1's PLUGIN view was moved to a channel strip (kind 1 = SSL, by its ordinal among the track's SSL plug-ins;
+// 2 = Cubase's own): the UC1 script goes to the same one (SysEx 45).
+void uc1FollowStrip(int kind, int ordinal);
 }

@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.20.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.21.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -476,7 +476,13 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (m[4] === 0x57 && m.length >= 8) {
 		// From the UC1 script, via the bridge: the strip its magnifier key picked.
 		var choice = { kind: m[5], ord: m[6] }
-		if (!uc1Choice || uc1Choice.kind !== choice.kind || uc1Choice.ord !== choice.ord) { uc1Choice = choice; plug.rescanAt = Date.now() + 50 }
+		// A real change (the magnifier key) takes over from SHIFT + the CHANNEL encoder's pick; the UC1 repeating its
+		// choice (it does after every repaint, and after a track title change cleared it here) does not.
+		if (!uc1Choice || uc1Choice.kind !== choice.kind || uc1Choice.ord !== choice.ord) {
+			if (uc1Choice) plug.pick = null
+			uc1Choice = choice
+			plug.rescanAt = Date.now() + 50
+		}
 		return
 	}
 	if ((m[4] === 0x3C || m[4] === 0x3D) && m.length >= 7) {
@@ -980,18 +986,19 @@ function plugKeys() {
 var PLUG_SKIP = { QuickControls: 1, Panner: 1, Modulators: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
 function plugWalk(base) {
 	var list = [], seen = {}
-	function rec(id, depth, parentType) {
+	function rec(id, depth, parentType, parent) {
 		if (list.length >= 300 || seen[id]) return
 		seen[id] = true
 		var type = ''
 		try { type = plugDa.getObjectTypeName(plugAm, id) } catch (e) {}
-		list.push({ id: id, type: type })
+		list.push({ id: id, type: type, parent: parent })
+		var me = list.length - 1
 		if (depth >= 4 || (/Channel$/.test(parentType) && PLUG_SKIP[type])) return
 		var n = 0
 		try { n = plugDa.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
-		for (var i = 0; i < n && i < 256; ++i) rec(plugDa.getChildObjectID(plugAm, id, i), depth + 1, type)
+		for (var i = 0; i < n && i < 256; ++i) rec(plugDa.getChildObjectID(plugAm, id, i), depth + 1, type, me)
 	}
-	rec(base, 0, '')
+	rec(base, 0, '', -1)
 	return list
 }
 function plugRescan(activeDevice) {
@@ -999,7 +1006,7 @@ function plugRescan(activeDevice) {
 	var base
 	try { base = plugDa.getBaseObjectID(plugAm) } catch (e) { return }
 	var objects = plugWalk(base)
-	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1, sslOrd = 0, strips = []
+	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1, sslOrd = 0, strips = [], all = []
 	for (var i = 0; i < objects.length; ++i) {
 		if (objects[i].type === 'EQ' && eqObj < 0) eqObj = objects[i].id
 		if (objects[i].type === 'InputFilter' && filterObj < 0) filterObj = objects[i].id
@@ -1010,16 +1017,34 @@ function plugRescan(activeDevice) {
 		var kind = null
 		for (var k = 0; k < PLUG_TYPES.length && !kind; ++k) if (title.indexOf(PLUG_TYPES[k].match) >= 0) kind = PLUG_TYPES[k]
 		if (!kind) continue
+		// The insert slot it sits in (slots titled "1".."16", under the track's inserts): for opening its window.
+		var slotIndex = -1, pa = objects[i].parent
+		if (pa >= 0 && objects[pa].type === 'Slot') {   // (as the UC1 script finds it for its 360 key)
+			try { slotIndex = parseInt(plugDa.getObjectTitle(plugAm, objects[pa].id), 10) - 1 } catch (e) {}
+			if (!(slotIndex >= 0 && slotIndex < 16)) slotIndex = -1
+		}
+		var entry = { id: objects[i].id, kind: kind, title: title, ordinal: 0, sslOrd: sslOrd, slot: slotIndex }
+		all.push(entry)
 		// The channel strips' position among the track's channel strips: how the bridge tells their EQ curves apart.
-		if (kind.strip) { var st = { id: objects[i].id, kind: kind, title: title, ordinal: stripOrd, sslOrd: sslOrd }; strips.push(st); if (!strip) strip = st; ++stripOrd }
-		else if (!busComp) busComp = { id: objects[i].id, kind: kind, title: title, ordinal: 0 }
+		if (kind.strip) { entry.ordinal = stripOrd; strips.push(entry); if (!strip) strip = entry; ++stripOrd }
+		else if (!busComp) busComp = entry
 		++sslOrd   // the position among the track's SSL plug-ins, as the UC1 script counts it
 	}
+	plug.all = all
+	plug.base = base
 	// The strip the UC1 is on (magnifier key), when it has said so for this track: the same SSL strip, or Cubase's
 	// own (then no SSL strip here: Quick Controls and Cubase's EQ).
 	if (uc1Choice && uc1Choice.kind === 2) { strip = null; busComp = null }
 	else if (uc1Choice && uc1Choice.kind === 1) for (var si = 0; si < strips.length; ++si) if (strips[si].sslOrd === uc1Choice.ord) strip = strips[si]
+	// SHIFT + the CHANNEL encoder picked one (newer than the UC1's choice): that one, or none (Quick Controls).
+	if (plug.pick && plug.pick.base === base) {
+		var picked = null
+		for (var pk = 0; pk < all.length; ++pk) if (all[pk].id === plug.pick.id) picked = all[pk]
+		if (plug.pick.id === 'cubase') { strip = null; busComp = null }
+		else if (picked) { strip = picked.kind.strip ? picked : null; busComp = picked.kind.strip ? null : picked }
+	}
 	var found = strip || busComp
+	plugReportSlot(activeDevice, found ? found.slot : -1)
 	var id = found ? found.id : -1
 	// Cubase's own channel EQ and input filter, for the EQ graph on tracks without an SSL channel strip.
 	cubaseEq.eq = eqObj
@@ -1063,12 +1088,37 @@ function plugRescan(activeDevice) {
 				plug.params.push({ tag: tag, title: t, lower: String(t).toLowerCase() })
 			}
 		}
-		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters)' : 'no SSL plug-in, V-pots on Quick Controls'))
+		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters, insert slot ' + (found.slot >= 0 ? found.slot + 1 : 'not found') + ')' : 'no SSL plug-in, V-pots on Quick Controls'))
 	}
 	plugPaint(activeDevice, true)
 }
 
 function plugSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
+// The insert slot of the plug-in the PLUGIN view is on (SysEx 58 <slot 0-15, 7F = none>): the CHANNEL encoder's push
+// opens / closes its window (PLUGIN event kind 5: the script moves an insert viewer there), or the track's channel
+// editor without one.
+var slotReported = null
+function plugReportSlot(activeDevice, slot) {
+	var v = slot >= 0 ? slot : 0x7F
+	if (v === slotReported) return
+	slotReported = v
+	plugSend(activeDevice, [0x58, v])
+}
+// SHIFT + CHANNEL encoder: the next / previous SSL plug-in on the track, then none (Quick Controls), wrapping.
+function plugStep(activeDevice, dir) {
+	var list = (plug.all || []).map(function (e) { return e.id }).concat(['cubase'])
+	var cur = list.indexOf(plug.obj >= 0 ? plug.obj : 'cubase')
+	if (cur < 0) cur = list.length - 1
+	var next = ((cur + dir) % list.length + list.length) % list.length
+	plug.pick = { base: plug.base, id: list[next] }
+	plugRescan(activeDevice)
+	// The UC1 follows to a channel strip (or Cubase's own, for "none"; a bus comp leaves it where it is): SysEx 59
+	// <kind> <ordinal>, on to the UC1 script as 45.
+	var e = null
+	for (var i = 0; i < (plug.all || []).length; ++i) if (plug.all[i].id === list[next]) e = plug.all[i]
+	if (list[next] === 'cubase') plugSend(activeDevice, [0x59, 2, 0])
+	else if (e && e.kind.strip) plugSend(activeDevice, [0x59, 1, e.sslOrd & 0x7F])
+}
 function plugPaint(activeDevice, force) {
 	if (force) { plug.sentInfo = null; plug.sentCells = [null, null, null, null]; plug.sentKeys = [null, null, null, null] }
 	var present = plug.obj >= 0 ? 1 : 0
@@ -1122,6 +1172,8 @@ function plugCell(activeDevice, i, slot) {
 }
 
 function plugEvent(activeDevice, kind, a, b, fine) {
+	if (kind === 4 && plugAm) { plugStep(activeDevice, a ? 1 : -1); return }
+	if (kind === 5) { windowToggle(activeDevice); return }
 	if (plug.obj < 0 || !plugAm) return
 	if (kind === 3) {
 		var n = plugPages()
@@ -1174,6 +1226,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
 	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
 	plug.obj = -2   // look again and send everything
+	slotReported = null
 	plug.rescanAt = Date.now() + 200
 }
 var eqPollAt = 0
@@ -1187,10 +1240,54 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		eqPollAt = t + 150
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
 	}
+	windowIdle(activeDevice)
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
 	}
+}
+
+// The plug-in window: one insert viewer (16 fixed-slot viewers made every track change lag), moved by the script
+// itself (its actions can be triggered directly). On the CHANNEL encoder's push (PLUGIN event kind 5) it goes to the
+// first slot, then on by the PLUGIN view's slot number, and the window is toggled once the viewer reports the
+// plug-in it is on and that is the one shown (else one slot on per idle tick, then back; Cubase moves the viewer
+// with a delay, so steps sent as MIDI notes landed on the wrong slot).
+var editWin = { viewer: null, state: null, open: 0, name: '', job: null }
+try {
+	editWin.viewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtyEdit')
+	var editState = surface.makeCustomValueVariable('pluginWindow')
+	page.makeValueBinding(editState, editWin.viewer.mEdit)
+	editWin.state = editState
+	editState.mOnProcessValueChange = function (activeDevice, value) { editWin.open = value }
+	editWin.viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { editWin.name = name || '' }
+} catch (e) { out('[CubaseSixty UF1] plug-in window switch could not be set up: ' + e) }
+function windowToggle(activeDevice) {
+	if (!editWin.viewer || !plugAm || plug.obj < 0) { out('[CubaseSixty UF1] plug-in window: no plug-in shown'); return }
+	var slot = -1
+	for (var i = 0; i < (plug.all || []).length; ++i) if (plug.all[i].id === plug.obj) slot = plug.all[i].slot
+	if (slot < 0) { out('[CubaseSixty UF1] plug-in window: the insert slot of "' + plug.title + '" is not known'); return }
+	try {
+		editWin.viewer.mAction.mReset.trigger(plugAm)
+		for (var k = 0; k < slot; ++k) editWin.viewer.mAction.mNext.trigger(plugAm)
+	} catch (e) { out('[CubaseSixty UF1] plug-in window: ' + e); return }
+	editWin.job = { title: plug.title, at: Date.now() + 60, tries: 0 }
+}
+function windowIdle(activeDevice) {
+	var job = editWin.job
+	if (!job || Date.now() < job.at) return
+	// Not there yet: on by one slot (16 tries), then back by one (16 more), in case the start was not slot 1.
+	if (editWin.name && job.title.indexOf(editWin.name) < 0 && editWin.name.indexOf(job.title) < 0 && job.tries < 32) {
+		++job.tries
+		job.at = Date.now() + 60
+		try { (job.tries <= 16 ? editWin.viewer.mAction.mNext : editWin.viewer.mAction.mPrev).trigger(plugAm) } catch (e) { editWin.job = null }
+		return
+	}
+	editWin.job = null
+	out('[CubaseSixty UF1] plug-in window: "' + job.title + '", viewer on "' + editWin.name + '" after ' + job.tries + ' extra steps, window ' + (editWin.open >= 0.5 ? 'open: closing' : 'closed: opening'))
+	if (job.tries >= 32) { out('[CubaseSixty UF1] plug-in window: "' + job.title + '" not found in the inserts'); return }
+	// Through the value variable bound to the viewer's edit switch (increment / decrement on the host value did
+	// nothing: a small step on a switch).
+	try { editWin.state.setProcessValue(activeDevice, editWin.open >= 0.5 ? 0 : 1) } catch (e) { out('[CubaseSixty UF1] plug-in window: ' + e) }
 }
 
 // ---------------------------------------------------------------------------
