@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.19.2-dev (MODE: PLUGIN = Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.20.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -164,6 +164,10 @@ deviceDriver.mOnIdle = function (activeDevice) {
 	flushLog(activeDevice)
 	var now = 0
 	try { now = Date.now() } catch (e) { return }
+	if (qcResendAt && now >= qcResendAt) {
+		qcResendAt = 0
+		if (qcActive) for (var q = 0; q < 4; ++q) sendQcCell(activeDevice, q)
+	}
 	if (now - vpotIdleLast < 1000) return
 	vpotIdleLast = now
 	for (var i = 0; i < 4; ++i) {
@@ -202,6 +206,15 @@ function sendCellInfo(activeDevice, index, cell) {
 	cell.sent = key
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x15, index, cell.pos], toAscii7(text), [0xF7]))
 }
+// A Quick Control's cell from what its callbacks last reported (name, value, position). Built again on each of
+// them, because Cubase reports a new name and a new value separately (and not at all when it did not change).
+function sendQcCell(activeDevice, index) {
+	var c = sendCells[index]
+	if (!c) return
+	var name = c.qcTitle || '', v = c.qcValue || ''
+	qcCells[index] = [0x51, index, c.qcPos || 0, name || v ? 2 : 0].concat(toAscii7(name || v ? cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + v : ''))
+	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
+}
 function attachSendFeedback(surfaceValue, number) {
 	var title = ''
 	var lastText = null
@@ -210,6 +223,8 @@ function attachSendFeedback(surfaceValue, number) {
 	sendCells[number - 1] = cell
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
 		title = valueTitle || objectTitle || ''
+		cell.qcTitle = title
+		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
 		if (!qcActive) {
@@ -218,6 +233,12 @@ function attachSendFeedback(surfaceValue, number) {
 			sendCellInfo(activeDevice, number - 1, cell)
 		}
 		var text
+		if (qcActive) {
+			// PLUGIN view without an SSL plug-in: the Quick Control's name and value in the V-pot cell (kept, so
+			// they can be sent again when the SSL plug-in goes away).
+			cell.qcValue = String(value) + (units ? units : '')
+			sendQcCell(activeDevice, number - 1)
+		}
 		if (qcActive) {
 			var v = String(value) + (units ? units : '')
 			var room = Math.max(3, 12 - v.length - 1)
@@ -231,6 +252,8 @@ function attachSendFeedback(surfaceValue, number) {
 	}
 	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 		reportVpotPosition(activeDevice, number - 1, value)
+		var qp = Math.max(0, Math.min(100, Math.round(value * 100)))
+		if (qcActive && qp !== cell.qcPos) { cell.qcPos = qp; sendQcCell(activeDevice, number - 1) } else cell.qcPos = qp
 		if (!qcActive) { cell.pos = Math.max(0, Math.min(100, Math.round(value * 100))); sendCellInfo(activeDevice, number - 1, cell) }
 		if (value === lastPos) return
 		lastPos = value
@@ -296,8 +319,11 @@ var sendOffset = 0
 var qcActive = false
 sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false; refreshCellNames(activeDevice) }
 sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false; refreshCellNames(activeDevice) }
-qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true }
-qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true }
+// After a switch between 1-4 and 5-8 the cells are sent once more a moment later, when Cubase has reported the
+// new Quick Controls (the order of its callbacks and the activation is not fixed).
+var qcResendAt = 0
+qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true; qcResendAt = Date.now() + 150 }
+qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true; qcResendAt = Date.now() + 150 }
 activatorButton(2, 53, sends14)
 activatorButton(3, 54, sends58)
 activatorButton(6, 88, qc14)
@@ -431,6 +457,14 @@ var sameNameHint = function () {}          // set by the track-number block
 midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
+	if (m.length >= 9 && m[0] === 0xF0 && m[4] === 0x53) {
+		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
+		return
+	}
+	if ((m[4] === 0x3C || m[4] === 0x3D) && m.length >= 7) {
+		try { onPresetMessage(activeDevice, m) } catch (e) { out('[CubaseSixty UF1] preset: ' + e) }
+		return
+	}
 	if (m.length < 7 || m[0] !== 0xF0 || m[4] !== 0x1C) return
 	var name = ''
 	for (var j = 6; j + 2 < m.length - 1; j += 3) name += String.fromCharCode((m[j] << 14) | (m[j + 1] << 7) | m[j + 2])
@@ -444,6 +478,8 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 }
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
+	plugAm = activeMapping
+	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	selectedInfo.title = title
 	if (masterActive) return
 	sendName(activeDevice, title)
@@ -749,4 +785,430 @@ function meterToMidi(value) {
 	if (db >= 0) return 127
 	if (db <= METER_FLOOR_DB) return 0
 	return Math.round((db - METER_FLOOR_DB) / -METER_FLOOR_DB * 127)
+}
+
+// ---------------------------------------------------------------------------
+// PLUGIN view: the SSL plug-in on the selected track, as Rea-Sixty (and SSL 360) show it. The V-pots, the four
+// display soft keys and ◄ ► work the plug-in's controls in pages (SSL's UF1 User Guide p188 tables, as measured
+// for Rea-Sixty on SSL 360 2.1.12). The plug-in is found and driven through Direct Access, its parameters by name.
+// Without an SSL plug-in on the track the V-pots stay on Cubase's Quick Controls.
+//
+// To the bridge:
+//   50 <present 0/1> <page> <pages> <eq in 0/1> <ordinal> <model…>    the plug-in shown (model "CS 2", "4K E" …)
+//   51 <pot> <position 0-100> <flags: 1 bipolar, 2 used> <label|value> one V-pot cell
+//   52 <key> <state: 0 off, 1 on, 2 no switch> <label…>               one soft key (0x7F = the Ø glyph)
+// From the bridge (PLUGIN view, with a plug-in present):
+//   53 <kind> <a> <b>   kind 0 = V-pot a turned by b - 64 detents, 1 = V-pot a pushed, 2 = soft key a pressed,
+//                       3 = page (a = 0 back, 1 forward)
+// ---------------------------------------------------------------------------
+
+var plugAm = null
+var qcCells = [null, null, null, null]   // the Quick Controls' cells (SysEx 51), for the PLUGIN view without an SSL plug-in
+var plugDa = null
+try { plugDa = page.mHostAccess.makeDirectAccess(selectedChannel) } catch (e) { out('[CubaseSixty UF1] no Direct Access, PLUGIN view stays on Quick Controls: ' + e) }
+
+// Rea-Sixty's strip types: 0 Channel Strip 2, 1 4K B, 2 4K E, 3 360 Link, 4 Bus Compressor 2, 5 4K G, 6 360 Link Bus
+// Compressor. The first match in this order wins (the Link bus compressor's name also contains "SSL 360 Link").
+var PLUG_TYPES = [
+	{ match: 'SSL 360 Link Bus', type: 6, model: 'BC 2', strip: false },
+	{ match: 'Bus Compressor 2', type: 4, model: 'BC 2', strip: false },
+	{ match: 'Channel Strip 2', type: 0, model: 'CS 2', strip: true },
+	{ match: '4K G', type: 5, model: '4K G', strip: true },
+	{ match: '4K E', type: 2, model: '4K E', strip: true },
+	{ match: '4K B', type: 1, model: '4K B', strip: true },
+	{ match: 'SSL 360 Link', type: 3, model: 'Link', strip: true }
+]
+var PLUG_PAGES = [8, 10, 10, 8, 2, 10, 2]
+// V-pot pages: [parameter name, label, bipolar]. A name matches the parameter of that name, else the first one
+// containing it (case ignored).
+function vp(param, label, bipolar) { return { param: param, label: label, bipolar: !!bipolar } }
+var NONE = null
+var EMPTY4 = [NONE, NONE, NONE, NONE]
+var STRIP_EQ_PAGES = [
+	[vp('LF Gain', 'LF Gain', true), vp('LF Freq', 'LF Freq'), NONE, NONE],
+	[vp('LMF Gain', 'LMF Gain', true), vp('LMF Freq', 'LMF Freq'), vp('LMF Q', 'LMF Q'), NONE],
+	[vp('HMF Gain', 'HMF Gain', true), vp('HMF Freq', 'HMF Freq'), vp('HMF Q', 'HMF Q'), NONE],
+	[vp('HF Gain', 'HF Gain', true), vp('HF Freq', 'HF Freq'), NONE, NONE]
+]
+var VPOT_PAGES = {
+	0: [[vp('Width', 'Width'), NONE, vp('Output Trim', 'Out Trim', true), vp('Compressor Mix', 'Comp Mix')],
+		[vp('Input Trim', 'In Trim', true), NONE, vp('High Pass', 'HighPass'), vp('Low Pass', 'Low Pass')]].concat(STRIP_EQ_PAGES, [
+		[vp('Compressor Ratio', 'Ratio'), vp('Compressor Threshold', 'Thresh'), vp('Compressor Release', 'Release'), NONE],
+		[vp('Gate Range', 'Range'), vp('Gate Threshold', 'Thresh'), vp('Gate Release', 'Release'), vp('Gate Hold', 'Hold')]]),
+	1: [[vp('Width', 'Width'), vp('Mic', 'Mic'), vp('Output Trim', 'Out Trim', true), vp('Compressor Mix', 'Comp Mix')],
+		[vp('Input Trim', 'In Trim', true), NONE, vp('High Pass', 'HighPass'), vp('Low Pass', 'Low Pass')]].concat(STRIP_EQ_PAGES, [
+		[vp('Compressor Ratio', 'Ratio'), vp('Compressor Threshold', 'Thresh'), NONE, vp('Compressor Release', 'Release')],
+		[vp('Gate Range', 'Range'), vp('Gate Threshold', 'Thresh'), vp('Gate Release', 'Release'), NONE], EMPTY4, EMPTY4]),
+	2: [[vp('Width', 'Width'), vp('Mic', 'Mic'), vp('Output Trim', 'Out Trim', true), vp('Compressor Mix', 'Mix')],
+		[vp('Input Trim', 'In Trim', true), NONE, vp('High Pass', 'HighPass'), vp('Low Pass', 'Low Pass')]].concat(STRIP_EQ_PAGES, [
+		[vp('Compressor Ratio', 'Ratio'), vp('Compressor Threshold', 'Thresh'), NONE, vp('Compressor Release', 'Release')],
+		[vp('Gate Range', 'Range'), vp('Gate Threshold', 'Thresh'), vp('Gate Release', 'Release'), NONE], EMPTY4, EMPTY4]),
+	3: [[vp('Width', 'Width'), vp('Saturation Amount', 'Sat Amt'), vp('Output Trim', 'Out Trim', true), vp('Comp Mix', 'Comp Mix')],
+		[vp('Input Trim', 'In Trim', true), NONE, vp('High Pass', 'HighPass'), vp('Low Pass', 'Low Pass')]].concat(STRIP_EQ_PAGES, [
+		[vp('Comp Ratio', 'Ratio'), vp('Comp Threshold', 'Thresh'), vp('Comp Release', 'Release'), NONE],
+		[vp('Gate Range', 'Range'), vp('Gate Threshold', 'Thresh'), vp('Gate Release', 'Release'), vp('Gate Hold', 'Hold')]]),
+	4: [[vp('Threshold', 'Thresh'), vp('Ratio', 'Ratio'), vp('Attack', 'Attack'), vp('Release', 'Release')],
+		[vp('Makeup', 'Makeup'), vp('Dry/Wet', 'Mix'), vp('Sidechain HPF', 'S/C HPF'), NONE]],
+	5: [[vp('Width', 'Width'), vp('Mic', 'Mic'), vp('Output Trim', 'Out Trim', true), vp('Compressor Mix', 'Mix')],
+		[vp('Input Trim', 'In Trim', true), vp('Impedance', 'Impedance'), vp('High Pass', 'HighPass'), vp('Low Pass', 'Low Pass')]].concat(STRIP_EQ_PAGES, [
+		[vp('Compressor Ratio', 'Ratio'), vp('Compressor Threshold', 'Thresh'), NONE, vp('Compressor Release', 'Release')],
+		[vp('Gate Range', 'Range'), vp('Gate Threshold', 'Thresh'), vp('Gate Release', 'Release'), NONE], EMPTY4, EMPTY4]),
+	6: [[vp('Threshold', 'Thresh'), vp('Ratio', 'Ratio'), vp('Attack', 'Attack'), vp('Release', 'Release')],
+		[vp('Makeup', 'Makeup'), vp('Mix', 'Mix'), vp('S/C HPF', 'S/C HPF'), NONE]]
+}
+// Soft-key pages: [parameter name or null (label only, no switch here), label]. 'Ø' = SSL's phase glyph.
+function sk(param, label) { return { param: param, label: label } }
+var SK0 = sk(null, '')
+var SK_EMPTY = [SK0, SK0, SK0, SK0]
+function eqKeys(type, lf, hf) {
+	// The four EQ pages: LF BELL / HF BELL on key 1 of the LF / HF pages, the EQ type or colour and EQ IN on 3 / 4.
+	var k3 = type === 1 ? SK0 : type === 3 ? sk('EQ Type', 'EQ TYPE') : type === 0 ? sk('EQ Type', 'E') : sk('EQ Colour', 'EQ COLOUR')
+	var k4 = type === 3 ? sk('EQ In', 'EQ IN') : sk('EQ In', 'EQ')
+	return [[lf, SK0, k3, k4], [SK0, SK0, k3, k4], [SK0, SK0, k3, k4], [hf, SK0, k3, k4]]
+}
+var SOFT_KEYS = {
+	0: [[sk('Polarity', 'Ø'), SK0, sk(null, 'SOLO SAFE'), sk(null, 'PLUG-IN')],
+		[sk(null, 'S/C MODE'), SK0, sk(null, 'HQ MODE'), sk(null, 'A/B')]].concat(eqKeys(0, sk('LF Type', 'LF BELL'), sk('HF Type', 'HF BELL')), [
+		[sk('Compressor Fast Attack', 'FAST ATTACK'), sk('Compressor Peak', 'PEAK'), sk('S/C Listen', 'S/C LISTEN'), sk('Dynamics In', 'DYNAMICS')],
+		[sk('Gate Expander', 'EXPAND'), sk('Gate Attack', 'FAST ATTACK'), SK0, sk('Dynamics In', 'DYNAMICS')]]),
+	1: [[sk('Polarity', 'Ø'), sk('Pre IN', 'PRE'), sk(null, 'SOLO SAFE'), sk(null, 'PLUG-IN')],
+		[sk('Filters In', 'FILTERS'), SK0, sk(null, 'HQ MODE'), sk(null, 'A/B')]].concat(eqKeys(1, sk('LF Type', 'LF BELL'), sk('HF Type', 'HF BELL')), [
+		[SK0, SK0, SK0, sk('Dynamics In', 'DYN')],
+		[SK0, sk('Gate Expander', 'EXPANDER'), sk('S/C Listen', 'S/C LISTEN'), sk('Dynamics In', 'DYN')],
+		[sk('Compressor Auto Make-up', 'AUTO MAKEUP'), SK0, SK0, SK0],
+		[sk('Gate Expander', 'EXPANDER'), SK0, SK0, SK0]]),
+	2: [[sk('Polarity', 'Ø'), sk('Pre', 'PRE'), sk(null, 'SOLO SAFE'), sk(null, 'PLUG-IN')],
+		[sk('Filters In', 'FILTERS'), SK0, sk(null, 'HQ MODE'), sk(null, 'A/B')]].concat(eqKeys(2, sk('LF Type', 'LF BELL'), sk('HF Type', 'HF BELL')), [
+		[sk('Compressor Fast Attack', 'FAST ATTACK'), SK0, SK0, sk('Dynamics In', 'DYN')],
+		[sk('Gate Fast Attack', 'FAST ATTACK'), sk('Gate Expander', 'EXPANDER'), sk('S/C Listen', 'S/C LISTEN'), sk('Dynamics In', 'DYN')],
+		[sk('Compressor Auto Make-up', 'AUTO MAKEUP'), SK0, SK0, SK0],
+		[sk('Gate Expander', 'EXPANDER'), SK0, SK0, SK0]]),
+	3: [[sk('Phase', 'Ø'), sk('Saturation In', 'SATURATION IN'), sk(null, 'SOLO SAFE'), sk(null, 'PLUG-IN')],
+		[sk('Listen', 'LISTEN'), SK0, SK0, SK0]].concat(eqKeys(3, sk('LF Type', 'LF TYPE'), sk('HF Type', 'HF TYPE')), [
+		[sk('Comp Fast Attack', 'CMP FST ATTK'), sk('Comp Peak', 'COMP PEAK'), sk('Listen', 'LISTEN'), sk('Dynamics In', 'DYNAMICS IN')],
+		[sk('Gate Expander', 'GTE EXPANDR'), sk('Gate Attack', 'GATE ATTACK'), SK0, sk('Dynamics In', 'DYNAMICS IN')]]),
+	4: [[sk('External S/C', 'EXT S/C'), sk('Oversampling', 'OVERSAMP'), SK0, sk(null, 'A/B')], SK_EMPTY],
+	5: [[sk('Polarity', 'Ø'), sk('Pre', 'PRE'), sk(null, 'SOLO SAFE'), sk(null, 'PLUG-IN')],
+		[sk('Filters In', 'FILTERS'), sk('Impedance In', 'IMP IN'), sk(null, 'HQ MODE'), sk(null, 'A/B')]].concat(eqKeys(5, sk('LF Type', 'LF BELL'), sk('HF Type', 'HF BELL')), [
+		[sk('Compressor Fast Attack', 'FAST ATTACK'), SK0, SK0, sk('Dynamics In', 'DYN')],
+		[sk('Gate Fast Attack', 'FAST ATTACK'), sk('Gate Expander', 'EXPANDER'), sk('S/C Listen', 'S/C LISTEN'), sk('Dynamics In', 'DYN')],
+		[sk('Compressor Auto Make-up', 'AUTO MAKEUP'), SK0, SK0, SK0],
+		[sk('Gate Expander', 'EXPANDER'), SK0, SK0, SK0]]),
+	6: [SK_EMPTY, SK_EMPTY]
+}
+var PLUG_STEP = 0.02   // per detent (Rea-Sixty's kUf1CsVPotStep: about 50 detents end to end)
+
+var plug = { obj: -1, kind: null, title: '', ordinal: 0, page: 0, params: [], byName: {}, rescanAt: 0,
+	sentInfo: null, sentCells: [null, null, null, null], sentKeys: [null, null, null, null], wanted: {}, missing: {} }
+
+function plugParam(name) {
+	if (!name || plug.obj < 0) return null
+	if (plug.byName[name] !== undefined) return plug.byName[name]
+	var want = name.toLowerCase(), hit = null
+	for (var i = 0; i < plug.params.length && !hit; ++i) if (plug.params[i].lower === want) hit = plug.params[i]
+	for (var j = 0; j < plug.params.length && !hit; ++j) if (plug.params[j].lower.indexOf(want) >= 0) hit = plug.params[j]
+	plug.byName[name] = hit
+	if (!hit && !plug.missing[name]) { plug.missing[name] = true; out('[CubaseSixty UF1] PLUGIN: "' + plug.title + '" has no parameter "' + name + '"') }
+	return hit
+}
+function plugValue(p) { return plugDa.getParameterProcessValue(plugAm, plug.obj, p.tag) }
+function plugPages() { return plug.kind ? PLUG_PAGES[plug.kind.type] : 1 }
+function plugVpots() { return plug.kind ? (VPOT_PAGES[plug.kind.type][plug.page] || EMPTY4) : EMPTY4 }
+function plugKeys() {
+	if (!plug.kind) return SK_EMPTY
+	var keys = (SOFT_KEYS[plug.kind.type][plug.page] || SK_EMPTY).slice()
+	// 4K G: key 1 of the LF and HF pages follows the EQ colour (Pink = the G EQ, whose ÷3 / ×3 switches it is).
+	if (plug.kind.type === 5 && (plug.page === 2 || plug.page === 5)) {
+		var colour = plugParam('EQ Colour')
+		if (colour && plugValue(colour) < 0.5) keys[0] = plug.page === 2 ? sk('LMF div3', 'LMF DIV3') : sk('HMF x3', 'HMF X3')
+	}
+	return keys
+}
+
+// Every object under the selected channel (as the UC1 script walks it), for the SSL plug-ins in its inserts.
+var PLUG_SKIP = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+function plugWalk(base) {
+	var list = [], seen = {}
+	function rec(id, depth, parentType) {
+		if (list.length >= 300 || seen[id]) return
+		seen[id] = true
+		var type = ''
+		try { type = plugDa.getObjectTypeName(plugAm, id) } catch (e) {}
+		list.push({ id: id, type: type })
+		if (depth >= 4 || (/Channel$/.test(parentType) && PLUG_SKIP[type])) return
+		var n = 0
+		try { n = plugDa.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
+		for (var i = 0; i < n && i < 256; ++i) rec(plugDa.getChildObjectID(plugAm, id, i), depth + 1, type)
+	}
+	rec(base, 0, '')
+	return list
+}
+function plugRescan(activeDevice) {
+	if (!plugDa || !plugAm) return
+	var base
+	try { base = plugDa.getBaseObjectID(plugAm) } catch (e) { return }
+	var objects = plugWalk(base)
+	var strip = null, busComp = null, stripOrd = 0
+	for (var i = 0; i < objects.length; ++i) {
+		var title = '', n = 0
+		try { title = plugDa.getObjectTitle(plugAm, objects[i].id) } catch (e) {}
+		try { n = plugDa.getNumberOfParameters(plugAm, objects[i].id) } catch (e) {}
+		if (!title || n < 4) continue
+		var kind = null
+		for (var k = 0; k < PLUG_TYPES.length && !kind; ++k) if (title.indexOf(PLUG_TYPES[k].match) >= 0) kind = PLUG_TYPES[k]
+		if (!kind) continue
+		// The channel strips' position among the track's channel strips: how the bridge tells their EQ curves apart.
+		if (kind.strip) { if (!strip) strip = { id: objects[i].id, kind: kind, title: title, ordinal: stripOrd }; ++stripOrd }
+		else if (!busComp) busComp = { id: objects[i].id, kind: kind, title: title, ordinal: 0 }
+	}
+	var found = strip || busComp
+	var id = found ? found.id : -1
+	if (id !== plug.obj) {
+		plug.obj = id
+		plug.kind = found ? found.kind : null
+		plug.title = found ? found.title : ''
+		plug.ordinal = found ? found.ordinal : 0
+		plug.page = 0
+		plug.byName = {}
+		plug.wanted = {}
+		plug.params = []
+		if (found) {
+			var count = plugDa.getNumberOfParameters(plugAm, id)
+			for (var p = 0; p < count && p < 256; ++p) {
+				var tag = plugDa.getParameterTagByIndex(plugAm, id, p)
+				var t = ''
+				try { t = plugDa.getParameterTitle(plugAm, id, tag, 48) } catch (e) {}
+				plug.params.push({ tag: tag, title: t, lower: String(t).toLowerCase() })
+			}
+		}
+		out('[CubaseSixty UF1] PLUGIN: ' + (found ? '"' + found.title + '" (' + found.kind.model + ', ' + plug.params.length + ' parameters)' : 'no SSL plug-in, V-pots on Quick Controls'))
+	}
+	plugPaint(activeDevice, true)
+}
+
+function plugSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
+function plugPaint(activeDevice, force) {
+	if (force) { plug.sentInfo = null; plug.sentCells = [null, null, null, null]; plug.sentKeys = [null, null, null, null] }
+	var present = plug.obj >= 0 ? 1 : 0
+	var eqIn = 0
+	if (present && plug.kind.strip) { var eq = plugParam('EQ In'); eqIn = eq && plugValue(eq) >= 0.5 ? 1 : 0 }
+	var info = [0x50, present, plug.page, plugPages(), eqIn, plug.ordinal & 0x7F].concat(toAscii7(present ? plug.kind.model : ''), [0x00], toAscii7(present ? plug.title : ''))
+	var infoKey = info.join(',')
+	if (infoKey !== plug.sentInfo) {
+		plug.sentInfo = infoKey
+		plugSend(activeDevice, info)
+		// No SSL plug-in (any more): the cells go back to the Quick Controls.
+		if (!present) for (var q = 0; q < 4; ++q) if (qcCells[q]) plugSend(activeDevice, qcCells[q])
+	}
+	if (!present) return
+	var pots = plugVpots()
+	for (var i = 0; i < 4; ++i) plugCell(activeDevice, i, pots[i])
+	var keys = plugKeys()
+	for (var k = 0; k < 4; ++k) {
+		var key = keys[k]
+		var p = key.param ? plugParam(key.param) : null
+		var st = !p ? 2 : plugValue(p) >= 0.5 ? 1 : 0
+		var label = []
+		for (var c = 0; c < key.label.length; ++c) { var code = key.label.charCodeAt(c); label.push(code === 0xD8 ? 0x7F : code < 0x80 ? code : 0x3F) }
+		var body = [0x52, k, st].concat(label)
+		var keyKey = body.join(',')
+		if (keyKey === plug.sentKeys[k]) continue
+		plug.sentKeys[k] = keyKey
+		plugSend(activeDevice, body)
+	}
+}
+function plugCell(activeDevice, i, slot) {
+	var p = slot ? plugParam(slot.param) : null
+	var body
+	if (!p) body = [0x51, i, 0, 0]
+	else {
+		var v = plugValue(p)
+		var value = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag))
+		var units = ''
+		try { units = plugDa.getParameterDisplayUnits(plugAm, plug.obj, p.tag) || '' } catch (e) {}
+		if (units && value.indexOf(units) < 0) value += units
+		body = [0x51, i, Math.max(0, Math.min(100, Math.round(v * 100))), (slot.bipolar ? 1 : 0) | 2].concat(toAscii7(slot.label + '|' + value))
+	}
+	var key = body.join(',')
+	if (key === plug.sentCells[i]) return
+	plug.sentCells[i] = key
+	plugSend(activeDevice, body)
+}
+
+function plugEvent(activeDevice, kind, a, b, fine) {
+	if (plug.obj < 0 || !plugAm) return
+	if (kind === 3) {
+		var n = plugPages()
+		plug.page = (plug.page + (a ? 1 : n - 1)) % n
+		plugPaint(activeDevice, false)
+		return
+	}
+	if (kind === 0 || kind === 1) {
+		var slot = plugVpots()[a]
+		var p = slot ? plugParam(slot.param) : null
+		if (!p) return
+		var v
+		if (kind === 1) {
+			if (!slot.bipolar) return
+			v = 0.5   // push: a gain / trim back to 0 dB
+		} else {
+			// A parameter with a few steps (a ratio) snaps a small change back, so while the V-pot turns (steps less
+			// than 1 s apart) the turn is added up here instead of read back from the plug-in.
+			var now = Date.now(), w = plug.wanted[p.tag]
+			var from = w && now - w.at < 1000 ? w.value : plugValue(p)
+			v = Math.max(0, Math.min(1, from + (b - 64) * PLUG_STEP * (fine ? 0.25 : 1)))
+			plug.wanted[p.tag] = { value: v, at: now }
+		}
+		plugDa.setParameterProcessValue(plugAm, plug.obj, p.tag, v)
+		plugCell(activeDevice, a, slot)
+		return
+	}
+	if (kind === 2) {
+		var key = plugKeys()[a]
+		var q = key && key.param ? plugParam(key.param) : null
+		if (!q) return
+		plugDa.setParameterProcessValue(plugAm, plug.obj, q.tag, plugValue(q) >= 0.5 ? 0 : 1)
+		plugPaint(activeDevice, false)
+	}
+}
+
+if (plugDa) {
+	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+		plugAm = activeMapping
+		if (objectID === plug.obj) plugPaint(activeDevice, false)
+	}
+	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
+		plugAm = activeMapping
+		plug.rescanAt = Date.now() + 300
+	}
+}
+page.mOnActivate = function (activeDevice, activeMapping) {
+	plugAm = activeMapping
+	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
+	plug.obj = -2   // look again and send everything
+	plug.rescanAt = Date.now() + 200
+}
+page.mOnIdle = function (activeDevice, activeMapping) {
+	plugAm = activeMapping
+	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
+		plug.rescanAt = 0
+		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Presets: the bridge's preset browser (SHIFT + 5-8) reads the SSL preset file and sends each value (SysEx 3C <section>
+// <id> 7F 7F 7F <value>, then 3D <section> <name>); they go into the plug-in the PLUGIN view shows. The same way as the
+// UC1 script loads them: an SSL preset names its parameters by their JUCE ids, whose Direct Access tag is the id's
+// Java-style string hash (31 * h + c, sign bit cleared) plus 4201; a value is a choice's index or a plain number in the
+// parameter's unit (set as its display value and checked, else found on the display).
+// ---------------------------------------------------------------------------
+function juceTag(id) {
+	var h = 0
+	for (var i = 0; i < id.length; ++i) h = (Math.imul(31, h) + id.charCodeAt(i)) | 0
+	return (h & 0x7FFFFFFF) + 4201
+}
+function leadingNumber(text) {
+	var r = /^\s*\+?(-?\d*\.?\d+(e[-+]?\d+)?)/i.exec(text || '')
+	return r ? parseFloat(r[1]) : NaN
+}
+var presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
+function applyPresetValue(id, text) {
+	if (plug.obj < 0 || !plugAm) { ++presetLoad.skipped; return }
+	var acc = plugDa, am = plugAm, obj = plug.obj, tag = juceTag(id)
+	var title = ''
+	try { title = acc.getParameterTitle(am, obj, tag, 40) } catch (e) {}
+	if (!title || title === '-') { ++presetLoad.unknown; return }   // view state / a placeholder, not a parameter
+	var v = parseFloat(text)
+	if (isNaN(v)) { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return }
+	var plainMax = acc.convertParameterProcessValueToPlain(am, obj, tag, 1)
+	if (plainMax > 1.0001) {   // a choice: the value is its index
+		acc.setParameterProcessValue(am, obj, tag, acc.convertParameterPlainToProcessValue(am, obj, tag, Math.round(v)))
+		++presetLoad.applied
+		return
+	}
+	if ((v === 0 || v === 1) && Math.abs(plainMax - 1) < 1e-6) {
+		// A switch, or a continuous parameter at an end: try it as a switch first.
+		var before = acc.getParameterProcessValue(am, obj, tag)
+		acc.setParameterDisplayValue(am, obj, tag, String(v))
+		var shown = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
+		if (!isNaN(shown) && Math.abs(shown - v) < 1e-6) { ++presetLoad.applied; return }
+		acc.setParameterProcessValue(am, obj, tag, v)
+		var disp = acc.getParameterDisplayValue(am, obj, tag)
+		if (isNaN(leadingNumber(disp)) || Math.abs(leadingNumber(disp) - v) < 1e-6) { ++presetLoad.applied; return }
+		acc.setParameterProcessValue(am, obj, tag, before)
+	}
+	var at = function (n) { acc.setParameterProcessValue(am, obj, tag, n); return acc.getParameterDisplayValue(am, obj, tag) }
+	var probe = function () {
+		var pts = []
+		for (var k = 0; k <= 64; ++k) { var d = at(k / 64); pts.push({ n: k / 64, text: d, num: leadingNumber(d) }) }
+		return pts
+	}
+	// A stepped parameter whose file value is its index: a short list of distinct readings, and the index picks one.
+	var pts = null
+	if (v === Math.round(v) && v >= 0) {
+		pts = probe()
+		var steps = []
+		for (var q = 0; q < pts.length; ++q) if (!steps.length || steps[steps.length - 1].text !== pts[q].text) steps.push(pts[q])
+		if (steps.length <= 24 && v < steps.length) {
+			var byValue = null
+			for (var w = 0; w < steps.length; ++w) if (!isNaN(steps[w].num) && Math.abs(steps[w].num - v) < 1e-6) byValue = steps[w]
+			acc.setParameterProcessValue(am, obj, tag, (byValue || steps[v]).n)
+			++presetLoad.applied
+			return
+		}
+	}
+	// A number in the parameter's unit: let the plug-in parse it, check, else bisect on the display.
+	acc.setParameterDisplayValue(am, obj, tag, String(v))
+	var got = leadingNumber(acc.getParameterDisplayValue(am, obj, tag))
+	if (!isNaN(got) && Math.abs(got - v) <= Math.max(Math.abs(v) * 0.02, 0.05)) { ++presetLoad.applied; return }
+	if (!pts) pts = probe()
+	var lo = null, hi = null
+	for (var z = 0; z + 1 < pts.length; ++z) {
+		var p0 = pts[z], p1 = pts[z + 1]
+		if (isNaN(p0.num) || isNaN(p1.num)) continue
+		if ((p0.num - v) * (p1.num - v) <= 0) { lo = p0; hi = p1; break }
+	}
+	if (!lo) {
+		// Outside the numbered part: an end that reads "OFF" (a filter at its end) takes values beyond the range.
+		var first = null, last = null
+		for (var y = 0; y < pts.length; ++y) if (!isNaN(pts[y].num)) { if (!first) first = pts[y]; last = pts[y] }
+		var offEnd = null
+		if (first && isNaN(pts[0].num) && (first.num > last.num ? v > first.num : v < first.num)) offEnd = pts[0]
+		if (last && isNaN(pts[pts.length - 1].num) && (last.num > first.num ? v > last.num : v < last.num)) offEnd = pts[pts.length - 1]
+		if (offEnd) { acc.setParameterProcessValue(am, obj, tag, offEnd.n); ++presetLoad.applied; return }
+		++presetLoad.skipped; presetLoad.failed.push(title + '=' + text); return
+	}
+	var a = lo.n, b = hi.n, asc = hi.num > lo.num, bestN = lo.n, bestErr = Math.abs(lo.num - v)
+	for (var it = 0; it < 16; ++it) {
+		var n = (a + b) / 2, num = leadingNumber(at(n))
+		if (isNaN(num)) break
+		if (Math.abs(num - v) < bestErr) { bestErr = Math.abs(num - v); bestN = n }
+		if ((num < v) === asc) a = n; else b = n
+	}
+	acc.setParameterProcessValue(am, obj, tag, bestN)
+	if (bestErr <= Math.max(Math.abs(hi.num - lo.num), Math.abs(v) * 0.02, 1e-6)) ++presetLoad.applied
+	else { ++presetLoad.skipped; presetLoad.failed.push(title + '=' + text) }
+}
+function decodeParts(message, from) {
+	var text = '', parts = [], i = from
+	for (; i + 2 < message.length && message[i] !== 0xF7; i += 3) {
+		if (message[i] === 0x7F && message[i + 1] === 0x7F && message[i + 2] === 0x7F) { parts.push(text); text = ''; continue }
+		text += String.fromCharCode((message[i] << 14) | (message[i + 1] << 7) | message[i + 2])
+	}
+	parts.push(text)
+	return parts
+}
+function onPresetMessage(activeDevice, message) {
+	if (message[4] === 0x3C) {
+		var parts = decodeParts(message, 6)
+		try { applyPresetValue(parts[0], parts[1] || '') } catch (e) { ++presetLoad.skipped; presetLoad.failed.push(parts[0] + ': ' + e) }
+		return
+	}
+	var name = decodeParts(message, 6)[0]
+	out('[CubaseSixty UF1] preset "' + name + '" into ' + (plug.obj >= 0 ? '"' + plug.title + '"' : 'nothing (no SSL plug-in)') + ': '
+		+ presetLoad.applied + ' set, ' + presetLoad.skipped + ' not set, ' + presetLoad.unknown + ' not parameters'
+		+ (presetLoad.failed.length ? ' (not set: ' + presetLoad.failed.slice(0, 12).join(', ') + ')' : ''))
+	presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
+	if (plug.obj >= 0) plugPaint(activeDevice, false)
 }

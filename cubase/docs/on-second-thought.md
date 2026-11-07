@@ -46,15 +46,20 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 - **SENDS view** (chosen). Rea-Sixty pages the sends in groups of four in the mixer's send order (hardware outputs
   included) and shows "N/M"; Cubase-Sixty shows sends 1–4 or 5–8 (the 5-8 key) and "1/2" / "2/2".
 - **◀ ▶ arrows** (chosen). Rea-Sixty: they page (soft-key pages, channel-strip pages, send groups) in every view.
-  Cubase-Sixty: previous / next track, except in PLUGIN with an SSL plug-in, where they page; SHIFT + arrow steps a
-  bar.
+  Cubase-Sixty: previous / next track in DAW and SENDS; in PLUGIN they page (the SSL plug-in's pages, or Quick
+  Controls 1–4 / 5–8); SHIFT + arrow steps a bar.
 - **BANK** (chosen). Rea-Sixty: eight tracks back / forward. Cubase-Sixty: banks the UF8 (eight tracks only when
   there is no UF8).
 - **Channel encoder** (not yet). Rea-Sixty: push opens / closes the plug-in window, SHIFT + turn steps through the
   plug-in instances, and other encoder modes can be picked (shown in the header). Cubase-Sixty: turn steps the
   track; nothing else yet.
-- **Quick keys 1 and 2** (not yet). Rea-Sixty: quick keys, key 2 = FINE (shown in the header's FINE CTRL field).
-  Cubase-Sixty: only with SHIFT (Latch / Touch); the header always shows FINE OFF.
+- **Quick key 1** (not yet). Rea-Sixty: clears every solo. Cubase-Sixty: nothing without SHIFT (SHIFT + 1 = Latch).
+  Quick key 2 is FINE in both (a quarter of the step, shown in the header's FINE CTRL field).
+- **5-8** (chosen). Rea-Sixty in PLUGIN: nothing on a plain press. Cubase-Sixty: Quick Controls 1–4 / 5–8 there,
+  sends 1–4 / 5–8 in DAW and SENDS. SHIFT + 5-8 opens the preset browser in both.
+- **Preset browser** (chosen). Rea-Sixty also browses REAPER's own presets for plug-ins that are not SSL's and opens
+  the browser from the Meter view for the SSL Meter; Cubase-Sixty browses SSL's preset library only, from the channel
+  views.
 - **SCRUB** (chosen, an addition). Rea-Sixty leaves it free; Cubase-Sixty scrubs through a Mackie Control device,
   and SHIFT + SCRUB is a shuttle.
 - **Key above the display** (chosen). Rea-Sixty: assignable. Cubase-Sixty: bypass / restore all inserts of the
