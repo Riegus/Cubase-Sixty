@@ -213,6 +213,7 @@ function sendQcCell(activeDevice, index) {
 	if (!c) return
 	var name = c.qcTitle || '', v = c.qcValue || ''
 	qcCells[index] = [0x51, index, c.qcPos || 0, name || v ? 2 : 0].concat(toAscii7(name || v ? cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + v : ''))
+	plugTrace('QC cell ' + (index + 1) + ' "' + name + '|' + v + '"' + (plug.obj < 0 ? ' sent' : ' kept (SSL plug-in shown)'))
 	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
 }
 function attachSendFeedback(surfaceValue, number) {
@@ -224,6 +225,7 @@ function attachSendFeedback(surfaceValue, number) {
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
 		title = valueTitle || objectTitle || ''
 		cell.qcTitle = title
+		plugTrace('V-pot ' + number + ' title "' + objectTitle + '" / "' + valueTitle + '" (' + (qcActive ? 'QC' : 'sends') + ')')
 		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
@@ -322,7 +324,7 @@ sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false
 // After a switch between 1-4 and 5-8 the cells are sent once more a moment later, when Cubase has reported the
 // new Quick Controls (the order of its callbacks and the activation is not fixed).
 var qcResendAt = 0
-qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true; qcResendAt = Date.now() + 150 }
+qc14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = true; qcResendAt = Date.now() + 150; plugTrace('Quick Controls 1-4') }
 qc58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = true; qcResendAt = Date.now() + 150 }
 activatorButton(2, 53, sends14)
 activatorButton(3, 54, sends58)
@@ -476,6 +478,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
+	plugTrace('track selected: "' + title + '"')
 	selectedInfo.title = title
 	if (masterActive) return
 	sendName(activeDevice, title)
@@ -799,6 +802,9 @@ function meterToMidi(value) {
 // ---------------------------------------------------------------------------
 
 var plugAm = null
+// Temporary: the PLUGIN view's cell traffic in the log (finding why the Quick Control cells clear).
+var PLUG_TRACE = true
+function plugTrace(text) { if (PLUG_TRACE) out('[CubaseSixty UF1] ' + Date.now() % 100000 + ' ' + text) }
 var qcCells = [null, null, null, null]   // the Quick Controls' cells (SysEx 51), for the PLUGIN view without an SSL plug-in
 var plugDa = null
 try { plugDa = page.mHostAccess.makeDirectAccess(selectedChannel) } catch (e) { out('[CubaseSixty UF1] no Direct Access, PLUGIN view stays on Quick Controls: ' + e) }
@@ -992,6 +998,7 @@ function plugPaint(activeDevice, force) {
 	var infoKey = info.join(',')
 	if (infoKey !== plug.sentInfo) {
 		plug.sentInfo = infoKey
+		plugTrace('plug-in info: ' + (present ? plug.kind.model + ' page ' + (plug.page + 1) : 'none') + (force ? ' (forced)' : ''))
 		plugSend(activeDevice, info)
 		// No SSL plug-in (any more): the cells go back to the Quick Controls.
 		if (!present) for (var q = 0; q < 4; ++q) if (qcCells[q]) plugSend(activeDevice, qcCells[q])
