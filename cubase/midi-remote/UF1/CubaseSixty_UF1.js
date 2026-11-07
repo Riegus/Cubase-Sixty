@@ -476,9 +476,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
-		var dir = m[5] ? 1 : -1
-		if (stepJob) stepQueue = Math.max(-16, Math.min(16, stepQueue + dir))
-		else stepStart(dir)
+		try { stepTrack(activeDevice, m[5] ? 1 : -1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 		return
 	}
 	if (m[4] === 0x57 && m.length >= 8) {
@@ -509,47 +507,57 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 	if (!masterActive) sendColor(activeDevice, r, g, b)
 }
 // Track stepping past the tracks hidden in the MixConsole (track-stepping = mixconsole, cubase\settings.txt): the
-// bridge asks for a step (SysEx 5C <1 forward / 0 back>); the script selects the next / previous track (the track
-// selection's own action) and, once the new one is selected, steps again while the MixConsole hides it.
-// Clicks that come while a step is still going past hidden tracks wait (stepQueue: + forward, - back) and are taken
-// one by one after it, so a quick turn does not mix with the extra steps.
-var stepJob = null   // { dir, tries, checkAt, until }
-var stepQueue = 0
-function stepStart(dir) {
-	stepJob = { dir: dir, tries: 0, checkAt: 0, until: Date.now() + 1500 }
-	stepTrack(dir)
+// bridge asks for a step (SysEx 5C <1 forward / 0 back>). The script reads the MixConsole's channels (Direct Access
+// on the whole MixConsole: order and visibility), counts how many tracks lie between the selected one and the next
+// visible one, and triggers the track selection's next / previous action that many times at once. (Stepping and
+// then looking at the new track was slow: Cubase reports the new selection up to a second later.) A click soon
+// after the last one counts from where that one went, as Cubase may not have caught up yet.
+var stepMix = null
+try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
+var stepLast = { id: -1, at: 0 }
+function stepChannels() {
+	var list = []
+	var base = stepMix.getBaseObjectID(plugAm)
+	var n = stepMix.getNumberOfChildObjects(plugAm, base)
+	for (var i = 0; i < n; ++i) {
+		var id = stepMix.getChildObjectID(plugAm, base, i)
+		var type = ''
+		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
+		if (!/Channel$/.test(type) || /Input|Output|ControlRoom|Monitor/.test(type)) continue   // tracks only
+		var vis = true, idx = i
+		try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
+		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
+		list.push({ id: id, vis: vis, idx: idx })
+	}
+	list.sort(function (a, b) { return a.idx - b.idx })
+	return list
 }
-function stepDone() {
-	stepJob = null
-	if (!stepQueue) return
-	var d = stepQueue > 0 ? 1 : -1
-	stepQueue -= d
-	stepStart(d)
-}
-function stepTrack(dir) {
-	if (!plugAm) { stepJob = null; return }
-	try { (dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack).trigger(plugAm) }
-	catch (e) { out('[CubaseSixty UF1] track step: ' + e); stepJob = null; stepQueue = 0 }
-}
-function stepIdle(activeDevice) {
-	var j = stepJob
-	if (!j) return
-	var now = Date.now()
-	if (now > j.until) { out('[CubaseSixty UF1] track step: no new track seen'); stepDone(); return }   // no further track (the first / last), or no title change
-	if (!j.checkAt || now < j.checkAt) return
-	j.checkAt = 0
-	var visible = true, base = -1, why = ''
-	try { base = plugDa.getBaseObjectID(plugAm); visible = plugDa.isMixerChannelVisible(plugAm, base) } catch (e) { why = ' (' + e + ')' }
-	out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + base + ') ' + (visible ? 'visible' : 'hidden in the MixConsole: on') + why)
-	if (visible || j.tries >= 64) { stepDone(); return }
-	++j.tries
-	j.until = now + 1500
-	stepTrack(j.dir)
+function stepTrack(activeDevice, dir) {
+	if (!plugAm) return
+	var action = dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
+	var count = 1
+	if (stepMix) {
+		try {
+			var list = stepChannels()
+			var now = Date.now()
+			var cur = now - stepLast.at < 600 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
+			var at = -1
+			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
+			if (at >= 0) {
+				var k = at + dir
+				while (k >= 0 && k < list.length && !list[k].vis) k += dir
+				if (k < 0 || k >= list.length) return   // no visible track that way
+				count = Math.abs(k - at)
+				stepLast = { id: list[k].id, at: now }
+			}
+			out('[CubaseSixty UF1] track step: ' + list.length + ' channels, selected at ' + at + ', ' + count + ' step(s) ' + (dir > 0 ? 'on' : 'back'))
+		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+	}
+	for (var c = 0; c < count; ++c) action.trigger(plugAm)
 }
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
-	if (stepJob) stepJob.checkAt = Date.now() + 40   // look at the new track's visibility (stepIdle)
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
@@ -1340,7 +1348,6 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
 	}
 	windowIdle(activeDevice)
-	stepIdle(activeDevice)
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
