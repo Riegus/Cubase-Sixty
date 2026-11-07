@@ -269,7 +269,16 @@ void paintSel(int strip)
     if (strip < 0 || strip >= kStrips) return;
     const int mode = g_selMode;
     if (mode == kSelNorm) { sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, g_selOn[strip])); return; }
-    const bool on = mode == kSelRec ? (g_recOn[strip] && !g_noRec[strip]) : g_autoW[strip].load();
+    if (mode == kSelRec) {
+        // As the top soft keys: dark where the track cannot be armed, dim red where it can, red when armed.
+        const bool can = !g_noRec[strip] && !g_stripEmpty[strip];
+        const bool armed = can && g_recOn[strip];
+        sendLedFrames(can ? uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true,
+                                                    armed ? uf8::ledColourRed() : uf8::ledColourForTrackRgb(0x5A0000))
+                          : uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, false, uf8::ledColourRed()));
+        return;
+    }
+    const bool on = g_autoW[strip].load();
     sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, on && !g_stripEmpty[strip], uf8::ledColourRed()));
 }
 void paintSelMode()
@@ -525,7 +534,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const int s = m[1] - kNoteNoRec;
             g_noRec[s] = status == 0x90 && m[2] > 0;
             if (g_trace8) std::printf("UF8 rec strip %d: %s\n", s + 1, g_noRec[s] ? "cannot be armed" : "can be armed");
-            setLed(s, 3, g_recOn[s]);
+            setLed(s, 3, g_recOn[s]);   // (also redraws SEL in REC)
             return;
         }
         if (auto t = noteToLed(m[1])) {
