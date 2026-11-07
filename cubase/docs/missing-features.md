@@ -6,7 +6,6 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. Known issue: ◀ ▶ track stepping does not skip hidden tracks.
 
 ## UF8
 

@@ -221,6 +221,8 @@ function commandButton(x, note, category, command) {
 commandButton(0, 100, 'Project', 'Select Track: Next')
 commandButton(1, 101, 'Project', 'Select Track: Prev')
 commandButton(2, B.SoloClear, 'Edit', 'Deactivate All Solo')
+commandButton(3, 102, 'Navigate', 'Down')   // track-stepping = project (cubase\settings.txt)
+commandButton(4, 103, 'Navigate', 'Up')
 
 // The whole MixConsole, for the Bus Comp section (which stays on its own track, as with SSL 360's Bus Comp
 // encoder). Created in a try: if Cubase refuses, the Bus Comp knobs fall back to the selected track's bus comp.

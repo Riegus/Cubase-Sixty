@@ -475,6 +475,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
 	}
+	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
+		stepJob = { dir: m[5] ? 1 : -1, tries: 0, checkAt: 0, until: Date.now() + 1500 }
+		stepTrack(stepJob.dir)
+		return
+	}
 	if (m[4] === 0x57 && m.length >= 8) {
 		// From the UC1 script, via the bridge: the strip its magnifier key picked.
 		var choice = { kind: m[5], ord: m[6] }
@@ -502,9 +507,33 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 	selectedInfo.r = r; selectedInfo.g = g; selectedInfo.b = b
 	if (!masterActive) sendColor(activeDevice, r, g, b)
 }
+// Track stepping past the tracks hidden in the MixConsole (track-stepping = mixconsole, cubase\settings.txt): the
+// bridge asks for a step (SysEx 5C <1 forward / 0 back>); the script selects the next / previous track (the track
+// selection's own action) and, once the new one is selected, steps again while the MixConsole hides it.
+var stepJob = null   // { dir, tries, checkAt, until }
+function stepTrack(dir) {
+	if (!plugAm) return
+	try { (dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack).trigger(plugAm) }
+	catch (e) { out('[CubaseSixty UF1] track step: ' + e); stepJob = null }
+}
+function stepIdle(activeDevice) {
+	var j = stepJob
+	if (!j) return
+	var now = Date.now()
+	if (now > j.until) { stepJob = null; return }   // no further track (the first / last), or no title change
+	if (!j.checkAt || now < j.checkAt) return
+	j.checkAt = 0
+	var visible = true
+	try { visible = plugDa.isMixerChannelVisible(plugAm, plugDa.getBaseObjectID(plugAm)) } catch (e) {}
+	if (visible || j.tries >= 64) { stepJob = null; return }
+	++j.tries
+	j.until = now + 1500
+	stepTrack(j.dir)
+}
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
+	if (stepJob) stepJob.checkAt = Date.now() + 40   // look at the new track's visibility (stepIdle)
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
@@ -1295,6 +1324,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
 	}
 	windowIdle(activeDevice)
+	stepIdle(activeDevice)
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }

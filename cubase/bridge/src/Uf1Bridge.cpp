@@ -8,6 +8,7 @@
 
 #include "Uf1Bridge.h"
 #include "Uc1Bridge.h"
+#include "Settings.h"
 
 #include <algorithm>
 #include <array>
@@ -370,6 +371,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     continue;
                 }
                 if (jog && !g_scrub && !g_shift && jogStep(right)) continue;
+                if (!jog && settings::projectStepping()) { cmd2(right ? 49 : 48); continue; }   // Navigate Down / Up
+                if (!jog && settings::trackStepping() == settings::Stepping::MixConsole) { uf1StepTrack(right ? 1 : -1); continue; }
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }
@@ -535,6 +538,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 break;
             }
             // SHIFT + ARROW: step back / forward one bar (81 / 82).
+            if (!g_shift && settings::projectStepping()) { cmd2(ev.id == 0x26 ? 49 : 48); break; }   // Navigate Down / Up
+            if (!g_shift && settings::trackStepping() == settings::Stepping::MixConsole) { uf1StepTrack(ev.id == 0x26 ? 1 : -1); break; }
             const uint8_t n = g_shift ? (ev.id == 0x26 ? 82 : 81) : (ev.id == 0x26 ? 41 : 40);
             note(n, true);
             note(n, false);
@@ -1630,6 +1635,13 @@ void uf1SetStripNumber(int n)
 }
 
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
+
+bool uf1StepTrack(int dir)
+{
+    if (!g_open) return false;
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
+    return true;
+}
 
 bool uf1NeedsReopen() { return g_open && g_dev.needsReopen(); }
 
