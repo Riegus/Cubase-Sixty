@@ -105,6 +105,13 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 
 ## Whole system
 
+- **Track stepping** (chosen, an addition). Rea-Sixty steps through REAPER's visible tracks. Cubase-Sixty's ◀ ▶ and
+  CHANNEL encoders skip the tracks hidden in the MixConsole by default (`track-stepping` in `cubase\settings.txt`:
+  `mixconsole`, `project` = the Project window's visibility, `all`). The MixConsole mode works through the UF1
+  script, so without a UF1 the steps include hidden tracks.
+- **Settings** (forced, for now). Rea-Sixty has a Settings window; Cubase-Sixty has two text files next to the
+  logs: `cubase\settings.txt` and `cubase\favourites.txt` (see the settings wishlist).
+
 - **A bridge program plus MIDI Remote scripts** (forced). Rea-Sixty runs inside REAPER and talks to the hardware and
   to REAPER directly; Cubase-Sixty needs a separate bridge for the USB side and talks to Cubase over virtual MIDI
   ports.

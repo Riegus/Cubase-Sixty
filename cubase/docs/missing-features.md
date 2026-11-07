@@ -6,6 +6,10 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
+1. Strip mode on the pan knobs: the UF8's V-pots and the UF1's pan knob on the SSL strip's own pan.
+2. Nav Mode on the UF8: markers and regions across the strips, SEL jumps to one.
+3. The UC1's secondary encoder modes.
+
 
 ## UF8
 
