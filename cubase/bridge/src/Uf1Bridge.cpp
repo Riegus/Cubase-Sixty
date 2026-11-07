@@ -442,6 +442,7 @@ std::array<PlugKey, 4> g_plugKeys;
 std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
 std::string g_plugTitle;   // the plug-in's name in Cubase (for its preset folder)
 std::string g_qcSource;    // what the Quick Controls belong to (SysEx 56; "" = not known)
+std::string g_trackName;   // the selected track's name (SysEx 01), under g_cellMx
 uf1eq::Model g_cubaseEq;   // Cubase's own channel EQ + input filter, from the script (SysEx 55); off = flat
 
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
@@ -812,7 +813,9 @@ void paintHeader(bool force)
                 if (name.rfind(pre, 0) == 0) { name.erase(0, std::strlen(pre)); break; }
             if (name.empty()) name = g_plugModel;
         } else {
-            name = g_qcSource.empty() ? std::string("Cubase QC") : g_qcSource;   // the field shows 13 characters
+            // The track's own Quick Controls report the track's name, which the small display already shows:
+            // "Cubase QC" then, and for nothing reported. A plug-in's name (its window's Quick Controls) is kept.
+            name = (g_qcSource.empty() || g_qcSource == g_trackName) ? std::string("Cubase QC") : g_qcSource;   // 13 characters fit
         }
     }
     name = sslpresets::latin1(name);
@@ -1014,6 +1017,7 @@ void onSysex(const std::vector<unsigned char>& m)
         // marker track, or nothing). Keep showing the last track rather than blanking the display; the
         // colour that follows (all zero) is skipped too.
         g_emptySelection = t.empty();
+        if (!t.empty()) { { std::lock_guard<std::mutex> lk(g_cellMx); g_trackName = t; } paintHeader(); }
         g_uf1RightSeen = false;   // another track: mono until it sends a right side
         if (t.empty()) return;
         if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
