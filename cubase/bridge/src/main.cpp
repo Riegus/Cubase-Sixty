@@ -101,6 +101,10 @@ std::array<uint16_t, 8> g_panPos{};
 std::string g_panLine[8];
 std::array<uint16_t, 8> g_focusPos{};
 std::array<uint8_t, 8> g_focusMode{};
+// The focused parameter's ring frames last sent (they carry all eight strips): only a change goes out.
+// paintVpots, which draws pan or a new focus, forgets them.
+std::array<uint16_t, 8> g_ringPosShown{};
+std::array<uint8_t, 8> g_ringModeShown{};
 void paintSoftKeys();
 void paintVpots();
 void setLed(int strip, int cls, bool on);
@@ -343,6 +347,8 @@ void paintSoftKeys()
 void paintVpots()
 {
     const int focus = g_focus;
+    g_ringPosShown.fill(0xFFFF);
+    g_ringModeShown.fill(0xFF);
     std::array<uint8_t, kStrips> modes{};
     for (int s = 0; s < kStrips; ++s) modes[size_t(s)] = focus < 0 ? 1 : g_focusMode[size_t(s)];
     g_dev.send(uf8::buildVPotReadoutBar(focus < 0 ? g_panPos : g_focusPos));
@@ -570,8 +576,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
             line.append(19 - line.size() - val.size(), ' ');
             line += val;
             g_dev.send(uf8::buildValueLine(uint8_t(s), line));
-            g_dev.send(uf8::buildVPotReadoutBar(g_focusPos));
-            g_dev.send(uf8::buildVPotMode(g_focusMode));
+            // The ring frames carry all eight strips: only what changed goes out (a focus sends eight of these).
+            if (g_focusPos != g_ringPosShown) { g_ringPosShown = g_focusPos; g_dev.send(uf8::buildVPotReadoutBar(g_focusPos)); }
+            if (g_focusMode != g_ringModeShown) { g_ringModeShown = g_focusMode; g_dev.send(uf8::buildVPotMode(g_focusMode)); }
         } else if (auto c = parseColour(m)) {
             { std::lock_guard<std::mutex> lk(g_paletteMx); g_palette[c->strip] = colourToPalette(c->r, c->g, c->b); }
             pushPalette();
@@ -724,6 +731,7 @@ int main(int argc, char** argv)
             // The helper's ports: its channel names go straight on to the UF8 script.
             g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
                 if (cs::scriptLogSysex(msg.data(), msg.size())) return;
+                if (msg.size() >= 7 && msg[0] == 0xF0 && msg[4] == 0x1D) { cs::uf1SetSoloActive(msg[5] != 0); return; }   // anything soloed
                 if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
                 std::lock_guard<std::mutex> lk(g_outMx);
                 try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }

@@ -23,6 +23,8 @@ void autoModePressed(uint8_t note);
 // The UF8 strip (1-8) that holds the selected track, 0 = not on the UF8's current bank. Shown in the UF1's
 // channel-number box.
 void uf1SetStripNumber(int n);
+// Something in the project is soloed (the helper script watches every channel): the UF1 shows SOLO ACTIVE.
+void uf1SetSoloActive(bool on);
 // A SysEx message for the UF1 script (passed on from the UF8 script: which of several same-named tracks is
 // selected, SysEx 1C).
 void uf1SendToScript(const std::vector<unsigned char>& msg);

@@ -9,6 +9,8 @@
 //     follow-selection (SysEx 18 <index hi> <index lo> <name>).
 //   - The channels that can record (groups, FX, VCA, inputs and outputs excluded), up to 128: names, for the
 //     UF8's record-enable keys (SysEx 19 <slot> <name>).
+//   - Whether any of the first list's channels is soloed (SysEx 1D <0 / 1>), for the UF1's SOLO ACTIVE: Cubase's
+//     MIDI Remote has no project-wide solo state.
 //
 // Names go out when they change. The bridge passes them on to the UF8 script. When the UF8 script asks
 // (SysEx 1B, passed on by the bridge; it asks until names arrive, as Cubase drops what is sent while a
@@ -47,7 +49,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.1.0-dev'
+var SCRIPT_VERSION = '0.2.0-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -82,10 +84,26 @@ function sendRec(activeDevice, slot) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x19, slot & 0x7F], encodeName(recTitles[slot]), [0xF7]))
 }
 
+var soloed = {}, soloCount = 0, soloSent = -1
+function sendSolo(activeDevice) {
+	var any = soloCount > 0 ? 1 : 0
+	if (any === soloSent) return
+	soloSent = any
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1D, any, 0xF7]))
+}
 var allZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: all channels').excludeInputChannels().excludeOutputChannels()
 for (var c = 0; c < CHANNELS; ++c) {
 	var ch = allZone.makeMixerBankChannel()
 	;(function (index, ch) {
+		var solo = surface.makeCustomValueVariable('solo' + index)
+		page.makeValueBinding(solo, ch.mValue.mSolo)
+		solo.mOnProcessValueChange = function (activeDevice, value) {
+			var on = value > 0.5
+			if (!!soloed[index] === on) return
+			soloed[index] = on
+			soloCount += on ? 1 : -1
+			sendSolo(activeDevice)
+		}
 		ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			if (allTitles[index] === title) return
 			allTitles[index] = title
@@ -117,6 +135,8 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (++resends <= 3 || resends % 20 === 0) out('[CubaseSixty Helper] lists requested (' + resends + ')')
 	for (var i = 0; i < CHANNELS; ++i) sendAll(activeDevice, i)
 	for (var s = 0; s < REC_CHANNELS; ++s) sendRec(activeDevice, s)
+	soloSent = -1
+	sendSolo(activeDevice)
 }
 
 deviceDriver.mOnIdle = function (activeDevice) { flushLog(activeDevice) }
