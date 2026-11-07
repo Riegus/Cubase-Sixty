@@ -177,6 +177,17 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 // faders 80 = volume, 81 = pan (FLIP), 82-89 = send 1-8 of each track; V-pots 90 = pan, 91 = volume (FLIP),
 // 92 = sends 1-8 of the selected track. SEND / PLUGIN 1-8 light for the fader send, FLIP for the flip.
 std::atomic<int> g_routeSend{-1};
+// SSL Strip Mode (the PLUGIN key): per strip, whether its fader is on the track's SSL channel strip fader (SysEx 26
+// from the script). Those strips send the hand to the script (25) and ignore Cubase's volume; g_volPb keeps it.
+std::atomic<bool> g_stripMode{false};
+std::array<std::atomic<bool>, 8> g_stripFader{};
+std::array<std::atomic<int>, 8> g_volPb{-1, -1, -1, -1, -1, -1, -1, -1};
+void driveFader(int s, uint16_t v14)
+{
+    std::vector<std::vector<uint8_t>> frames;
+    { std::lock_guard<std::mutex> lk(g_faderMx); frames = uf8fader::drive(uint8_t(s), midi14ToPb(v14), g_engaged[s]); }
+    for (auto& f : frames) g_dev.send(std::move(f));
+}
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
 long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 void note2(uint8_t n) { sendMidi({0x91, n, 127}); sendMidi({0x81, n, 0}); }
@@ -213,7 +224,8 @@ void handleFrame(const uf8frames::Frame& fr)
         const auto r = uf8fader::read(pb14, (d[4] & 0x80) != 0, /*grabValid=*/false);
         if (!r.usable) return;
         const uint16_t v = pbToMidi14(r.pbOut);
-        sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
+        if (g_stripFader[s]) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
+        else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
         // Echo the hand position so the motor does not jump back on release.
         g_dev.send(uf8fader::echo(s, r.pbOut));
         break;
@@ -256,6 +268,15 @@ void handleFrame(const uf8frames::Frame& fr)
                 const int n = d[3] - 0x48;
                 g_routeSend = g_routeSend == n ? -1 : n;
                 applyRoute();
+            }
+            break;
+        }
+        if (d[3] == 0x50) {   // PLUGIN: SSL Strip Mode on / off (the faders on the SSL channel strips' faders)
+            if (pressed) {
+                g_stripMode = !g_stripMode;
+                sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x24, uint8_t(g_stripMode ? 1 : 0), 0xF7});
+                sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Plugin, g_stripMode));
+                if (g_trace8) std::printf("UF8 SSL Strip Mode %s\n", g_stripMode ? "on" : "off");
             }
             break;
         }
@@ -685,6 +706,14 @@ void onMidiIn(std::vector<unsigned char>& msg)
             line += v;
             g_panLine[m[5]] = line;
             if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+        } else if (m.size() >= 8 && m[4] == 0x26 && m[5] < kStrips) {
+            // Strip mode per strip: on = the fader follows the strip's fader (27); off = back to the track's volume.
+            const int s = m[5];
+            g_stripFader[s] = m[6] != 0;
+            if (!g_stripFader[s] && g_volPb[s] >= 0 && !g_touched[s]) driveFader(s, uint16_t(g_volPb[s].load()));
+        } else if (m.size() >= 9 && m[4] == 0x27 && m[5] < kStrips) {
+            const int s = m[5];
+            if (g_stripFader[s] && !g_touched[s]) driveFader(s, uint16_t((m[6] << 7) | m[7]));
         } else if (m.size() >= 7 && m[4] == 0x0D && m[5] < kStrips) {
             // A send level on the V-pot (the selected track's sends): "Send" left, the level right.
             std::string v(m.begin() + 6, m.end() - 1);
@@ -754,11 +783,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
     }
     if (status == 0xE0 && m.size() >= 3) {   // fader from Cubase
         const int s = m[0] & 0x0F;
-        if (s >= kStrips || g_touched[s]) return;   // hand wins
+        if (s >= kStrips) return;
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
-        std::vector<std::vector<uint8_t>> frames;
-        { std::lock_guard<std::mutex> lk(g_faderMx); frames = uf8fader::drive(uint8_t(s), midi14ToPb(v), g_engaged[s]); }
-        for (auto& f : frames) g_dev.send(std::move(f));
+        g_volPb[s] = v;
+        if (g_touched[s] || g_stripFader[s]) return;   // hand wins; strip mode: the strip's fader drives it
+        driveFader(s, v);
         return;
     }
     // LED feedback: note on / note off, plus polyphonic aftertouch (Cubase sends

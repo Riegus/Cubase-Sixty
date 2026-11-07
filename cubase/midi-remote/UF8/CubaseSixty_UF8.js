@@ -169,6 +169,7 @@ function routeChanged(activeDevice) {
 	uf8FlipActive = route.fader === 'pan'
 	for (var r = 0; r < flipResets.length; ++r) flipResets[r]()
 	for (var i = 0; i < STRIPS; ++i) paintStripName(activeDevice, i)
+	if (stripModeOn) stripModeUpdateAll(activeDevice)   // FLIP and the send views take the fader back
 }
 // The name a strip shows: the send's destination in a send view, else the track's.
 function paintStripName(activeDevice, index) {
@@ -203,6 +204,7 @@ function paintStripName(activeDevice, index) {
 
 // SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
 var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
+var trackDb = [], dbResend = []
 for (var i = 0; i < STRIPS; ++i) {
 	var channel = bankZone.makeMixerBankChannel()
 	var strip = strips[i]
@@ -250,6 +252,7 @@ for (var i = 0; i < STRIPS; ++i) {
 		if (!skDa[index]) return
 		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 			skAm = activeMapping
+			if (skStrip[index].faderOn && objectID === skStrip[index].obj && tag === skStrip[index].faderTag) stripFaderSend(activeDevice, index)
 			// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
 			if (skFocus && objectID === skStrip[index].obj && tag === skStrip[index].tag) skReport(activeDevice, index)
 		}
@@ -340,10 +343,13 @@ for (var i = 0; i < STRIPS; ++i) {
 		}
 		function dbText(activeDevice, value) {
 			var text = String(value)
+			if (route.fader === 'vol') trackDb[index] = text   // for leaving strip mode
+			if (skStrip[index] && skStrip[index].faderOn) return   // strip mode: the dB field is the strip's fader
 			if (text === lastDb) return
 			lastDb = text
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 		}
+		dbResend[index] = function (activeDevice) { lastDb = null; if (trackDb[index] !== undefined) dbText(activeDevice, trackDb[index]) }
 		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
 			if (route.vpot === 'sends') sendText(activeDevice, value, units)
 			else if (route.vpot === 'vol') dbText(activeDevice, value)
@@ -839,7 +845,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
-	if (m[4] >= 0x21 && m[4] <= 0x23) {
+	if (m[4] >= 0x21 && m[4] <= 0x25) {
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
@@ -944,7 +950,69 @@ function skReport(activeDevice, index) {
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7]))
 }
 function skReportAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) skReport(activeDevice, i) }
+// ---------------------------------------------------------------------------
+// SSL Strip Mode (the PLUGIN key): each strip's fader on its SSL channel strip's own fader / output gain instead of
+// the track's volume; a strip whose track has none keeps volume. The bridge says on / off (SysEx 24 <0/1>) and
+// sends a hand's position (25 <strip> <msb> <lsb>); the script answers per strip whether its fader is on a strip
+// (26 <strip> <0/1>; the bridge then ignores Cubase's volume there) and the strip fader's value for the motor
+// (27 <strip> <msb> <lsb>), with its value in the dB field.
+// ---------------------------------------------------------------------------
+var stripModeOn = false
+var STRIP_FADER_NAMES = ['fader level', 'fader', 'output gain', 'out gain', 'output level']
+function stripFaderTag(index) {
+	var st = skStrip[index], da = skDa[index]
+	if (!st.scanned) skScan(index)
+	if (st.obj < 0 || !da || !skAm) return -1
+	if (st.faderObj === st.obj) return st.faderTag
+	st.faderObj = st.obj
+	st.faderTag = -1
+	var n = 0
+	try { n = da.getNumberOfParameters(skAm, st.obj) } catch (e) { return -1 }
+	var titles = []
+	for (var i = 0; i < n && i < 400; ++i) {
+		try { var tag = da.getParameterTagByIndex(skAm, st.obj, i); titles.push({ tag: tag, t: String(da.getParameterTitle(skAm, st.obj, tag, 48)).toLowerCase() }) } catch (e) {}
+	}
+	for (var w = 0; w < STRIP_FADER_NAMES.length && st.faderTag < 0; ++w)
+		for (var k = 0; k < titles.length; ++k) if (titles[k].t === STRIP_FADER_NAMES[w]) { st.faderTag = titles[k].tag; break }
+	return st.faderTag
+}
+function stripModeUpdate(activeDevice, index) {
+	var st = skStrip[index]
+	var on = stripModeOn && route.fader === 'vol' && stripFaderTag(index) >= 0
+	if (on !== !!st.faderOn) {
+		st.faderOn = on
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, 0xF7]))
+		if (!on) dbResend[index](activeDevice)
+	}
+	if (on) stripFaderSend(activeDevice, index)
+}
+function stripModeUpdateAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i) }
+function stripFaderText(index) {
+	var st = skStrip[index], da = skDa[index], text = ''
+	try { text = String(da.getParameterDisplayValue(skAm, st.obj, st.faderTag)) } catch (e) {}
+	return text.replace(/\s+/g, ' ').trim()
+}
+function stripFaderSend(activeDevice, index) {
+	var st = skStrip[index], da = skDa[index]
+	var v = Math.round(Math.max(0, Math.min(1, da.getParameterProcessValue(skAm, st.obj, st.faderTag))) * 16383)
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x27, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(stripFaderText(index)), [0xF7]))
+}
+
 function skMessage(activeDevice, m) {
+	if (m[4] === 0x24 && m.length >= 7) {
+		stripModeOn = m[5] !== 0
+		out('[CubaseSixty] SSL Strip Mode ' + (stripModeOn ? 'on' : 'off'))
+		stripModeUpdateAll(activeDevice)
+		return
+	}
+	if (m[4] === 0x25 && m.length >= 9) {
+		var si = m[5]
+		if (si >= STRIPS || !skStrip[si].faderOn) return
+		skDa[si].setParameterProcessValue(skAm, skStrip[si].obj, skStrip[si].faderTag, ((m[6] << 7) | m[7]) / 16383)
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, si], toAscii7(stripFaderText(si)), [0xF7]))
+		return
+	}
 	if (m[4] === 0x21 && m.length >= 8) {
 		skFocus = m[5] === 0x7F ? null : { bank: m[5], slot: m[6] }
 		for (var i = 0; i < STRIPS; ++i) { skStrip[i].wanted = null; skStrip[i].sent = null }
@@ -979,5 +1047,6 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
 		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
+		if (stripModeOn) { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
 	}
 }
