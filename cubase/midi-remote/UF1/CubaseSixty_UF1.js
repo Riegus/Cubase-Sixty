@@ -1313,7 +1313,8 @@ function cubaseEqSend(activeDevice) {
 	if (text === cubaseEq.sent) return
 	cubaseEq.sent = text
 	if (cubaseEq.bandCount !== bands.length) { cubaseEq.bandCount = bands.length; out('[CubaseSixty UF1] EQ graph: ' + bands.length + ' band(s) on' + (bands.length ? ': ' + text : '')) }
-	plugSend(activeDevice, [0x55].concat(asciiAll(text)))
+	// "-" for none: a SysEx with nothing after the command is too short for the bridge to take.
+	plugSend(activeDevice, [0x55].concat(asciiAll(text || '-')))
 }
 // toAscii7 stops at 32 characters; the band list is longer.
 function asciiAll(text) {
