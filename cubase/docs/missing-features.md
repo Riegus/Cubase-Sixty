@@ -6,6 +6,9 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
+1. UF8 SSL Strip Mode: the PLUGIN key puts each strip's fader on its SSL channel strip's fader (as the UF1 now does).
+2. UF8 soft keys: the bus comp pages (Q2), so the top row works on Bus Compressor 2 as on the channel strips.
+3. Known issue: ◀ ▶ track stepping does not skip hidden tracks.
 
 ## UF8
 
