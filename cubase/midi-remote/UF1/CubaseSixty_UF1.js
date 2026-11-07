@@ -926,7 +926,9 @@ function plugKeys() {
 }
 
 // Every object under the selected channel (as the UC1 script walks it), for the SSL plug-ins in its inserts.
-var PLUG_SKIP = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+// Inside the channel the input filter, the EQ and the strip are walked too (Cubase's own EQ for the graph), as the
+// UC1 script does; the rest cannot hold what is looked for.
+var PLUG_SKIP = { QuickControls: 1, Panner: 1, Modulators: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
 function plugWalk(base) {
 	var list = [], seen = {}
 	function rec(id, depth, parentType) {
@@ -986,6 +988,8 @@ function plugRescan(activeDevice) {
 			}
 		}
 	}
+	var eqWhere = (eqObj >= 0 ? 'EQ' : 'no EQ') + ', ' + (filterObj >= 0 ? 'input filter' : 'no input filter')
+	if (!strip && eqWhere !== cubaseEq.logged) { cubaseEq.logged = eqWhere; out('[CubaseSixty UF1] EQ graph: Cubase channel (' + eqWhere + ', ' + Object.keys(cubaseEq.tags).length + ' parameters)') }
 	cubaseEqSend(activeDevice)
 	if (id !== plug.obj) {
 		plug.obj = id
