@@ -441,6 +441,7 @@ struct PlugKey { std::vector<uint8_t> label; uint8_t state = 2; };   // state 0 
 std::array<PlugKey, 4> g_plugKeys;
 std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
 std::string g_plugTitle;   // the plug-in's name in Cubase (for its preset folder)
+uf1eq::Model g_cubaseEq;   // Cubase's own channel EQ + input filter, from the script (SysEx 55); off = flat
 
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
 // takes no FF39 frame: Rea-Sixty found that one sticks its rectangle on.
@@ -881,6 +882,12 @@ void paintEq(bool force)
             }
         }
     }
+    if (!drawn && !strip) {
+        // No SSL channel strip: Cubase's own channel EQ, drawn from its settings with Rea-Sixty's renderer.
+        uf1eq::Model m;
+        { std::lock_guard<std::mutex> lk(g_cellMx); m = g_cubaseEq; }
+        if (m.on) { uf1eq::render(m, col, tail); drawn = true; }
+    }
     if (!drawn) { uf1eq::Model flat; uf1eq::render(flat, col, tail); }
     col[0] = 0x00;
     col[1] = 0x01;
@@ -1053,6 +1060,27 @@ void onSysex(const std::vector<unsigned char>& m)
         // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
         // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
         if (g_view == kViewSends) paintSendCells(false);
+    } else if (m[4] == 0x55) {
+        // Cubase's channel EQ for the graph: "<kind> <Hz> <dB> <Q> <order>" per band, ';' between (see the script).
+        uf1eq::Model model;
+        const std::string t(m.begin() + 5, m.end() - 1);
+        size_t a = 0;
+        while (a < t.size()) {
+            size_t e = t.find(';', a);
+            if (e == std::string::npos) e = t.size();
+            char kind = 0; double hz = 0, db = 0, q = 1; int order = 2;
+            if (std::sscanf(t.substr(a, e - a).c_str(), " %c %lf %lf %lf %d", &kind, &hz, &db, &q, &order) == 5 && hz > 0) {
+                using K = uf1eq::Band::Kind;
+                uf1eq::Band b;
+                b.kind = kind == 'L' ? K::LowShelf : kind == 'H' ? K::HighShelf : kind == 'P' ? K::HighPass : kind == 'C' ? K::LowPass : K::Bell;
+                b.freq = hz; b.gainDb = db; b.q = q > 0 ? q : 1.0; b.order = order;
+                model.bands.push_back(b);
+            }
+            a = e + 1;
+        }
+        model.on = !model.bands.empty();
+        std::lock_guard<std::mutex> lk(g_cellMx);
+        g_cubaseEq = model;
     } else if (m[4] == 0x54) {
         // The script (re)started: it begins on the sends, so tell it the V-pot page of the view shown.
         sendVpotPage();

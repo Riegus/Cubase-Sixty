@@ -948,8 +948,10 @@ function plugRescan(activeDevice) {
 	var base
 	try { base = plugDa.getBaseObjectID(plugAm) } catch (e) { return }
 	var objects = plugWalk(base)
-	var strip = null, busComp = null, stripOrd = 0
+	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1
 	for (var i = 0; i < objects.length; ++i) {
+		if (objects[i].type === 'EQ' && eqObj < 0) eqObj = objects[i].id
+		if (objects[i].type === 'InputFilter' && filterObj < 0) filterObj = objects[i].id
 		var title = '', n = 0
 		try { title = plugDa.getObjectTitle(plugAm, objects[i].id) } catch (e) {}
 		try { n = plugDa.getNumberOfParameters(plugAm, objects[i].id) } catch (e) {}
@@ -963,6 +965,28 @@ function plugRescan(activeDevice) {
 	}
 	var found = strip || busComp
 	var id = found ? found.id : -1
+	// Cubase's own channel EQ and input filter, for the EQ graph on tracks without an SSL channel strip.
+	cubaseEq.eq = eqObj
+	cubaseEq.filter = filterObj
+	cubaseEq.tags = {}
+	cubaseEq.sent = null
+	if (strip) cubaseEq.eq = cubaseEq.filter = -1   // the SSL strip's own curve is drawn instead
+	else {
+		var lists = [[eqObj, 'eq'], [filterObj, 'in']]
+		for (var li = 0; li < lists.length; ++li) {
+			var o = lists[li][0]
+			if (o < 0) continue
+			var cnt = 0
+			try { cnt = plugDa.getNumberOfParameters(plugAm, o) } catch (e) {}
+			for (var pi = 0; pi < cnt && pi < 64; ++pi) {
+				var tg = plugDa.getParameterTagByIndex(plugAm, o, pi)
+				var tt = ''
+				try { tt = plugDa.getParameterTitle(plugAm, o, tg, 32) } catch (e) {}
+				if (tt) cubaseEq.tags[lists[li][1] + ':' + tt] = tg
+			}
+		}
+	}
+	cubaseEqSend(activeDevice)
 	if (id !== plug.obj) {
 		plug.obj = id
 		plug.kind = found ? found.kind : null
@@ -1076,6 +1100,7 @@ if (plugDa) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		plugAm = activeMapping
 		if (objectID === plug.obj) plugPaint(activeDevice, false)
+		if (objectID === cubaseEq.eq || objectID === cubaseEq.filter) cubaseEqSend(activeDevice)
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 		plugAm = activeMapping
@@ -1211,4 +1236,75 @@ function onPresetMessage(activeDevice, message) {
 		+ (presetLoad.failed.length ? ' (not set: ' + presetLoad.failed.slice(0, 12).join(', ') + ')' : ''))
 	presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
 	if (plug.obj >= 0) plugPaint(activeDevice, false)
+}
+
+// ---------------------------------------------------------------------------
+// The EQ graph for Cubase's own channel EQ (tracks without an SSL channel strip). Cubase does not send a curve the
+// way SSL's plug-ins do, so the script sends the EQ's settings and the bridge draws the curve from them (Rea-Sixty's
+// renderer, Uf1EqCurve). SysEx 55 <text>: "<kind> <Hz> <dB> <Q> <order>" per band, ';' between bands; kinds B bell,
+// L / H low / high shelf, P / C high pass (low cut) / low pass (high cut). Empty = nothing switched on (flat).
+// The four bands count when on (an inverted band, or Invert All, turns its gain round) and the EQ not bypassed; the
+// input filter's low / high cut when on (order from the slope, 6 dB per octave each).
+// ---------------------------------------------------------------------------
+var cubaseEq = { eq: -1, filter: -1, tags: {}, sent: null }
+function cubaseEqParam(key) {
+	var tag = cubaseEq.tags[key]
+	if (tag === undefined) return null
+	var obj = key.charAt(0) === 'e' ? cubaseEq.eq : cubaseEq.filter
+	return { process: plugDa.getParameterProcessValue(plugAm, obj, tag), text: String(plugDa.getParameterDisplayValue(plugAm, obj, tag)) }
+}
+function eqNumber(text) {
+	var r = /(-?\d*\.?\d+)\s*(k?)/i.exec(text || '')
+	if (!r) return NaN
+	return parseFloat(r[1]) * (r[2] ? 1000 : 1)
+}
+function cubaseEqSend(activeDevice) {
+	if (!plugDa || !plugAm) return
+	var bands = []
+	if (cubaseEq.eq >= 0) {
+		var bypass = cubaseEqParam('eq:Bypass')
+		var invertAll = cubaseEqParam('eq:Invert All')
+		if (!bypass || bypass.process < 0.5) {
+			for (var b = 1; b <= 4; ++b) {
+				var on = cubaseEqParam('eq:EQ ' + b + ' On')
+				if (!on || on.process < 0.5) continue
+				var type = cubaseEqParam('eq:EQ ' + b + ' Type'), gain = cubaseEqParam('eq:EQ ' + b + ' Gain')
+				var freq = cubaseEqParam('eq:EQ ' + b + ' Freq'), q = cubaseEqParam('eq:EQ ' + b + ' Q')
+				var inv = cubaseEqParam('eq:Invert ' + b)
+				var t = type ? type.text : 'Parametric'
+				var kind = /low\s*shelf/i.test(t) ? 'L' : /high\s*shelf/i.test(t) ? 'H' : /high\s*pass|low\s*cut/i.test(t) ? 'P'
+					: /low\s*pass|high\s*cut/i.test(t) ? 'C' : 'B'
+				var g = gain ? eqNumber(gain.text) : 0
+				if (((inv && inv.process >= 0.5) ? 1 : 0) ^ ((invertAll && invertAll.process >= 0.5) ? 1 : 0)) g = -g
+				var f = freq ? eqNumber(freq.text) : 1000
+				var qv = q ? eqNumber(q.text) : 1
+				var order = /\bII\b/.test(t) ? 4 : 2   // the cut types: I = 12, II = 24 dB per octave (approximate)
+				if (!isNaN(f)) bands.push(kind + ' ' + f + ' ' + (isNaN(g) ? 0 : g) + ' ' + (isNaN(qv) || qv <= 0 ? 1 : qv) + ' ' + order)
+			}
+		}
+	}
+	if (cubaseEq.filter >= 0) {
+		var fb = cubaseEqParam('in:Bypass')
+		if (!fb || fb.process < 0.5) {
+			var cuts = [['LC', 'P'], ['HC', 'C']]
+			for (var c = 0; c < cuts.length; ++c) {
+				var con = cubaseEqParam('in:' + cuts[c][0] + '-On')
+				if (!con || con.process < 0.5) continue
+				var cf = cubaseEqParam('in:' + cuts[c][0] + '-Freq'), cs = cubaseEqParam('in:' + cuts[c][0] + '-Slope')
+				var hz = cf ? eqNumber(cf.text) : NaN
+				var slope = cs ? eqNumber(cs.text) : 12
+				if (!isNaN(hz)) bands.push(cuts[c][1] + ' ' + hz + ' 0 0.7 ' + Math.max(1, Math.min(8, Math.round((isNaN(slope) ? 12 : slope) / 6))))
+			}
+		}
+	}
+	var text = bands.join(';')
+	if (text === cubaseEq.sent) return
+	cubaseEq.sent = text
+	plugSend(activeDevice, [0x55].concat(asciiAll(text)))
+}
+// toAscii7 stops at 32 characters; the band list is longer.
+function asciiAll(text) {
+	var r = []
+	for (var i = 0; i < text.length; ++i) { var c = text.charCodeAt(i); r.push(c >= 0x20 && c < 0x80 ? c : 0x3F) }
+	return r
 }
