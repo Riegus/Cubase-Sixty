@@ -516,30 +516,22 @@ var stepMix = null
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
 var stepListed = false   // (the channel list is logged once, when the selected track is not in it)
-// Every track channel in the MixConsole, in MixConsole order. Channels in a folder sit deeper in the tree than the
-// top level, so the whole tree is walked (not into the channels themselves); the same channel can be listed twice.
+// Every track's channel in the MixConsole, in MixConsole order: the VST Mixer's children, except the inputs and
+// outputs. (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
 function stepChannels() {
-	var list = [], seen = {}, count = 0
-	function rec(id, depth) {
-		if (seen[id] || count > 2000) return
-		seen[id] = true
-		++count
+	var list = []
+	var base = stepMix.getBaseObjectID(plugAm)
+	var n = stepMix.getNumberOfChildObjects(plugAm, base)
+	for (var i = 0; i < n && i < 1024; ++i) {
+		var id = stepMix.getChildObjectID(plugAm, base, i)
 		var type = ''
 		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
-		if (/Channel$/.test(type)) {
-			if (/Input|Output|ControlRoom|Monitor/.test(type)) return   // tracks only
-			var vis = true, idx = list.length
-			try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
-			try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
-			list.push({ id: id, vis: vis, idx: idx })
-			return
-		}
-		if (depth >= 6) return
-		var n = 0
-		try { n = stepMix.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
-		for (var i = 0; i < n && i < 512; ++i) rec(stepMix.getChildObjectID(plugAm, id, i), depth + 1)
+		if (/Input|Output|ControlRoom|Monitor/.test(type)) continue
+		var vis = true, idx = i
+		try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
+		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
+		list.push({ id: id, vis: vis, idx: idx })
 	}
-	rec(stepMix.getBaseObjectID(plugAm), 0)
 	list.sort(function (a, b) { return a.idx - b.idx })
 	return list
 }
@@ -564,20 +556,6 @@ function stepTrack(activeDevice, dir) {
 			out('[CubaseSixty UF1] track step: ' + list.length + ' channels, selected at ' + at + ' ("' + selectedInfo.title + '", object ' + cur + '), ' + count + ' step(s) ' + (dir > 0 ? 'on' : 'back'))
 			if (at < 0 && !stepListed) {
 				stepListed = true
-				// The tree's top three levels (types and titles), to see where the tracks sit.
-				var lines = []
-				;(function dump(id, depth) {
-					if (lines.length > 400) return
-					var t = '', ty = ''
-					try { ty = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
-					try { t = stepMix.getObjectTitle(plugAm, id) } catch (e) {}
-					lines.push(new Array(depth + 1).join('  ') + '#' + id + ' [' + ty + '] "' + t + '"')
-					if (depth >= 2) return
-					var n = 0
-					try { n = stepMix.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
-					for (var i = 0; i < n && i < 64; ++i) dump(stepMix.getChildObjectID(plugAm, id, i), depth + 1)
-				})(stepMix.getBaseObjectID(plugAm), 0)
-				for (var l = 0; l < lines.length; ++l) out('[CubaseSixty UF1] mix ' + lines[l])
 				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
 			}
 		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
