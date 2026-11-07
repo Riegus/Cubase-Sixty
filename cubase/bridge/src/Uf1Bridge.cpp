@@ -15,6 +15,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdio>
+#include <cstring>
 #include <initializer_list>
 #include <map>
 #include <mutex>
@@ -32,6 +33,7 @@
 #include "ScriptLog.h"
 #include "Uf1Meter.h"
 #include "SslCoreImpersonator.h"
+#include "Uf1EqCurve.h"
 
 namespace cs {
 bool netInit();      // NetInit.cpp
@@ -93,6 +95,18 @@ enum { kViewPlugin = 0, kViewDaw = 1, kViewMeter = 2, kViewSends = 3 };
 std::atomic<int> g_view{kViewDaw};
 std::atomic<bool> g_meterReset{false};   // METER: the RESET soft key was pressed (the cycle thread takes it)
 std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LED note from the script)
+// PLUGIN view: the SSL plug-in on the selected track, as the script reports it (SysEx 50). While one is there, the
+// V-pots, the display soft keys and ◄ ► go to the script as SysEx 53 instead of Quick Controls / track steps.
+std::atomic<bool> g_plugPresent{false}, g_plugEqIn{false};
+std::atomic<int> g_plugPage{0}, g_plugPages{1}, g_plugOrd{0};
+void plugEvent(uint8_t kind, uint8_t a, uint8_t b)
+{
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x53, kind, a, b, 0xF7});
+}
+bool plugActive() { return g_view == kViewPlugin && g_plugPresent; }
+void paintHeader(bool force = false);
+void paintCsType(bool force);
+void paintEq(bool force);
 long long nowMs();
 void paintSendCells(bool force = false);
 void startIdleCycle();
@@ -203,6 +217,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id >= 1 && ev.id <= 4) {
             if (g_view == kViewMeter) break;   // METER: the V-pots have no meter settings yet (and would change sends unseen)
+            if (plugActive()) { plugEvent(0, uint8_t(ev.id - 1), uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }
             const size_t k = size_t(ev.id - 1);
             if (g_vpotPos[k] < 0) break;   // position not known yet (comes from Cubase within a second)
             const int v = std::clamp(g_vpotPos[k] + ev.delta * kVpotStep, 0, 16383);
@@ -211,7 +226,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             const uint8_t cc = uint8_t(uf1m::kCcEncoder + ev.id);
             sendMidi({0xB0, cc, uint8_t((v >> 7) & 0x7F)});
             sendMidi({0xB0, uint8_t(cc + 32), uint8_t(v & 0x7F)});
-            if (g_view == kViewSends) paintSendCells(false);
+            if (g_view == kViewSends || g_view == kViewPlugin) paintSendCells(false);
             break;
         }
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
@@ -267,6 +282,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
             // METER, without MODE: soft key 2 = RESET (the peak holds and overload marks). FINE and PRESETS: later.
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1A) { g_meterReset = true; break; }
+            // PLUGIN with an SSL plug-in, without MODE: the plug-in's switches on this page.
+            if (ev.pressed && !g_modeHeld && plugActive()) { plugEvent(2, uint8_t(ev.id - 0x19), 0); break; }
             if (!ev.pressed || !g_modeHeld) break;
             {
                 const int view = ev.id - 0x19;
@@ -275,6 +292,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     g_view = view;
                     if (pageChanges) sendVpotPage();
                     paintSendCells(true);
+                    paintHeader();
                     if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
                 }
                 paintSoftKeys();
@@ -286,6 +304,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (!ev.pressed) break;
             g_sends58 = !g_sends58;
             sendVpotPage();
+            paintHeader();
             setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
             break;
         }
@@ -320,12 +339,16 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (ev.id == 0x24 || ev.id == 0x26) {
             if (!ev.pressed) break;
+            // PLUGIN with an SSL plug-in: ◄ ► page through its controls (as in Rea-Sixty). The channel encoder
+            // still steps the track.
+            if (plugActive() && !g_shift) { plugEvent(3, ev.id == 0x26 ? 1 : 0, 0); break; }
             // SHIFT + ARROW: step back / forward one bar (81 / 82).
             const uint8_t n = g_shift ? (ev.id == 0x26 ? 82 : 81) : (ev.id == 0x26 ? 41 : 40);
             note(n, true);
             note(n, false);
             break;
         }
+        if (ev.id >= 0x09 && ev.id <= 0x0C && plugActive()) { if (ev.pressed) plugEvent(1, uint8_t(ev.id - 0x09), 0); break; }
         if (auto n = uf1m::buttonToNote(ev.id)) note(*n, ev.pressed);
         break;
     default: break;
@@ -366,6 +389,20 @@ void showSelLed()
     g_dev.send(::uf1::buildLedLevel(sel.id, 0x00));
 }
 
+// SENDS view: the four sends in the display's V-pot cells (Rea-Sixty's cells: 0x010e text per pot with the
+// pot index first, 0x010f bars = position 0..100 + brightness 0x80 per pot, 0x010d styles: 0x01 pointer,
+// 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
+// cells show them only in SENDS (PLUGIN shows its own, below; DAW none).
+std::array<SendCell, 4> g_sendCells;
+std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
+// PLUGIN view cells and soft keys (SysEx 51 / 52), under g_cellMx: the SSL plug-in's controls on the current
+// page, or (no SSL plug-in) the Quick Controls' names and values.
+struct PlugCell { std::string name, value; uint8_t pos = 0; bool used = false, bipolar = false; };
+std::array<PlugCell, 4> g_plugCells;
+struct PlugKey { std::vector<uint8_t> label; uint8_t state = 2; };   // state 0 off, 1 on, 2 no switch
+std::array<PlugKey, 4> g_plugKeys;
+std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
+
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
 // takes no FF39 frame: Rea-Sixty found that one sticks its rectangle on.
 void softKeyLed(int i, uint32_t rgb)
@@ -384,13 +421,22 @@ void paintSoftKeys()
     static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
     static const char* const kMeterKeys[4] = {"OVERVIEW", "RESET", "FINE", "PRESETS"};   // the METER view's own keys
     const bool meter = g_view == kViewMeter;
+    const bool plugin = plugActive() && !g_modeHeld;
     for (int i = 0; i < 4; ++i) {
         const std::string label = g_modeHeld ? kPicker[i] : meter ? kMeterKeys[i] : "";
         std::vector<uint8_t> p;
         p.push_back(uint8_t(i));
-        p.insert(p.end(), label.begin(), label.end());
-        g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
         uint32_t rgb = 0;   // dark
+        if (plugin) {
+            // The plug-in's switch on this page (0x7F from the script = SSL's Ø glyph, 0xD8 in the UF1's font),
+            // lit white while it is on.
+            std::lock_guard<std::mutex> lk(g_cellMx);
+            for (uint8_t c : g_plugKeys[size_t(i)].label) p.push_back(c == 0x7F ? 0xD8 : c);
+            if (g_plugKeys[size_t(i)].state == 1) rgb = 0xFFFFFF;
+        } else {
+            p.insert(p.end(), label.begin(), label.end());
+        }
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
         if (g_modeHeld) {
             const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
@@ -401,12 +447,6 @@ void paintSoftKeys()
     g_dev.send(::uf1::buildScreen(0x0102, std::span<const uint8_t>(&noHighlight, 1)));
 }
 
-// SENDS view: the four sends in the display's V-pot cells (Rea-Sixty's cells: 0x010e text per pot with the
-// pot index first, 0x010f bars = position 0..100 + brightness 0x80 per pot, 0x010d styles: 0x01 pointer,
-// 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
-// cells show them only in SENDS and are blank otherwise.
-std::array<SendCell, 4> g_sendCells;
-std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
 // ---------------------------------------------------------------------------
 // The send level text while turning. The bar follows the bridge's own position at once, but the dB text
 // comes from Cubase and trails behind. Cubase's level curve is the same for every send, so the bridge learns
@@ -534,6 +574,9 @@ void startIdleCycle()
                 }
                 uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
             } else {
+                // The EQ graph, every third cycle (~120 ms): a turned EQ knob redraws about as fast as SSL 360's.
+                static int eqTick = 0;
+                if (++eqTick >= 3) { eqTick = 0; paintEq(false); }
                 const uint8_t level[4] = { g_meterL.load(), g_meterR.load(), 0x00, 0x00 };
                 const uint8_t idle[4] = { 0x00, 0x00, 0x00, 0x00 };
                 const uint8_t zero = 0x00, closeValue = 0x11;   // 011d = 11 closes the channel view's idle cycle
@@ -564,6 +607,32 @@ void paintSendCells(bool force)
     const bool show = g_view == kViewSends;
     std::array<uint8_t, 8> bars{};
     std::array<uint8_t, 4> styles{};
+    if (g_view == kViewPlugin) {
+        // PLUGIN: the plug-in's controls (bipolar ones as a centre bar, style 08 with a signed position, as
+        // Rea-Sixty draws EQ gains and trims), or the Quick Controls (the bar on the bridge's own position).
+        const bool qc = !g_plugPresent;
+        for (int i = 0; i < 4; ++i) {
+            const PlugCell& c = g_plugCells[size_t(i)];
+            SendCell sc; sc.name = c.name; sc.value = c.value; sc.used = c.used;
+            const std::string line = c.used ? sendCellLine(sc) : std::string();
+            if (force || line != shownLine[size_t(i)]) {
+                shownLine[size_t(i)] = line;
+                std::vector<uint8_t> p;
+                p.push_back(uint8_t(i));
+                p.insert(p.end(), line.begin(), line.end());
+                g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, p));
+            }
+            const int own = g_vpotPos[size_t(i)];
+            int pos = (qc && own >= 0) ? (own * 100 + 8191) / 16383 : c.pos;
+            if (c.bipolar) pos = std::clamp((pos - 50) * 2, -100, 100);
+            bars[size_t(i) * 2] = c.used ? uint8_t(int8_t(pos)) : 0;
+            bars[size_t(i) * 2 + 1] = 0x80;
+            styles[size_t(i)] = !c.used ? 0x03 : c.bipolar ? 0x08 : 0x01;
+        }
+        if (force || bars != shownBars) { shownBars = bars; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars)); }
+        if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
+        return;
+    }
     for (int i = 0; i < 4; ++i) {
         const SendCell& c = g_sendCells[size_t(i)];
         const bool on = show && c.used;
@@ -592,6 +661,106 @@ void paintSendCells(bool force)
         g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotBars, bars));
     }
     if (force || styles != shownStyles) { shownStyles = styles; g_dev.send(::uf1::buildScreen(::uf1::scr::kVpotStyle, styles)); }
+}
+
+// The big display's header row (0x011c, 8 fields of 25 bytes; in the channel layout the firmware draws field 0
+// under CHANNEL, field 3 as the SOFT KEY page "N/M" and field 4 as FINE CTRL, Rea-Sixty's uf1spread::pageHeader).
+// PLUGIN with an SSL plug-in: its page; otherwise V-pots 1-4 / 5-8 as page 1 / 2.
+void paintHeader(bool force)
+{
+    if (!g_open || g_view == kViewMeter) return;
+    static std::array<uint8_t, 200> shown{};
+    std::array<uint8_t, 200> h{};
+    const char* name = "Cubase-Sixty";
+    std::memcpy(h.data(), name, std::strlen(name));
+    const bool plug = plugActive();
+    const std::string page = plug ? std::to_string(g_plugPage + 1) + "/" + std::to_string(int(g_plugPages))
+                                  : std::string(g_sends58 ? "2/2" : "1/2");
+    std::memcpy(h.data() + 75, page.data(), std::min<size_t>(page.size(), 24));
+    std::memcpy(h.data() + 100, "OFF", 3);
+    if (!force && h == shown) return;
+    shown = h;
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow, h));
+}
+
+// The CS TYPE cell (0x0017): the model of the selected track's SSL plug-in ("CS 2", "4K E" ...), 12 spaces
+// without one (Rea-Sixty: never empty, that drops the layer).
+void paintCsType(bool force)
+{
+    if (!g_open) return;
+    static std::string shown = "\x01";
+    std::string t;
+    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent ? g_plugModel : std::string(); }
+    if (t.empty()) t.assign(12, ' ');
+    if (!force && t == shown) return;
+    shown = t;
+    std::vector<uint8_t> p{0x00};
+    p.insert(p.end(), t.begin(), t.end());
+    g_dev.send(::uf1::buildScreen(::uf1::scr::kCsType, p));
+}
+
+// The EQ graph (0x0122): the channel strip's own EQ curve, as the plug-in sends it to SSL 360 Core (the stand-in
+// collects it, as Rea-Sixty's uf1PaintEqGraph_ reads it), resampled onto the UF1's 250 columns (20 Hz .. 20 kHz).
+// Flat (the 0 dB line) when the track has no SSL channel strip, its EQ is out, or no curve has come. Called
+// from the cycle thread between two cycles; only a changed curve goes out.
+void paintEq(bool force)
+{
+    if (!g_open) return;
+    static std::array<uint8_t, 251> last{};
+    static uint8_t lastTail = 0;
+    static bool have = false;
+    std::array<uint8_t, 251> col{};
+    uint8_t tail = 0x64;
+    bool drawn = false;
+    std::string model;
+    { std::lock_guard<std::mutex> lk(g_cellMx); model = g_plugModel; }
+    const bool strip = g_plugPresent && !model.empty() && model != "BC 2";
+    if (strip && g_plugEqIn && g_trackNo > 0) {
+        ensureSslCore();
+        std::vector<float> wire;
+        float wMin = 0.0f, wMax = 0.0f;
+        if (sslcore::isRunning() &&
+            sslcore::getChannelStripEqCurve(g_trackNo, model.c_str(), nullptr, 0, g_plugOrd, wire, wMin, wMax)) {
+            // Points the plug-in sent as NaN / inf are filled in from their neighbours (Rea-Sixty's
+            // uf1SanitizeWireCurve_); all of them bad = no curve.
+            const int n = int(wire.size());
+            int good = 0;
+            for (float v : wire) if (std::isfinite(v)) ++good;
+            if (good > 0) {
+                for (int i = 0; i < n;) {
+                    if (std::isfinite(wire[size_t(i)])) { ++i; continue; }
+                    int j = i;
+                    while (j < n && !std::isfinite(wire[size_t(j)])) ++j;
+                    for (int k = i; k < j; ++k) {
+                        if (i > 0 && j < n) wire[size_t(k)] = wire[size_t(i - 1)] + (wire[size_t(j)] - wire[size_t(i - 1)]) * float(k - i + 1) / float(j - i + 1);
+                        else wire[size_t(k)] = i > 0 ? wire[size_t(i - 1)] : wire[size_t(j)];
+                    }
+                    i = j;
+                }
+                const double aMin = wMin > 0.0f ? double(wMin) : 20.0;
+                const double aMax = wMax > aMin ? double(wMax) : 20000.0;
+                const double lMin = std::log(aMin), lSpan = std::log(aMax) - lMin;
+                for (int x = 2; x < 252; ++x) {   // column 251 = the tail point
+                    const double f = 20.0 * std::pow(1000.0, (x - 2) / 249.0);
+                    double pos = lSpan > 0.0 ? (std::log(f) - lMin) / lSpan * (n - 1) : 0.0;
+                    pos = std::clamp(pos, 0.0, double(n - 1));
+                    const int i0 = int(pos), i1 = i0 + 1 < n ? i0 + 1 : i0;
+                    const double fr = pos - i0;
+                    const uint8_t hgt = uf1eq::dbToHeight(wire[size_t(i0)] * (1.0 - fr) + wire[size_t(i1)] * fr);
+                    if (x < 251) col[size_t(x)] = hgt; else tail = hgt;
+                }
+                drawn = true;
+            }
+        }
+    }
+    if (!drawn) { uf1eq::Model flat; uf1eq::render(flat, col, tail); }
+    col[0] = 0x00;
+    col[1] = 0x01;
+    if (have && !force && col == last && tail == lastTail) return;
+    last = col; lastTail = tail; have = true;
+    const std::array<uint8_t, 2> refresh{0x01, tail};
+    g_dev.send(::uf1::buildScreen(0x0122, refresh));
+    g_dev.send(::uf1::buildScreen(0x0122, std::span<const uint8_t>(col.data(), col.size())));
 }
 
 // Screen text zone: 0x00, then the text (the UF1 reads one byte per glyph, so ASCII only here).
@@ -756,6 +925,49 @@ void onSysex(const std::vector<unsigned char>& m)
         // Drawn at once, like the value line (which turns smoothly): a 40 ms painter sampled the updates at
         // its own beat (Cubase sends every 20-40 ms), so some frames moved two steps and some none.
         if (g_view == kViewSends) paintSendCells(false);
+    } else if (m[4] == 0x50 && m.size() >= 11) {
+        // PLUGIN view: the SSL plug-in on the selected track (present, page, pages, EQ in, ordinal, model).
+        const bool present = m[5] != 0;
+        {
+            std::lock_guard<std::mutex> lk(g_cellMx);
+            g_plugModel.assign(m.begin() + 10, m.end() - 1);
+            if (!present) {   // the script sends the Quick Controls' cells next
+                for (auto& k : g_plugKeys) k = PlugKey{};
+                for (auto& c : g_plugCells) c = PlugCell{};
+            }
+        }
+        const bool was = g_plugPresent.exchange(present);
+        g_plugPage = m[6];
+        g_plugPages = std::max(1, int(m[7]));
+        g_plugEqIn = m[8] != 0;
+        g_plugOrd = m[9];
+        if (g_trace) std::printf("UF1 PLUGIN: %s page %d/%d EQ %s\n", present ? g_plugModel.c_str() : "(none)", int(m[6]) + 1, int(m[7]), m[8] ? "in" : "out");
+        paintCsType(false);
+        paintHeader();
+        if (was != present && g_view == kViewPlugin) { paintSoftKeys(); paintSendCells(true); }
+    } else if (m[4] == 0x51 && m.size() >= 9 && m[5] < 4) {
+        // A PLUGIN-view cell: pot, position 0..100, flags (1 bipolar, 2 used), "label|value".
+        {
+            std::lock_guard<std::mutex> lk(g_cellMx);
+            PlugCell& c = g_plugCells[m[5]];
+            std::string t(m.begin() + 8, m.end() - 1);
+            const size_t bar = t.find('|');
+            c.name = bar == std::string::npos ? t : t.substr(0, bar);
+            c.value = bar == std::string::npos ? std::string() : t.substr(bar + 1);
+            c.pos = uint8_t(m[6] > 100 ? 100 : m[6]);
+            c.bipolar = (m[7] & 1) != 0;
+            c.used = (m[7] & 2) != 0;
+        }
+        if (g_view == kViewPlugin) paintSendCells(false);
+    } else if (m[4] == 0x52 && m.size() >= 8 && m[5] < 4) {
+        // A PLUGIN-view soft key: key, state (0 off, 1 on, 2 no switch), label.
+        {
+            std::lock_guard<std::mutex> lk(g_cellMx);
+            PlugKey& k = g_plugKeys[m[5]];
+            k.state = m[6];
+            k.label.assign(m.begin() + 7, m.end() - 1);
+        }
+        if (g_view == kViewPlugin && !g_modeHeld) paintSoftKeys();
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
@@ -888,12 +1100,9 @@ void restoreChannelView()
     put(0x000a, {0x00, 0x00, 0x00, 0x00});
     put(0x011b, {});
     put(0x0102, {0x00});
-    {
-        const char* banner = "Cubase-Sixty";   // the header row carried the meter readouts
-        g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow,
-            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(banner), 12)));
-    }
-    screenText(::uf1::scr::kCsType, std::string(12, ' '));
+    paintHeader(true);   // the header row carried the meter readouts
+    paintCsType(true);
+    paintEq(true);
     screenText(::uf1::scr::kChSoftKey, "BYPASS");
     { std::lock_guard<std::mutex> lk(g_lineMx); g_barStyleShown = 0x00; }   // the bar style goes out again
     g_tcShown.clear();
@@ -945,13 +1154,11 @@ bool uf1OpenDevice()
     g_open = true;
     // Same as Rea-Sixty after open(): a header banner, and the motor limp so the fader moves freely.
     {
-        const char* banner = "Cubase-Sixty";
-        g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow,
-            std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(banner), 12)));
+        paintHeader(true);
         g_dev.send(::uf1::buildMotorEnable(false));
         // Cells inside the colour bar that the UF1's start-up state leaves filled: the text cell (Rea-Sixty
         // writes 12 spaces for "nothing" - never empty, that drops the layer) and the channel number.
-        screenText(::uf1::scr::kCsType, std::string(12, ' '));
+        paintCsType(true);
         screenText(::uf1::scr::kChNumber, "");
         screenText(::uf1::scr::kChSoftKey, "BYPASS");   // the key above the display: insert bypass
         paintSoftKeys();   // the four display soft keys: blank and dark until MODE is held

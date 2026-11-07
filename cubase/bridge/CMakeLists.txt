@@ -70,7 +70,8 @@ add_executable(cubase_sixty_bridge
     ${EXT_SRC}/Palette.cpp
     ${EXT_SRC}/LogPath.cpp
     ${EXT_SRC}/SslCoreImpersonator.cpp
-    ${EXT_SRC}/SslMeterProtocol.cpp)
+    ${EXT_SRC}/SslMeterProtocol.cpp
+    ${EXT_SRC}/Uf1EqCurve.cpp)
 target_include_directories(cubase_sixty_bridge PRIVATE src ${EXT_SRC})
 target_link_libraries(cubase_sixty_bridge PRIVATE cs_libusb rtmidi)
 if(WIN32)
