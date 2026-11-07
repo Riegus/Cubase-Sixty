@@ -564,6 +564,20 @@ function stepTrack(activeDevice, dir) {
 			out('[CubaseSixty UF1] track step: ' + list.length + ' channels, selected at ' + at + ' ("' + selectedInfo.title + '", object ' + cur + '), ' + count + ' step(s) ' + (dir > 0 ? 'on' : 'back'))
 			if (at < 0 && !stepListed) {
 				stepListed = true
+				// The tree's top three levels (types and titles), to see where the tracks sit.
+				var lines = []
+				;(function dump(id, depth) {
+					if (lines.length > 400) return
+					var t = '', ty = ''
+					try { ty = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
+					try { t = stepMix.getObjectTitle(plugAm, id) } catch (e) {}
+					lines.push(new Array(depth + 1).join('  ') + '#' + id + ' [' + ty + '] "' + t + '"')
+					if (depth >= 2) return
+					var n = 0
+					try { n = stepMix.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
+					for (var i = 0; i < n && i < 64; ++i) dump(stepMix.getChildObjectID(plugAm, id, i), depth + 1)
+				})(stepMix.getBaseObjectID(plugAm), 0)
+				for (var l = 0; l < lines.length; ++l) out('[CubaseSixty UF1] mix ' + lines[l])
 				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
 			}
 		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
