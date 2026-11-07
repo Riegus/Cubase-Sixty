@@ -475,6 +475,12 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
 	}
+	if (m[4] === 0x57 && m.length >= 8) {
+		// From the UC1 script, via the bridge: the strip its magnifier key picked.
+		var choice = { kind: m[5], ord: m[6] }
+		if (!uc1Choice || uc1Choice.kind !== choice.kind || uc1Choice.ord !== choice.ord) { uc1Choice = choice; plug.rescanAt = Date.now() + 50 }
+		return
+	}
 	if ((m[4] === 0x3C || m[4] === 0x3D) && m.length >= 7) {
 		try { onPresetMessage(activeDevice, m) } catch (e) { out('[CubaseSixty UF1] preset: ' + e) }
 		return
@@ -494,6 +500,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
+	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
 	if (masterActive) return
 	sendName(activeDevice, title)
@@ -817,6 +824,7 @@ function meterToMidi(value) {
 // ---------------------------------------------------------------------------
 
 var plugAm = null
+var uc1Choice = null   // the UC1's strip on the selected track (SysEx 57): { kind 0 none / 1 SSL / 2 Cubase's, ord }
 var qcCells = [null, null, null, null]   // the Quick Controls' cells (SysEx 51), for the PLUGIN view without an SSL plug-in
 var plugDa = null
 try { plugDa = page.mHostAccess.makeDirectAccess(selectedChannel) } catch (e) { out('[CubaseSixty UF1] no Direct Access, PLUGIN view stays on Quick Controls: ' + e) }
@@ -964,7 +972,7 @@ function plugRescan(activeDevice) {
 	var base
 	try { base = plugDa.getBaseObjectID(plugAm) } catch (e) { return }
 	var objects = plugWalk(base)
-	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1
+	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1, sslOrd = 0, strips = []
 	for (var i = 0; i < objects.length; ++i) {
 		if (objects[i].type === 'EQ' && eqObj < 0) eqObj = objects[i].id
 		if (objects[i].type === 'InputFilter' && filterObj < 0) filterObj = objects[i].id
@@ -976,9 +984,14 @@ function plugRescan(activeDevice) {
 		for (var k = 0; k < PLUG_TYPES.length && !kind; ++k) if (title.indexOf(PLUG_TYPES[k].match) >= 0) kind = PLUG_TYPES[k]
 		if (!kind) continue
 		// The channel strips' position among the track's channel strips: how the bridge tells their EQ curves apart.
-		if (kind.strip) { if (!strip) strip = { id: objects[i].id, kind: kind, title: title, ordinal: stripOrd }; ++stripOrd }
+		if (kind.strip) { var st = { id: objects[i].id, kind: kind, title: title, ordinal: stripOrd, sslOrd: sslOrd }; strips.push(st); if (!strip) strip = st; ++stripOrd }
 		else if (!busComp) busComp = { id: objects[i].id, kind: kind, title: title, ordinal: 0 }
+		++sslOrd   // the position among the track's SSL plug-ins, as the UC1 script counts it
 	}
+	// The strip the UC1 is on (magnifier key), when it has said so for this track: the same SSL strip, or Cubase's
+	// own (then no SSL strip here: Quick Controls and Cubase's EQ).
+	if (uc1Choice && uc1Choice.kind === 2) { strip = null; busComp = null }
+	else if (uc1Choice && uc1Choice.kind === 1) for (var si = 0; si < strips.length; ++si) if (strips[si].sslOrd === uc1Choice.ord) strip = strips[si]
 	var found = strip || busComp
 	var id = found ? found.id : -1
 	// Cubase's own channel EQ and input filter, for the EQ graph on tracks without an SSL channel strip.

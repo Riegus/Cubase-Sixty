@@ -838,8 +838,16 @@ function reportGr(activeDevice) {
 	sysex(activeDevice, [0x40, (csT >> 7) & 0x7F, csT & 0x7F, csO & 0x7F, (bcT >> 7) & 0x7F, bcT & 0x7F, bcO & 0x7F].concat(encodeName(model)))
 }
 var pluginsShown = null
+// The channel strip the UC1 is on, for the UF1's PLUGIN view (SysEx 41 <kind> <ordinal>, passed on by the bridge):
+// kind 0 = none, 1 = an SSL strip (ordinal = its position among the track's SSL plug-ins, bus comps included),
+// 2 = Cubase's own strip. Sent with every repaint (after a track change, after the magnifier key).
+function reportStripChoice(activeDevice) {
+	var kind = !state.cs ? 0 : state.cs.key === 'cubase' ? 2 : 1
+	sysex(activeDevice, [0x41, kind, kind === 1 ? (state.cs.sslOrd || 0) & 0x7F : 0])
+}
 function paintAll(activeDevice) {
 	reportRouting(activeDevice)
+	reportStripChoice(activeDevice)
 	reportGr(activeDevice)
 	var bc = busComp()
 	// The SSL plug-ins the two sections are on, for the bridge's PRESETS screen.
