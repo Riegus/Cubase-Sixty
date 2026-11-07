@@ -64,6 +64,7 @@
 #include "ScriptLog.h"
 #include "SslCoreImpersonator.h"
 #include "SslPresets.h"
+#include "Uf1Bridge.h"
 
 namespace cs {
 bool netInit();   // NetInit.cpp
@@ -563,6 +564,11 @@ void onSysex(const std::vector<unsigned char>& m)
         }
         break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
+    case 0x41:
+        // The channel strip picked with the magnifier key: on to the UF1 script (SysEx 57), so the UF1's PLUGIN
+        // view shows the same one.
+        if (m.size() >= 8) uf1SendToScript({0xF0, 0x7D, 0x52, 0x36, 0x57, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F), 0xF7});
+        break;
     default: break;
     }
 }

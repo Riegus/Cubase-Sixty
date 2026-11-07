@@ -208,9 +208,20 @@ function sendCellInfo(activeDevice, index, cell) {
 }
 // A Quick Control's cell from what its callbacks last reported (name, value, position). Built again on each of
 // them, because Cubase reports a new name and a new value separately (and not at all when it did not change).
+// The header's CHANNEL field in PLUGIN without an SSL plug-in: what the Quick Controls belong to (SysEx 56), so it is
+// clear which plug-in the V-pots work.
+var qcSourceSent = null
+function sendQcSource(activeDevice) {
+	var src = ''
+	for (var i = 0; i < 4 && !src; ++i) if (sendCells[i] && sendCells[i].qcObject) src = sendCells[i].qcObject
+	if (src === qcSourceSent) return
+	qcSourceSent = src
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x56], toAscii7(src || '-'), [0xF7]))
+}
 function sendQcCell(activeDevice, index) {
 	var c = sendCells[index]
 	if (!c) return
+	if (qcActive) sendQcSource(activeDevice)
 	var name = c.qcTitle || '', v = c.qcValue || ''
 	qcCells[index] = [0x51, index, c.qcPos || 0, name || v ? 2 : 0].concat(toAscii7(name || v ? cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + v : ''))
 	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
@@ -224,6 +235,7 @@ function attachSendFeedback(surfaceValue, number) {
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
 		title = valueTitle || objectTitle || ''
 		cell.qcTitle = title
+		cell.qcObject = valueTitle ? (objectTitle || '') : ''   // what the Quick Control belongs to (a plug-in's name)
 		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
 	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
@@ -461,6 +473,12 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
 	}
+	if (m[4] === 0x57 && m.length >= 8) {
+		// From the UC1 script, via the bridge: the strip its magnifier key picked.
+		var choice = { kind: m[5], ord: m[6] }
+		if (!uc1Choice || uc1Choice.kind !== choice.kind || uc1Choice.ord !== choice.ord) { uc1Choice = choice; plug.rescanAt = Date.now() + 50 }
+		return
+	}
 	if ((m[4] === 0x3C || m[4] === 0x3D) && m.length >= 7) {
 		try { onPresetMessage(activeDevice, m) } catch (e) { out('[CubaseSixty UF1] preset: ' + e) }
 		return
@@ -480,6 +498,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
+	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
 	if (masterActive) return
 	sendName(activeDevice, title)
@@ -803,6 +822,7 @@ function meterToMidi(value) {
 // ---------------------------------------------------------------------------
 
 var plugAm = null
+var uc1Choice = null   // the UC1's strip on the selected track (SysEx 57): { kind 0 none / 1 SSL / 2 Cubase's, ord }
 var qcCells = [null, null, null, null]   // the Quick Controls' cells (SysEx 51), for the PLUGIN view without an SSL plug-in
 var plugDa = null
 try { plugDa = page.mHostAccess.makeDirectAccess(selectedChannel) } catch (e) { out('[CubaseSixty UF1] no Direct Access, PLUGIN view stays on Quick Controls: ' + e) }
@@ -926,7 +946,9 @@ function plugKeys() {
 }
 
 // Every object under the selected channel (as the UC1 script walks it), for the SSL plug-ins in its inserts.
-var PLUG_SKIP = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, Strips: 1, EQ: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+// Inside the channel the input filter, the EQ and the strip are walked too (Cubase's own EQ for the graph), as the
+// UC1 script does; the rest cannot hold what is looked for.
+var PLUG_SKIP = { QuickControls: 1, Panner: 1, Modulators: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
 function plugWalk(base) {
 	var list = [], seen = {}
 	function rec(id, depth, parentType) {
@@ -948,8 +970,10 @@ function plugRescan(activeDevice) {
 	var base
 	try { base = plugDa.getBaseObjectID(plugAm) } catch (e) { return }
 	var objects = plugWalk(base)
-	var strip = null, busComp = null, stripOrd = 0
+	var strip = null, busComp = null, stripOrd = 0, eqObj = -1, filterObj = -1, sslOrd = 0, strips = []
 	for (var i = 0; i < objects.length; ++i) {
+		if (objects[i].type === 'EQ' && eqObj < 0) eqObj = objects[i].id
+		if (objects[i].type === 'InputFilter' && filterObj < 0) filterObj = objects[i].id
 		var title = '', n = 0
 		try { title = plugDa.getObjectTitle(plugAm, objects[i].id) } catch (e) {}
 		try { n = plugDa.getNumberOfParameters(plugAm, objects[i].id) } catch (e) {}
@@ -958,11 +982,40 @@ function plugRescan(activeDevice) {
 		for (var k = 0; k < PLUG_TYPES.length && !kind; ++k) if (title.indexOf(PLUG_TYPES[k].match) >= 0) kind = PLUG_TYPES[k]
 		if (!kind) continue
 		// The channel strips' position among the track's channel strips: how the bridge tells their EQ curves apart.
-		if (kind.strip) { if (!strip) strip = { id: objects[i].id, kind: kind, title: title, ordinal: stripOrd }; ++stripOrd }
+		if (kind.strip) { var st = { id: objects[i].id, kind: kind, title: title, ordinal: stripOrd, sslOrd: sslOrd }; strips.push(st); if (!strip) strip = st; ++stripOrd }
 		else if (!busComp) busComp = { id: objects[i].id, kind: kind, title: title, ordinal: 0 }
+		++sslOrd   // the position among the track's SSL plug-ins, as the UC1 script counts it
 	}
+	// The strip the UC1 is on (magnifier key), when it has said so for this track: the same SSL strip, or Cubase's
+	// own (then no SSL strip here: Quick Controls and Cubase's EQ).
+	if (uc1Choice && uc1Choice.kind === 2) { strip = null; busComp = null }
+	else if (uc1Choice && uc1Choice.kind === 1) for (var si = 0; si < strips.length; ++si) if (strips[si].sslOrd === uc1Choice.ord) strip = strips[si]
 	var found = strip || busComp
 	var id = found ? found.id : -1
+	// Cubase's own channel EQ and input filter, for the EQ graph on tracks without an SSL channel strip.
+	cubaseEq.eq = eqObj
+	cubaseEq.filter = filterObj
+	cubaseEq.tags = {}
+	cubaseEq.sent = null
+	if (strip) cubaseEq.eq = cubaseEq.filter = -1   // the SSL strip's own curve is drawn instead
+	else {
+		var lists = [[eqObj, 'eq'], [filterObj, 'in']]
+		for (var li = 0; li < lists.length; ++li) {
+			var o = lists[li][0]
+			if (o < 0) continue
+			var cnt = 0
+			try { cnt = plugDa.getNumberOfParameters(plugAm, o) } catch (e) {}
+			for (var pi = 0; pi < cnt && pi < 64; ++pi) {
+				var tg = plugDa.getParameterTagByIndex(plugAm, o, pi)
+				var tt = ''
+				try { tt = plugDa.getParameterTitle(plugAm, o, tg, 32) } catch (e) {}
+				if (tt) cubaseEq.tags[lists[li][1] + ':' + tt] = tg
+			}
+		}
+	}
+	var eqWhere = (eqObj >= 0 ? 'EQ' : 'no EQ') + ', ' + (filterObj >= 0 ? 'input filter' : 'no input filter')
+	if (!strip && eqWhere !== cubaseEq.logged) { cubaseEq.logged = eqWhere; out('[CubaseSixty UF1] EQ graph: Cubase channel (' + eqWhere + ', ' + Object.keys(cubaseEq.tags).length + ' parameters)') }
+	cubaseEqSend(activeDevice)
 	if (id !== plug.obj) {
 		plug.obj = id
 		plug.kind = found ? found.kind : null
@@ -1076,6 +1129,7 @@ if (plugDa) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		plugAm = activeMapping
 		if (objectID === plug.obj) plugPaint(activeDevice, false)
+		if (objectID === cubaseEq.eq || objectID === cubaseEq.filter) cubaseEqSend(activeDevice)
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 		plugAm = activeMapping
@@ -1088,8 +1142,16 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	plug.obj = -2   // look again and send everything
 	plug.rescanAt = Date.now() + 200
 }
+var eqPollAt = 0
 page.mOnIdle = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
+	// Cubase's EQ is also read here, ten times a second: its changes do not reliably arrive as parameter changes.
+	// Only a changed band list is sent.
+	var t = Date.now()
+	if (t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
+		eqPollAt = t + 100
+		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
+	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
@@ -1211,4 +1273,77 @@ function onPresetMessage(activeDevice, message) {
 		+ (presetLoad.failed.length ? ' (not set: ' + presetLoad.failed.slice(0, 12).join(', ') + ')' : ''))
 	presetLoad = { applied: 0, skipped: 0, unknown: 0, failed: [] }
 	if (plug.obj >= 0) plugPaint(activeDevice, false)
+}
+
+// ---------------------------------------------------------------------------
+// The EQ graph for Cubase's own channel EQ (tracks without an SSL channel strip). Cubase does not send a curve the
+// way SSL's plug-ins do, so the script sends the EQ's settings and the bridge draws the curve from them (Rea-Sixty's
+// renderer, Uf1EqCurve). SysEx 55 <text>: "<kind> <Hz> <dB> <Q> <order>" per band, ';' between bands; kinds B bell,
+// L / H low / high shelf, P / C high pass (low cut) / low pass (high cut). Empty = nothing switched on (flat).
+// The four bands count when on (an inverted band, or Invert All, turns its gain round) and the EQ not bypassed; the
+// input filter's low / high cut when on (order from the slope, 6 dB per octave each).
+// ---------------------------------------------------------------------------
+var cubaseEq = { eq: -1, filter: -1, tags: {}, sent: null }
+function cubaseEqParam(key) {
+	var tag = cubaseEq.tags[key]
+	if (tag === undefined) return null
+	var obj = key.charAt(0) === 'e' ? cubaseEq.eq : cubaseEq.filter
+	return { process: plugDa.getParameterProcessValue(plugAm, obj, tag), text: String(plugDa.getParameterDisplayValue(plugAm, obj, tag)) }
+}
+function eqNumber(text) {
+	var r = /(-?\d*\.?\d+)\s*(k?)/i.exec(text || '')
+	if (!r) return NaN
+	return parseFloat(r[1]) * (r[2] ? 1000 : 1)
+}
+function cubaseEqSend(activeDevice) {
+	if (!plugDa || !plugAm) return
+	var bands = []
+	if (cubaseEq.eq >= 0) {
+		var bypass = cubaseEqParam('eq:Bypass')
+		var invertAll = cubaseEqParam('eq:Invert All')
+		if (!bypass || bypass.process < 0.5) {
+			for (var b = 1; b <= 4; ++b) {
+				var on = cubaseEqParam('eq:EQ ' + b + ' On')
+				if (!on || on.process < 0.5) continue
+				var type = cubaseEqParam('eq:EQ ' + b + ' Type'), gain = cubaseEqParam('eq:EQ ' + b + ' Gain')
+				var freq = cubaseEqParam('eq:EQ ' + b + ' Freq'), q = cubaseEqParam('eq:EQ ' + b + ' Q')
+				var inv = cubaseEqParam('eq:Invert ' + b)
+				var t = type ? type.text : 'Parametric'
+				var kind = /low\s*shelf/i.test(t) ? 'L' : /high\s*shelf/i.test(t) ? 'H' : /high\s*pass|low\s*cut/i.test(t) ? 'P'
+					: /low\s*pass|high\s*cut/i.test(t) ? 'C' : 'B'
+				var g = gain ? eqNumber(gain.text) : 0
+				if (((inv && inv.process >= 0.5) ? 1 : 0) ^ ((invertAll && invertAll.process >= 0.5) ? 1 : 0)) g = -g
+				var f = freq ? eqNumber(freq.text) : 1000
+				var qv = q ? eqNumber(q.text) : 1
+				var order = /\bII\b/.test(t) ? 4 : 2   // the cut types: I = 12, II = 24 dB per octave (approximate)
+				if (!isNaN(f)) bands.push(kind + ' ' + f + ' ' + (isNaN(g) ? 0 : g) + ' ' + (isNaN(qv) || qv <= 0 ? 1 : qv) + ' ' + order)
+			}
+		}
+	}
+	if (cubaseEq.filter >= 0) {
+		var fb = cubaseEqParam('in:Bypass')
+		if (!fb || fb.process < 0.5) {
+			var cuts = [['LC', 'P'], ['HC', 'C']]
+			for (var c = 0; c < cuts.length; ++c) {
+				var con = cubaseEqParam('in:' + cuts[c][0] + '-On')
+				if (!con || con.process < 0.5) continue
+				var cf = cubaseEqParam('in:' + cuts[c][0] + '-Freq'), cs = cubaseEqParam('in:' + cuts[c][0] + '-Slope')
+				var hz = cf ? eqNumber(cf.text) : NaN
+				var slope = cs ? eqNumber(cs.text) : 12
+				if (!isNaN(hz)) bands.push(cuts[c][1] + ' ' + hz + ' 0 0.7 ' + Math.max(1, Math.min(8, Math.round((isNaN(slope) ? 12 : slope) / 6))))
+			}
+		}
+	}
+	var text = bands.join(';')
+	if (text === cubaseEq.sent) return
+	cubaseEq.sent = text
+	if (cubaseEq.bandCount !== bands.length) { cubaseEq.bandCount = bands.length; out('[CubaseSixty UF1] EQ graph: ' + bands.length + ' band(s) on' + (bands.length ? ': ' + text : '')) }
+	// "-" for none: a SysEx with nothing after the command is too short for the bridge to take.
+	plugSend(activeDevice, [0x55].concat(asciiAll(text || '-')))
+}
+// toAscii7 stops at 32 characters; the band list is longer.
+function asciiAll(text) {
+	var r = []
+	for (var i = 0; i < text.length; ++i) { var c = text.charCodeAt(i); r.push(c >= 0x20 && c < 0x80 ? c : 0x3F) }
+	return r
 }
