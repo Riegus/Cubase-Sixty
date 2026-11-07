@@ -185,7 +185,8 @@ const char* const kJogNames[kJogModes] = { "Playhead", "Scrub", "Items", "Envelo
 std::atomic<int> g_jogMode{kJogPlayhead};
 bool g_scrubHeld = false, g_scrubTurned = false;
 std::atomic<long long> g_jogShowUntil{0};   // the mode stays in the header (also in PLUGIN) until then
-int g_rangeAim = 0;          // 0 the whole range, 1 left, 2 right, 3 top, 4 bottom edge
+int g_rangeAim = 0;          // 0 the whole range, 1 left, 2 right edge (Nudge Top / Bottom did nothing in the Project
+                             // window, so ↑ ↓ aim at nothing)
 int g_fadeAim = 0;           // 0 fade-in, 1 fade-out
 bool g_fadeWalk = false;     // Fades: the cross walks the events instead of aiming
 bool g_envPlayhead = false;  // Envelope: the jog is on the play cursor instead of the points
@@ -202,7 +203,7 @@ void paintNavLeds()
 {
     int lit = -1;
     const int mode = jogShown();
-    if (mode == kJogRange) { static const int byAim[5] = {2, 1, 3, 0, 4}; lit = byAim[g_rangeAim]; }
+    if (mode == kJogRange) { static const int byAim[3] = {2, 1, 3}; lit = byAim[g_rangeAim]; }
     else if (mode == kJogFades) lit = g_fadeWalk ? 2 : g_fadeAim == 0 ? 1 : 3;
     else if (mode == kJogEnvelope && g_envPlayhead) lit = 2;
     static int shown = -2;
@@ -245,7 +246,7 @@ bool jogStep(bool right)
         cmd2(right ? 31 : 30);
         return true;
     case kJogRange: {
-        static const uint8_t left[5] = {30, 34, 36, 38, 40}, rightN[5] = {31, 35, 37, 39, 41};
+        static const uint8_t left[3] = {30, 34, 36}, rightN[3] = {31, 35, 37};
         cmd2(right ? rightN[g_rangeAim] : left[g_rangeAim]);
         return true;
     }
@@ -271,7 +272,8 @@ bool jogNav(uint8_t id)   // 0x28 up, 0x29 left, 0x2A centre, 0x2B right, 0x2C d
         else navigate(id == 0x29 || id == 0x2B);
         break;
     case kJogRange:
-        g_rangeAim = id == 0x2A ? 0 : id == 0x29 ? 1 : id == 0x2B ? 2 : id == 0x28 ? 3 : 4;
+        if (id == 0x28 || id == 0x2C) return true;
+        g_rangeAim = id == 0x2A ? 0 : id == 0x29 ? 1 : 2;
         break;
     case kJogFades:
         if (id == 0x2A) g_fadeWalk = !g_fadeWalk;
