@@ -1261,6 +1261,7 @@ void uf1ProjectOpen()
         std::lock_guard<std::mutex> lk(g_cacheMx);
         for (auto& kv : g_npBefore) {
             if (kv.first == 0x17C || kv.first == 0x17E) continue;   // the driver state, the log
+            if (kv.first == 0x104 || kv.first == 0x105) continue;   // a send shown for a moment: not again
             auto b = g_npBlanked.find(kv.first);
             auto c = g_cache.find(kv.first);
             if (b != g_npBlanked.end() && c != g_cache.end() && c->second == b->second) again.push_back(kv.second);
@@ -1584,7 +1585,7 @@ void restoreChannelView()
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
     for (auto& kv : cache)   // the script's texts (not its log lines)
-        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C) { auto msg = kv.second; onMidiIn(msg); }
+        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C && kv.first != 0x104 && kv.first != 0x105) { auto msg = kv.second; onMidiIn(msg); }
     { std::lock_guard<std::mutex> lk(g_lineMx); g_tempUntil = 0; showHomeLocked(); }
     showStripNumber();
     paintSoftKeys();
