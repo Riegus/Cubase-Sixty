@@ -62,6 +62,7 @@ MidiInPort  g_in;
 std::mutex g_outMx;
 std::atomic<bool> g_touched{false};
 std::atomic<bool> g_open{false};
+std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the strip display says only "No Proj."
 std::atomic<bool> g_trace{false};
 bool g_engaged = false;
 std::mutex g_engMx;
@@ -652,10 +653,10 @@ void paintSoftKeys()
     static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
     static const char* const kMeterKeys[4] = {"OVERVIEW", "RESET", "FINE", "PRESETS"};   // the METER view's own keys
     const bool meter = g_view == kViewMeter;
-    const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen;
+    const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen && !g_noProject;
     const bool browser = g_presetsOpen && !g_modeHeld;
     for (int i = 0; i < 4; ++i) {
-        const std::string label = g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i] : "";
+        const std::string label = g_noProject ? "" : g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i] : "";
         std::vector<uint8_t> p;
         p.push_back(uint8_t(i));
         uint32_t rgb = 0;   // dark
@@ -669,7 +670,7 @@ void paintSoftKeys()
             p.insert(p.end(), label.begin(), label.end());
         }
         g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
-        if (g_modeHeld) {
+        if (g_modeHeld && !g_noProject) {
             const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
         }
@@ -1014,6 +1015,7 @@ void paintHeader(bool force)
                                   : std::string(g_sends58 ? "2/2" : "1/2");
     std::memcpy(h.data() + 75, page.data(), std::min<size_t>(page.size(), 24));
     std::memcpy(h.data() + 100, g_fine ? "ON" : "OFF", g_fine ? 2 : 3);
+    if (g_noProject) h.fill(0);   // no project: the fields blank (the UF1's own captions stay)
     if (!force && h == shown) return;
     shown = h;
     g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow, h));
@@ -1026,7 +1028,7 @@ void paintCsType(bool force)
     if (!g_open) return;
     static std::string shown = "\x01";
     std::string t;
-    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent ? g_plugModel : std::string(); }
+    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent && !g_noProject ? g_plugModel : std::string(); }
     if (t.empty()) t.assign(12, ' ');
     if (!force && t == shown) return;
     shown = t;
@@ -1195,6 +1197,7 @@ void revertLoop() {
 std::atomic<int> g_stripNo{0};
 void showStripNumber()
 {
+    if (g_noProject) { screenText(::uf1::scr::kChNumber, ""); return; }
     // The track number when the script knows it, else the UF8 strip; blank on MASTER.
     if (!g_open) return;
     const int n = g_trackNo > 0 ? int(g_trackNo) : int(g_stripNo);
@@ -1202,10 +1205,85 @@ void showStripNumber()
 }
 
 // Sysex from the Cubase script: 01 name, 02 colour (strip 0), 03 level text.
+void onMidiIn(std::vector<unsigned char>& msg);
+// No project (the script's driver deactivated, Cubase shows the Hub): "No Proj." as the track (the name cell is 8 wide), no colour, level or
+// value line, meters and fader down, the LEDs Cubase drives off. The next project paints it all again.
+std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
+void uf1NoProject()
+{
+    const bool first = !g_noProject;
+    if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBefore = g_cache; }
+    std::vector<int> notes;
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMx);
+        for (auto& kv : g_cache) if (kv.first < 0x100) notes.push_back(kv.first);
+    }
+    std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
+    for (char c : std::string("No Proj.")) name.push_back(uint8_t(c));
+    name.push_back(0xF7);
+    std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
+    std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
+    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0}, fader{0xE0, 0, 0};
+    onMidiIn(name);
+    onMidiIn(colour);
+    onMidiIn(level);
+    onMidiIn(meterL);
+    onMidiIn(meterR);
+    onMidiIn(fader);
+    for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
+    std::vector<unsigned char> time{0xF0, 0x7D, 0x52, 0x36, 0x0D, ' ', 0xF7};
+    onMidiIn(time);
+    if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBlanked = g_cache; }
+    valueHome("");
+    // Only "No Proj." on the strip display: no BYPASS label, channel number, plug-in model or V-pot bar.
+    g_noProject = true;
+    screenText(::uf1::scr::kChSoftKey, "");
+    showStripNumber();
+    paintCsType(true);
+    paintHeader(true);   // the big display: the CHANNEL, SOFT KEY and FINE CTRL fields blank
+    paintSoftKeys();
+    {
+        std::lock_guard<std::mutex> lk(g_lineMx);
+        g_homeHasBar = false;
+        g_barStyleShown = 0x04;
+        const uint8_t off = 0x04;   // bar style 04 = off
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&off, 1)));
+    }
+}
+// A project is open again: the strip display's own parts back (Cubase sends the rest).
+// Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
+// before the close is put back for every kind nothing new has arrived for since the blanking.
+void uf1ProjectOpen()
+{
+    if (!g_noProject.exchange(false)) return;
+    std::vector<std::vector<unsigned char>> again;
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMx);
+        for (auto& kv : g_npBefore) {
+            if (kv.first == 0x17C || kv.first == 0x17E) continue;   // the driver state, the log
+            if (kv.first == 0x104 || kv.first == 0x105) continue;   // a send shown for a moment: not again
+            auto b = g_npBlanked.find(kv.first);
+            auto c = g_cache.find(kv.first);
+            if (b != g_npBlanked.end() && c != g_cache.end() && c->second == b->second) again.push_back(kv.second);
+        }
+    }
+    for (auto& mm : again) onMidiIn(mm);
+    screenText(::uf1::scr::kChSoftKey, "BYPASS");
+    showStripNumber();
+    paintCsType(true);
+    paintHeader(true);
+    paintSoftKeys();
+}
+
 void onSysex(const std::vector<unsigned char>& m)
 {
     if (!isOurSysex(m)) return;
     if (scriptLogSysex(m.data(), m.size())) return;
+    if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
+        if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
+        if (g_trace) std::printf("UF1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
     if (auto n = parseName(m)) {
         if (n->strip != 0) return;
         std::string t(n->text.begin(), n->text.end());
@@ -1420,7 +1498,8 @@ void onSysex(const std::vector<unsigned char>& m)
         std::vector<uint8_t> p;
         p.push_back(0x00);
         for (size_t k = 0; k < 6; ++k) p.push_back(k < v.size() ? uint8_t(v[k]) : 0x00);
-        p.push_back('d'); p.push_back('B');
+        const bool blank = v.find_first_not_of(' ') == std::string::npos;   // no project: no "dB" either
+        p.push_back(blank ? 0x00 : 'd'); p.push_back(blank ? 0x00 : 'B');
         g_dev.send(::uf1::buildScreen(::uf1::scr::kOutputDb, p));
     }
 }
@@ -1435,6 +1514,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_cacheMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[1] == 0x7D) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80 || (m[0] & 0xF0) == 0xA0)) g_cache[m[1]] = m;
+        else if (m.size() >= 3 && (m[0] & 0xF0) == 0xE0) g_cache[0x200] = m;   // the fader
     }
     if (!m.empty() && m[0] == 0xF0) { onSysex(m); return; }
     if (m.size() < 3) return;
@@ -1505,7 +1585,7 @@ void restoreChannelView()
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
     for (auto& kv : cache)   // the script's texts (not its log lines)
-        if (kv.first >= 0x100 && kv.first != 0x17E) { auto msg = kv.second; onMidiIn(msg); }
+        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C && kv.first != 0x104 && kv.first != 0x105) { auto msg = kv.second; onMidiIn(msg); }
     { std::lock_guard<std::mutex> lk(g_lineMx); g_tempUntil = 0; showHomeLocked(); }
     showStripNumber();
     paintSoftKeys();

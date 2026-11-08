@@ -3,11 +3,17 @@
 What has to happen before Cubase-Sixty can go out as a beta, in this order. Features still missing are in
 [Missing features](missing-features.md); they do not hold the beta back.
 
-## 1. Closing and opening projects
+## 1. Closing and opening projects (done 8.11.2026)
 
 - Find out what each surface shows when a project closes and another opens (a test on the hardware first).
 - On close: every surface to a clean "no project" state (names, faders, meters, LEDs, the UF1 / UC1 screens).
 - On open: everything picked up again (UF8 follow, UF1 PLUGIN, UC1 strip and bus comp, favourites, settings).
+- Found (8.11.2026): on close each script's driver is deactivated (mOnDeactivate), on open activated again with the
+  page; there is no project callback. After reopening, the UF8 did not bank to the selected track.
+- Done: the scripts send SysEx 7C 00 / 01 on deactivate / activate. On close the bridge blanks each surface (UF8:
+  strips empty, faders down, its own keys dark; UF1: only "No Proj.", the big display's fields blank; UC1: "No
+  Project", bus comp row empty, rings and LEDs off). On open each surface puts back what Cubase does not send again
+  (it sends only what changed), and the UF8's start-up follow runs again.
 
 ## 2. Different setups of the surfaces
 

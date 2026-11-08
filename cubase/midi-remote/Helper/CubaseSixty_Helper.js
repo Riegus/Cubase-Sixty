@@ -49,7 +49,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.2.0-dev'
+var SCRIPT_VERSION = '0.2.1-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -139,4 +139,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	sendSolo(activeDevice)
 }
 
+// Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
+deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
+deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); flushLog(activeDevice) }
 deviceDriver.mOnIdle = function (activeDevice) { flushLog(activeDevice) }

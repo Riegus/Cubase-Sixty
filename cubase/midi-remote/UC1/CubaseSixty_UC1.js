@@ -1694,3 +1694,12 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		if (mixScans <= 3) log('MixConsole scan took ' + (Date.now() - t0) + ' ms')
 	}
 }
+
+// Closing a project (Cubase shows the Hub) deactivates the driver, opening one activates it again: the bridge shows
+// "No Project" meanwhile (SysEx 7C 00 / 01); what the scripts send on the next project paints the surface again.
+deviceDriver.mOnDeactivate = function (activeDevice) {
+	log('inactive (no project)')
+	sysex(activeDevice, [0x7C, 0x00])
+	try { flushLog(activeDevice) } catch (e) {}
+}
+deviceDriver.mOnActivate = function (activeDevice) { sysex(activeDevice, [0x7C, 0x01]) }

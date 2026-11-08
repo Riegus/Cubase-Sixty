@@ -107,6 +107,7 @@ std::atomic<int> g_skDomain{0};
 // notes 10-17) or recall its cycle markers (view 1, Recall Cycle Marker 1-8, notes 18-25); Q1 = cycle, Q2 = markers.
 // Cubase gives scripts no marker list, so the keys are by number, without names or colours.
 std::atomic<bool> g_nav{false};
+std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's own keys stay dark
 std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = channel strip (Q1), 1 = bus comp (Q2)
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
@@ -531,6 +532,7 @@ void paintSel(int strip)
 }
 void paintSoftKeys()
 {
+    if (g_noProject) return;
     if (g_nav) {   // Nav Mode: the eight keys are markers / cycle markers 1-8, the last one pressed lit
         const int view = g_navView;
         for (int s = 0; s < kStrips; ++s) {
@@ -576,11 +578,13 @@ void paintEncPicker()
 }
 void paintEncLeds()
 {
+    if (g_noProject) return;
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nav, g_encMode == kEncMarkers));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nudge, g_encMode == kEncNudge));
 }
 void paintSelMode()
 {
+    if (g_noProject) return;
     const int mode = g_selMode;
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Norm, mode == kSelNorm));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Rec, mode == kSelRec));
@@ -607,12 +611,81 @@ std::atomic<int> g_freezeGen{0};
 std::atomic<bool> g_freezeHeld{false};
 std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ... 13 00): bursts leave it on
 void replayUf8Cache();
+void onMidiIn(std::vector<unsigned char>& msg);
+// No project (the script's driver deactivated): every strip as an empty one (name, colour, meter, dB, its LEDs),
+// faders down, value lines and V-pot bars off, the LEDs Cubase drives off. What Cubase sends on the next project
+// paints it all again.
+std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
+void uf8NoProject()
+{
+    const bool first = !g_noProject;
+    if (first) { std::lock_guard<std::mutex> lk(g_uf8CacheMx); g_npBefore = g_uf8Cache; }
+    g_uf8Frozen = false;
+    std::vector<int> notes;
+    {
+        std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+        for (auto& kv : g_uf8Cache) if (kv.first < 0x10000) notes.push_back(kv.first);
+    }
+    for (int s = 0; s < kStrips; ++s) {
+        std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
+        std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
+        std::vector<unsigned char> fader{uint8_t(0xE0 | s), 0, 0};
+        onMidiIn(name);
+        onMidiIn(colour);
+        onMidiIn(fader);
+        g_panLine[s].clear();
+        g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
+    }
+    for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
+    if (first) { std::lock_guard<std::mutex> lk(g_uf8CacheMx); g_npBlanked = g_uf8Cache; }
+    g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{3, 3, 3, 3, 3, 3, 3, 3}));
+    // The bridge's own keys: the soft keys' labels and LEDs, Q1 / Q2, the soft key pages, NORM / REC / AUTO,
+    // NAV / NUDGE, PLUGIN. They stay dark until a project opens (the paint functions check g_noProject).
+    g_noProject = true;
+    for (int s = 0; s < kStrips; ++s) {
+        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
+        g_dev.send(uf8::buildPluginSlotName(uint8_t(s), ""));
+    }
+    using L = uf8::Uf8GlobalLed;
+    for (L l : {L::Quick1, L::Quick2, L::VPotBank, L::Soft1, L::Soft2, L::Soft3, L::Soft4, L::Soft5,
+                L::Norm, L::Rec, L::Auto, L::Nav, L::Nudge, L::Plugin})
+        sendLedFrames(uf8::buildUf8GlobalLed(l, false));
+}
+// A project is open again: the bridge's own keys as they were.
+// Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
+// before the close is put back for every kind nothing new has arrived for since the blanking.
+void uf8ProjectOpen()
+{
+    if (!g_noProject.exchange(false)) return;
+    std::vector<std::vector<unsigned char>> again;
+    {
+        std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+        for (auto& kv : g_npBefore) {
+            auto b = g_npBlanked.find(kv.first);
+            auto c = g_uf8Cache.find(kv.first);
+            if (b != g_npBlanked.end() && c != g_uf8Cache.end() && c->second == b->second) again.push_back(kv.second);
+        }
+    }
+    for (auto& mm : again) onMidiIn(mm);
+    paintSoftKeys();
+    paintSelMode();
+    paintEncLeds();
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Plugin, g_stripMode));
+}
 
+void uf8NoProject();
 void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
     if (cs::scriptLogSysex(m.data(), m.size())) return;
+    // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
+    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
+        if (m[5] == 0) uf8NoProject();
+        else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
+        if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
     // Trace: when each strip's name arrives (timing of bank changes).
     if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
         std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
