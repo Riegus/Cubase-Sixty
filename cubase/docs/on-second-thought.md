@@ -24,6 +24,9 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   V-pot stays on the track's pan in Send N and FLIP does not swap a send's level and pan; SOLO stays the track's solo
   (no exclusive send solo); CUT follows the faders' view only; no Receive views (no receives in the API); eight sends,
   so no paging; a track without that send shows a blank name and its fader does nothing.
+- **Nav Mode** (forced). Rea-Sixty lists the project's markers and regions by name and colour across the strips.
+  Cubase gives scripts no marker list, so Cubase-Sixty's Nav Mode (NAV held) puts Cubase's numbered markers 1–8 on
+  the top soft keys (To Marker N), or with Q1 its cycle markers 1–8 (Recall Cycle Marker N); labels are numbers.
 - **V-pot push** (chosen). Rea-Sixty: centre the pan. Cubase-Sixty: open the channel editor.
 - **Favourite cycle** (chosen). Rea-Sixty swaps the plug-in at every notch; Cubase-Sixty shows the favourites on the
   UC1's name row while you turn and swaps once, half a second after the last notch (loading a plug-in per notch is

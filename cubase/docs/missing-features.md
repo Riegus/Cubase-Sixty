@@ -6,8 +6,7 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. Nav Mode on the UF8: markers and regions across the strips, SEL jumps to one.
-2. The UC1's secondary encoder modes.
+1. The UC1's secondary encoder modes.
 
 
 ## UF8
@@ -23,7 +22,9 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
   name in the colour bar, and UF8 Plug-in Mode (one plug-in's controls across the eight strips).
 - **Send and Receive views**: the send views are done (Send N on the faders, the selected track's sends on the
   V-pots); missing are the Receive views (no receives in the API), send pan, send solo, paging past send 8.
-- **Nav Mode**: markers and regions on the strips (with auto-follow).
+- **Nav Mode**: a numbered version is done (NAV held: the top soft keys jump to markers / cycle markers 1–8);
+  missing, as Cubase gives scripts no marker list: names, colours, which markers exist, markers inside a region,
+  auto-follow, the UC1 / UF1 parts.
 - **Two UF8s** (16 strips); **the UF1 as an extender** (a 9th fader) and Pin Set.
 - **Solo / Mute modifier modes**, the **MIDI CC layer**, the **layer keys**.
 - **Show only armed tracks** (AUTO: only tracks armed for writing; also "only record-enabled tracks", on the pending
