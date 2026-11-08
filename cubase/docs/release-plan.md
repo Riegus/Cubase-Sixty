@@ -8,6 +8,8 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - Find out what each surface shows when a project closes and another opens (a test on the hardware first).
 - On close: every surface to a clean "no project" state (names, faders, meters, LEDs, the UF1 / UC1 screens).
 - On open: everything picked up again (UF8 follow, UF1 PLUGIN, UC1 strip and bus comp, favourites, settings).
+- Found (8.11.2026): on close each script's driver is deactivated (mOnDeactivate), on open activated again with the
+  page; there is no project callback. After reopening, the UF8 did not bank to the selected track.
 
 ## 2. Different setups of the surfaces
 
