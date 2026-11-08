@@ -684,7 +684,7 @@ var ENC2_MODES = [
 	{ key: 'bus-comp', name: 'Bus Comp' }, { key: 'strips', name: 'Strips' },
 	{ key: 'cs-fav', name: 'CS Fav' }, { key: 'bc-fav', name: 'BC Fav' }
 ]
-var enc2 = { mode: 0, held: false, turned: false }
+var enc2 = { mode: 0, held: false, turned: false, started: false }
 function enc2Show(activeDevice) {
 	readout(activeDevice, ZONE_BC, 'Encoder: ' + ENC2_MODES[enc2.mode].name, (enc2.mode + 1) + '/' + ENC2_MODES.length)
 }
@@ -1570,7 +1570,9 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
 	if (cmd === 0x43) { onFavList(message); return }
 	if (cmd === 0x45 && am) { followUf1(activeDevice, message[5], message[6]); return }
-	if (cmd === 0x4C) { enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder: ' + ENC2_MODES[enc2.mode].name); return }
+	// The start setting, once: the bridge sends it with every favourites reply (the favourite cycle asks again
+	// after a pause), which must not undo a job picked with the push.
+	if (cmd === 0x4C) { if (!enc2.started) { enc2.started = true; enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder at start: ' + ENC2_MODES[enc2.mode].name) } return }
 	if (cmd === 0x4D && am) { try { extEvent(activeDevice, message[5], message[6] - 64) } catch (e) { log('EXT FUNCS: ' + e) } return }
 	if (cmd === 0x44 && am) { try { favStep(activeDevice, message[5] === 0 ? 'cs' : 'bc', message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) } return }
 	if (cmd === 0x3E && am && message.length >= 11) { try { setRouting(activeDevice, message) } catch (e) { log('routing: ' + e) } return }
