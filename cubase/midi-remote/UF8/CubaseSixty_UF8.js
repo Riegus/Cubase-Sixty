@@ -167,7 +167,7 @@ for (var st = 0; st < 8; ++st) sendTitles.push(['', '', '', '', '', '', '', ''])
 var routeSelected = page.mHostAccess.mTrackSelection.mMixerChannel
 function routeChanged(activeDevice) {
 	uf8FlipActive = route.fader === 'pan'
-	for (var r = 0; r < flipResets.length; ++r) flipResets[r]()
+	for (var r = 0; r < flipResets.length; ++r) flipResets[r](activeDevice)
 	for (var i = 0; i < STRIPS; ++i) paintStripName(activeDevice, i)
 	if (stripModeOn) stripModeUpdateAll(activeDevice)   // FLIP and the send views take the fader back
 }
@@ -317,7 +317,17 @@ for (var i = 0; i < STRIPS; ++i) {
 	// readout. Normally pan comes from the V-pot and the level from the fader; under FLIP the other way round.
 	;(function (index, vpot, fader) {
 		var lastPanText = null, lastPanPos = null, lastDb = null
-		flipResets.push(function () { lastPanText = lastPanPos = lastDb = null })
+		// The controls' last values, whatever they were on: Cubase sends the new bindings' values before the sub-page
+		// change is announced, so they are drawn again once it is (FLIP showed the pan in the dB field otherwise).
+		var vpotShown = { value: null, units: '', pos: null }, faderShown = { value: null, units: '', pos: null }
+		flipResets.push(function (activeDevice) {
+			lastPanText = lastPanPos = lastDb = null
+			if (!activeDevice) return
+			if (faderShown.value !== null) fader.mSurfaceValue.mOnDisplayValueChange(activeDevice, faderShown.value, faderShown.units)
+			if (faderShown.pos !== null) fader.mSurfaceValue.mOnProcessValueChange(activeDevice, faderShown.pos)
+			if (vpotShown.value !== null) vpot.mSurfaceValue.mOnDisplayValueChange(activeDevice, vpotShown.value, vpotShown.units)
+			if (vpotShown.pos !== null) vpot.mSurfaceValue.mOnProcessValueChange(activeDevice, vpotShown.pos)
+		})
 		function panText(activeDevice, value, units) {
 			var text = String(value) + (units ? units : '')
 			if (text === lastPanText) return
@@ -363,6 +373,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, Math.max(0, Math.min(127, Math.round(pos * 127))), 0xF7]))
 		}
 		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+			vpotShown.value = value; vpotShown.units = units
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || { pos: 0.5 }; trackPan[index].value = value; trackPan[index].units = units }
 			if (route.vpot === 'pan' && skStrip[index] && skStrip[index].panOn) return
 			if (route.vpot === 'sends') sendText(activeDevice, value, units)
@@ -370,15 +381,18 @@ for (var i = 0; i < STRIPS; ++i) {
 			else panText(activeDevice, value, units)
 		}
 		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			vpotShown.pos = value
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || {}; trackPan[index].pos = value }
 			if (route.vpot === 'pan' && skStrip[index] && skStrip[index].panOn) return
 			if (route.vpot === 'sends') sendPos(activeDevice, value)
 			else if (route.vpot === 'pan') panPos(activeDevice, value)
 		}
 		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+			faderShown.value = value; faderShown.units = units
 			if (route.fader === 'pan') panText(activeDevice, value, units); else dbText(activeDevice, value)
 		}
 		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+			faderShown.pos = value
 			if (route.fader === 'pan') panPos(activeDevice, value)
 		}
 	})(i, strip.vpot, strip.fader)
