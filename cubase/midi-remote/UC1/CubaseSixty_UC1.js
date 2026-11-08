@@ -689,9 +689,9 @@ function enc2Show(activeDevice) {
 	readout(activeDevice, ZONE_BC, 'Encoder: ' + ENC2_MODES[enc2.mode].name, (enc2.mode + 1) + '/' + ENC2_MODES.length)
 }
 function enc2Turn(activeDevice, clicks) {
-	// Lists: one entry per turn message, and none for 120 ms after a step (a quick turn skipped entries).
+	// Lists: one entry per turn message, and none for 80 ms after a step (a quick turn skipped entries).
 	var now = Date.now()
-	if (now - (enc2.stepAt || 0) < 120) return
+	if (now - (enc2.stepAt || 0) < 80) return
 	enc2.stepAt = now
 	clicks = clicks > 0 ? 1 : -1
 	if (enc2.held) {   // picking a job
@@ -975,7 +975,7 @@ function onBcEncoder(activeDevice, steps) {
 // cubase\favourites.txt; the bridge reads the file and sends the two lists (SysEx 43 <0 = CS, 1 = BC> <names,
 // 7F 7F 7F between>) when asked (SysEx 42, on activation and when stepping after a pause). The UF8's CHANNEL
 // encoder in CS Fav / BC Fav mode steps through them (SysEx 44 <domain> <1 = forward, 0 = back>): the UC1's name
-// rows show the previous / current / next favourite at once, and half a second after the last step the plug-in in
+// rows show the previous / current / next favourite at once, and 0.8 s after the last step the plug-in in
 // the slot is replaced by the one shown (one load per pause, not one per notch). The controls both plug-ins have
 // on the UC1 are carried across (by value, in their units), so the sound stays. On a track with none, the
 // favourite goes into the first free insert slot after the last plug-in.
@@ -987,7 +987,8 @@ var fav = {
 	uids: {},                    // plug-in name -> class id (from the plug-in manager's collections)
 	pick: null,                  // while stepping: { domain, index, slotObj, until }
 	commitAt: 0,
-	pending: null                // after a swap: { slotObj, name, values, until }
+	pending: null,               // after a swap: { slotObj, name, values, until }
+	loaded: null                 // the last swap: { slotObj, name, at } (Cubase shows it to the script seconds later)
 }
 function favIndex(domain, name) {
 	var list = fav.lists[domain] || []
@@ -1012,7 +1013,13 @@ function onFavList(message) {
 function favContext(domain) {
 	var t = domain === 'cs' ? (state.cs && state.cs.key !== 'cubase' ? state.cs : null) : busComp()
 	var on = state.favOn ? state.favOn[domain] : null
-	if (t && t.slotObj >= 0) return { acc: t.da, slotObj: t.slotObj, name: t.name, target: t, track: domain === 'bc' && t.track ? t.track : state.trackName }
+	if (t && t.slotObj >= 0) {
+		// Just swapped, and Cubase does not show the new plug-in yet: count from it, not from the old one.
+		var ld = fav.loaded
+		if (ld && ld.slotObj === t.slotObj && Date.now() - ld.at < 8000 && ld.name !== t.name)
+			return { acc: t.da, slotObj: t.slotObj, name: ld.name, target: null, track: domain === 'bc' && t.track ? t.track : state.trackName }
+		return { acc: t.da, slotObj: t.slotObj, name: t.name, target: t, track: domain === 'bc' && t.track ? t.track : state.trackName }
+	}
 	if (on) return { acc: on.acc, slotObj: on.slotObj, name: on.name, target: null, track: state.trackName }
 	// None on the track: the first free insert slot after the last one in use, else the first free one.
 	var slots = state.insertSlots || [], free = null
@@ -1041,7 +1048,7 @@ function favStep(activeDevice, domain, dir) {
 	if (cur < 0) next = dir > 0 ? 0 : list.length - 1
 	else next = ((cur + dir) % list.length + list.length) % list.length
 	fav.pick = { domain: domain, index: next, slotObj: ctx.slotObj }
-	fav.commitAt = Date.now() + 500
+	fav.commitAt = Date.now() + 800
 	favShow(activeDevice, domain, next, ctx.track)
 }
 function favUid(acc, slotObj, name) {
@@ -1143,12 +1150,15 @@ function favCommit(activeDevice) {
 	if (!name || favIndex(domain, ctx.name) === p.index) return
 	var uid = favUid(ctx.acc, ctx.slotObj, name)
 	if (!uid) { log('favourite "' + name + '": not in Cubase\'s plug-in list (check the name in favourites.txt)'); readout(activeDevice, zone, favShort(name), 'NOT FOUND'); return }
-	var values = ctx.target ? favSnapshot(ctx.target) : null
+	// The settings to carry: the plug-in's own, or, while Cubase has not shown the last swap yet, the ones that swap
+	// was carrying.
+	var values = ctx.target ? favSnapshot(ctx.target) : fav.pending && fav.pending.slotObj === ctx.slotObj ? fav.pending.values : null
 	var ok = false
 	try { ok = ctx.acc.mPluginManager.trySetSlotPlugin(am, ctx.slotObj, uid, true) } catch (e) { log('trySetSlotPlugin failed: ' + e) }
 	log('favourite: "' + (ctx.name || '(empty slot)') + '" -> "' + name + '": ' + (ok ? 'done' : 'refused'))
 	if (!ok) { readout(activeDevice, zone, favShort(name), 'FAILED'); return }
-	fav.pending = values ? { slotObj: ctx.slotObj, name: name, values: values, until: Date.now() + 4000 } : null
+	fav.pending = values ? { slotObj: ctx.slotObj, name: name, values: values, until: Date.now() + 8000 } : null
+	fav.loaded = { slotObj: ctx.slotObj, name: name, at: Date.now() }
 	state.rescanAt = Date.now() + 300
 	state.mixScanAt = Date.now() + 400
 }

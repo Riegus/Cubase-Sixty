@@ -181,7 +181,7 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 | Bus Comp header | `F0 7D 52 36 39 <text> F7` | Cubase → bridge | Shown for 1.5 s in place of the model field ("BUS COMP 2"), as SSL 360 does while the Bus Comp encoder turns. |
 | Ask for favourites | `F0 7D 52 36 42 F7` | Cubase → bridge | The bridge reads `cubase\favourites.txt` (written with a default list when missing) and answers with two `43`. Sent when the page activates and when stepping after 5 s without. |
 | Favourites | `F0 7D 52 36 43 <domain> <name> 7F 7F 7F <name> … F7` | bridge → Cubase | Domain 0 channel strips, 1 bus comps; up to eight names each, as Cubase lists the plug-ins. |
-| Favourite step | `F0 7D 52 36 44 <domain> <dir> F7` | bridge → Cubase | One notch of the UF8's CHANNEL encoder in CS Fav / BC Fav mode; dir 1 forward, 0 back. The script shows the favourites on the name row and swaps the plug-in half a second after the last step. |
+| Favourite step | `F0 7D 52 36 44 <domain> <dir> F7` | bridge → Cubase | One notch of the UF8's CHANNEL encoder in CS Fav / BC Fav mode; dir 1 forward, 0 back. The script shows the favourites on the name row and swaps the plug-in 0.8 s after the last step (counting from the last swap until Cubase shows it). |
 
 ## Script log
 

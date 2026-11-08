@@ -30,7 +30,7 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   and the keys go by marker ID (an ID the project lacks does nothing).
 - **V-pot push** (chosen). Rea-Sixty: centre the pan. Cubase-Sixty: open the channel editor.
 - **Favourite cycle** (chosen). Rea-Sixty swaps the plug-in at every notch; Cubase-Sixty shows the favourites on the
-  UC1's name row while you turn and swaps once, half a second after the last notch (loading a plug-in per notch is
+  UC1's name row while you turn and swaps once, 0.8 s after the last notch (loading a plug-in per notch is
   slow in Cubase). Bus comps carry their settings across like channel strips (Rea-Sixty's default for bus comps is
   each favourite's own settings, which is not there yet).
 - **Zoom pad centre** (chosen). Rea-Sixty: zoom to fit the project. Cubase-Sixty: open / close the editor.
