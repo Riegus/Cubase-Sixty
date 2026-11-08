@@ -689,6 +689,11 @@ function enc2Show(activeDevice) {
 	readout(activeDevice, ZONE_BC, 'Encoder: ' + ENC2_MODES[enc2.mode].name, (enc2.mode + 1) + '/' + ENC2_MODES.length)
 }
 function enc2Turn(activeDevice, clicks) {
+	// Lists: one entry per turn message, and none for 120 ms after a step (a quick turn skipped entries).
+	var now = Date.now()
+	if (now - (enc2.stepAt || 0) < 120) return
+	enc2.stepAt = now
+	clicks = clicks > 0 ? 1 : -1
 	if (enc2.held) {   // picking a job
 		enc2.turned = true
 		enc2.mode = Math.max(0, Math.min(ENC2_MODES.length - 1, enc2.mode + (clicks > 0 ? 1 : -1)))
