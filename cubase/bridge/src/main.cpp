@@ -215,8 +215,10 @@ void applyRoute()
 {
     const int send = g_routeSend;
     const bool flip = g_routeFlip, sel = g_routeSelSends;
-    note2(uint8_t(send >= 0 ? 82 + send : flip ? 81 : 80));
-    note2(uint8_t(sel ? 92 : flip ? 91 : 90));
+    // 40 ms apart: Cubase now and then lost the second of two back-to-back notes (the V-pots kept the old route).
+    const uint8_t faderNote = uint8_t(send >= 0 ? 82 + send : flip ? 81 : 80), vpotNote = uint8_t(sel ? 92 : flip ? 91 : 90);
+    note2(faderNote);
+    std::thread([vpotNote] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note2(vpotNote); }).detach();
     static const uf8::Uf8GlobalLed sp[8] = { uf8::Uf8GlobalLed::SendPlugin1, uf8::Uf8GlobalLed::SendPlugin2, uf8::Uf8GlobalLed::SendPlugin3,
         uf8::Uf8GlobalLed::SendPlugin4, uf8::Uf8GlobalLed::SendPlugin5, uf8::Uf8GlobalLed::SendPlugin6, uf8::Uf8GlobalLed::SendPlugin7,
         uf8::Uf8GlobalLed::SendPlugin8 };
