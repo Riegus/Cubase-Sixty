@@ -107,7 +107,8 @@ std::string g_csPlugin, g_bcPlugin;   // from the script (SysEx 3B)
 std::atomic<bool> g_routingOn{false};   // the ROUTING screen is showing
 // The channel strip's routing switches as the script reports them (SysEx 3F): -1 = the strip has none.
 int g_routing[5] = {-1, -1, -1, -1, -1};   // filters to input, filters to S/C, EQ to S/C, dynamics pre EQ, external S/C
-bool menuOn() { return g_presetsOn || g_routingOn; }
+std::atomic<bool> g_extOn{false};       // the EXT FUNCS screen is showing (the script draws it, SysEx 4A)
+bool menuOn() { return g_presetsOn || g_routingOn || g_extOn; }
 // Gain reduction: which SSL plug-in instances the meters read (SysEx 40). Track = the channel's MixConsole number
 // (0 = none), ordinal = the plug-in's position among the SSL plug-ins on that channel (insert order).
 std::mutex g_grMx;
@@ -487,6 +488,10 @@ void pushRing(uint8_t knobId, double value, bool dim)
     }
 }
 
+void setPresetsMode(bool on);
+void setRoutingMode(bool on);
+void setExtMode(bool on);
+void renderExt(const std::vector<uint8_t>& m);
 void onSysex(const std::vector<unsigned char>& m)
 {
     if (m.size() < 6 || m[1] != 0x7D || m[2] != 0x52 || m[3] != 0x36) return;
@@ -567,9 +572,17 @@ void onSysex(const std::vector<unsigned char>& m)
         }
         break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
-    case 0x42:   // the script asks for the favourites (cubase\favourites.txt)
+    case 0x42: {   // the script asks for the favourites (cubase\favourites.txt) and the secondary encoder's job
         for (auto& f : favourites::messages()) sendMidi(std::move(f));
+        const std::string job = settings::get("uc1-encoder2", "bus-comp");
+        const uint8_t mode = job == "strips" ? 1 : job == "cs-fav" ? 2 : job == "bc-fav" ? 3 : 0;
+        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x4C, mode, 0xF7});
         break;
+    }
+    case 0x4B:   // the script opens EXT FUNCS (BACK on the main screen)
+        if (m.size() >= 7 && m[5] == 1) { std::lock_guard<std::mutex> lk(g_presetMx); setPresetsMode(false); setRoutingMode(false); setExtMode(true); }
+        break;
+    case 0x4A: { std::lock_guard<std::mutex> lk(g_presetMx); renderExt(m); break; }
     case 0x41:
         // The channel strip picked with the magnifier key: on to the UF1 script (SysEx 57), so the UF1's PLUGIN
         // view shows the same one.
@@ -588,7 +601,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42 && m[4] != 0x4A && m[4] != 0x4B) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
@@ -770,13 +783,64 @@ void routingStep(int step)   // g_presetMx held
     renderRouting();
 }
 
+// ---------------------------------------------------------------------------
+// EXT FUNCS screen (Rea-Sixty UC1Surface::renderExtFuncsSubscreen_): the script keeps the list and the values and
+// sends what to draw (SysEx 4A <prev> 00 <current> 00 <next> 00 <long name> 00 <value> 00 <pos 0-127> <active>);
+// the bridge sends it the secondary encoder and the keys while the screen is open (4D <op> <64 + steps>: 1 turn,
+// 2 push = scroll / adjust, 3 closed). BACK or CONFIRM closes it.
+// ---------------------------------------------------------------------------
+bool g_extActiveShown = false;
+void setExtMode(bool on)   // g_presetMx held
+{
+    namespace U = ::uc1;
+    if (g_extOn == on) return;
+    g_extOn = on;
+    g_extActiveShown = false;
+    send(U::buildCentralMode(on ? U::CentralMode::ExtFuncs : U::CentralMode::Main));
+    send(U::buildBcModeDot(!on));
+    if (on) send(U::buildMenuCommit(false));
+    else {
+        sysex({0x4D, 3, 64});
+        paintCentre();
+        paintSevenSeg();
+    }
+}
+void renderExt(const std::vector<uint8_t>& m)   // g_presetMx held
+{
+    namespace U = ::uc1;
+    if (!g_extOn) return;
+    std::vector<std::string> f;
+    size_t i = 5;
+    for (int k = 0; k < 5 && i < m.size(); ++k) {
+        std::string t;
+        while (i < m.size() && m[i] != 0x00 && m[i] != 0xF7) t += char(m[i++]);
+        if (i < m.size() && m[i] == 0x00) ++i;
+        f.push_back(t);
+    }
+    if (f.size() < 5 || i + 1 >= m.size()) return;
+    const int pos = m[i];
+    const bool active = m[i + 1] == 1;
+    send(U::buildCentralMode(U::CentralMode::ExtFuncs));   // (SSL 360 re-sends it with every step: a redraw)
+    send(U::buildLcdHeader(f[3]));
+    send(U::buildTrackNameTripleLarge(f[0], f[1], f[2]));
+    send(U::buildLcdValue(f[4]));
+    send(U::buildLcdUnit(""));
+    send(U::buildLcdRoundIndicator(pos / 127.0));
+    if (active != g_extActiveShown) { g_extActiveShown = active; send(U::buildMenuCommit(active)); }
+}
+
 // The PRESETS screen's keys and encoder. Returns true if the event was the screen's.
 bool presetsButton(uint8_t id, bool pressed)
 {
     namespace B = ::uc1::button;
     std::lock_guard<std::mutex> lk(g_presetMx);
-    if (id == B::kPresets) { if (pressed) { setRoutingMode(false); setPresetsMode(!g_presetsOn); } return true; }
-    if (id == B::kRouting) { if (pressed) { setPresetsMode(false); setRoutingMode(!g_routingOn); } return true; }
+    if (id == B::kPresets) { if (pressed) { setExtMode(false); setRoutingMode(false); setPresetsMode(!g_presetsOn); } return true; }
+    if (id == B::kRouting) { if (pressed) { setExtMode(false); setPresetsMode(false); setRoutingMode(!g_routingOn); } return true; }
+    if (g_extOn) {
+        if (id == B::kBack || id == B::kConfirm) { if (pressed) setExtMode(false); return true; }
+        if (id == B::kSecEncPush) { if (pressed) sysex({0x4D, 2, 64}); return true; }
+        return false;
+    }
     if (g_routingOn) {
         if (id == B::kBack || id == B::kConfirm || id == B::kSecEncPush) { if (pressed) setRoutingMode(false); return true; }
         return false;
@@ -824,6 +888,7 @@ bool presetsKnob(uint8_t id, int delta)
     const int step = acc.step(delta);
     if (step == 0) return true;
     if (g_routingOn) { routingStep(step); return true; }
+    if (g_extOn) { sysex({0x4D, 1, uint8_t(std::clamp(64 + step, 1, 127))}); return true; }
     if (!g_presetsBrowse) { g_presetsCs = !g_presetsCs; renderPresets(); return true; }
     const int n = int(presetRows().size());
     if (n > 0) g_presetSel = std::clamp(g_presetSel + step, 0, n - 1);
