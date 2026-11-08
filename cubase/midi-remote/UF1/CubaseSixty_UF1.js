@@ -312,16 +312,20 @@ function levelText(activeDevice, value) {
 	lastLevelText = value
 	sendLevel(activeDevice, value)
 }
-var trackPanUf1 = { value: null, units: '', pos: null }   // Cubase's track pan, for leaving strip mode
-vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-	if (!flipActive) { trackPanUf1.value = value; trackPanUf1.units = units }
-	if (flipActive) levelText(activeDevice, value)
-	else if (!stripMode.panSent) panText(activeDevice, value, units)
+// The pan knob's and the fader's last values (Cubase's, whatever they are on), for drawing them again when strip
+// mode or FLIP changes who shows where; in strip mode the plug-in's fader / pan take the dB field / value line.
+var knobShown = { value: null, units: '', pos: null }, faderShown = { value: null, units: '', pos: null }
+function knobDisplay(activeDevice, value, units) {
+	knobShown.value = value; knobShown.units = units
+	if (flipActive) { if (!stripOwnsDb()) levelText(activeDevice, value) }
+	else if (!stripOwnsPan()) panText(activeDevice, value, units)
 }
-vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-	if (!flipActive) trackPanUf1.pos = value
-	if (!flipActive && !stripMode.panSent) panPos(activeDevice, value)
+function knobProcess(activeDevice, value) {
+	knobShown.pos = value
+	if (!flipActive && !stripOwnsPan()) panPos(activeDevice, value)
 }
+vpot.mSurfaceValue.mOnDisplayValueChange = knobDisplay
+vpot.mSurfaceValue.mOnProcessValueChange = knobProcess
 
 // 5-8 switches the V-pots between sends 1-4 and 5-8 (the bridge sends notes 53 / 54).
 var sendArea = page.makeSubPageArea('Sends')
@@ -447,14 +451,23 @@ function sendBar(activeDevice, position01, style, home) {
 fader.mSurfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
 	dbg('title: object=[' + objectTitle + '] value=[' + valueTitle + ']')
 }
-fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-	dbg('display value: [' + value + '] units=[' + units + ']')
-	if (flipActive) panText(activeDevice, value, units)
-	trackLevelText = value
-	if (!stripMode.sent) levelText(activeDevice, value)   // in strip mode the dB field is the strip's fader
+function faderDisplay(activeDevice, value, units) {
+	faderShown.value = value; faderShown.units = units
+	if (flipActive) { if (!stripOwnsPan()) panText(activeDevice, value, units) }
+	else if (!stripOwnsDb()) levelText(activeDevice, value)
 }
-fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-	if (flipActive) panPos(activeDevice, value)
+function faderProcess(activeDevice, value) {
+	faderShown.pos = value
+	if (flipActive && !stripOwnsPan()) panPos(activeDevice, value)
+}
+fader.mSurfaceValue.mOnDisplayValueChange = faderDisplay
+fader.mSurfaceValue.mOnProcessValueChange = faderProcess
+function redrawTrackValues(activeDevice) {
+	lastPanText = lastPanPos = lastLevelText = null
+	if (faderShown.value !== null) faderDisplay(activeDevice, faderShown.value, faderShown.units)
+	if (faderShown.pos !== null) faderProcess(activeDevice, faderShown.pos)
+	if (knobShown.value !== null) knobDisplay(activeDevice, knobShown.value, knobShown.units)
+	if (knobShown.pos !== null) knobProcess(activeDevice, knobShown.pos)
 }
 
 // Name and colour: the selected track's, or the main output's while MASTER is on.
@@ -1287,9 +1300,8 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 // position as PLUGIN event kind 6 (14 bit in a / b) and ignores Cubase's volume while it is on (SysEx 5A <0/1>); the
 // strip's fader comes back as SysEx 5B <msb> <lsb> for the motor, its value in the dB field. On a track without
 // an SSL channel strip (or one without such a parameter) the fader stays on volume; the mode stays on for the next.
-var stripMode = { on: false, sent: false, param: null, pan: null, panSent: false }
+var stripMode = { on: false, sent: false, param: null, pan: null, panSent: false, fp: null, pp: null }
 var STRIP_PAN_NAMES = ['pan', 'panning', 'stereo pan', 'pan/bal', 'balance']
-var trackLevelText = null
 var STRIP_FADER_NAMES = ['Fader Level', 'Fader', 'Output Gain', 'Out Gain', 'Output Level']
 function stripFaderParam() {
 	if (plug.obj < 0 || !plug.kind || !plug.kind.strip) return null
@@ -1305,57 +1317,61 @@ function stripPanParam() {
 		for (var j = 0; j < plug.params.length; ++j) if (plug.params[j].lower === STRIP_PAN_NAMES[i]) return plug.params[j]
 	return null
 }
+// Without FLIP the fader is on the plug-in's fader and the pan knob on its pan; with FLIP the other way round (the
+// plug-in stays in control). stripMode.param = what the fader moves, stripMode.pan = what the pan knob moves.
 function stripModeSend(activeDevice) {
-	var p = stripMode.on && !masterActive ? stripFaderParam() : null
-	var on = !!p
-	var pp = stripMode.on && !masterActive && !flipActive ? stripPanParam() : null
+	var live = stripMode.on && !masterActive
+	var fp = live ? stripFaderParam() : null, pp = live ? stripPanParam() : null
+	var p = flipActive ? pp : fp, k = flipActive ? fp : pp
+	var on = !!p, knob = !!k
+	var changed = on !== stripMode.sent || knob !== stripMode.panSent || p !== stripMode.param || k !== stripMode.pan
 	stripMode.param = p
-	stripMode.pan = pp
-	if (!!pp !== stripMode.panSent) {
-		stripMode.panSent = !!pp
-		if (!pp) { lastPanText = null; lastPanPos = null; if (trackPanUf1.value !== null) panText(activeDevice, trackPanUf1.value, trackPanUf1.units); if (trackPanUf1.pos !== null) panPos(activeDevice, trackPanUf1.pos) }
-		plugSend(activeDevice, [0x5A, on ? 1 : 0, pp ? 1 : 0])
-	}
-	if (pp) stripPanSend(activeDevice)
-	if (on !== stripMode.sent) {
-		stripMode.sent = on
-		plugSend(activeDevice, [0x5A, on ? 1 : 0, pp ? 1 : 0])
-		out('[CubaseSixty UF1] strip mode: fader on ' + (on ? '"' + p.title + '" of "' + plug.title + '"' : 'the track\'s volume'))
-		if (!on) { lastLevelText = null; if (trackLevelText !== null) levelText(activeDevice, trackLevelText) }
+	stripMode.pan = k
+	stripMode.fp = fp
+	stripMode.pp = pp
+	stripMode.sent = on
+	stripMode.panSent = knob
+	if (changed) {
+		plugSend(activeDevice, [0x5A, on ? 1 : 0, knob ? 1 : 0])
+		out('[CubaseSixty UF1] strip mode: fader on ' + (on ? '"' + p.title + '"' : 'the track') + ', pan knob on ' + (knob ? '"' + k.title + '"' : 'the track'))
+		redrawTrackValues(activeDevice)
 	}
 	if (on) stripFaderSend(activeDevice)
+	if (knob) stripPanSend(activeDevice)
+}
+function stripOwnsDb() { return !!stripMode.fp && (stripMode.param === stripMode.fp || stripMode.pan === stripMode.fp) }
+function stripOwnsPan() { return !!stripMode.pp && (stripMode.param === stripMode.pp || stripMode.pan === stripMode.pp) }
+// A plug-in parameter shown where its kind belongs: its fader in the dB field, its pan on the value line.
+function stripShow(activeDevice, p) {
+	var text = ''
+	try { text = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag)).replace(/\s+/g, ' ').trim() } catch (e) {}
+	if (p === stripMode.pp) {
+		lastPanText = null; lastPanPos = null
+		sendValueLine(activeDevice, 'Pan ' + text, true)
+		sendBar(activeDevice, plugValue(p), 0x01, true)
+	} else sendLevel(activeDevice, text)
 }
 function stripFaderSend(activeDevice) {
 	var p = stripMode.param
 	if (!p || !plugAm) return
 	var v = Math.round(Math.max(0, Math.min(1, plugValue(p))) * 16383)
 	plugSend(activeDevice, [0x5B, (v >> 7) & 0x7F, v & 0x7F])
-	var text = ''
-	try { text = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag)) } catch (e) {}
-	sendLevel(activeDevice, text)
+	stripShow(activeDevice, p)
 }
 function stripPanSend(activeDevice) {
-	var p = stripMode.pan
-	if (!p || !plugAm) return
-	var text = ''
-	try { text = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag)).replace(/\s+/g, ' ').trim() } catch (e) {}
-	lastPanText = null; lastPanPos = null
-	sendValueLine(activeDevice, 'Pan ' + text, true)
-	sendBar(activeDevice, plugValue(p), 0x01, true)
+	if (stripMode.pan && plugAm) stripShow(activeDevice, stripMode.pan)
 }
 function stripPanTurn(activeDevice, delta) {
 	var p = stripMode.pan
 	if (!p || !plugAm) return
 	plugDa.setParameterProcessValue(plugAm, plug.obj, p.tag, Math.max(0, Math.min(1, plugValue(p) + delta / 100)))
-	stripPanSend(activeDevice)
+	stripShow(activeDevice, p)
 }
 function stripFaderMove(activeDevice, v14) {
 	var p = stripMode.param
 	if (!p || !plugAm) return
 	plugDa.setParameterProcessValue(plugAm, plug.obj, p.tag, v14 / 16383)
-	var text = ''
-	try { text = String(plugDa.getParameterDisplayValue(plugAm, plug.obj, p.tag)) } catch (e) {}
-	sendLevel(activeDevice, text)
+	stripShow(activeDevice, p)
 }
 
 if (plugDa) {

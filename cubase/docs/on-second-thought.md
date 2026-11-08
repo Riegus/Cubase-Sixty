@@ -15,9 +15,10 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   as it is (chosen).
 - **SSL Strip Mode** (partly). As Rea-Sixty: PLUGIN puts each fader on its track's SSL channel strip fader, tracks
   without one keep volume. The V-pots go on the strip's pan where it has one (push = centre).
-  Not yet: the strip's name in the colour bar. FLIP (chosen) is a
-  plain swap there too: faders on the track's pan, V-pots on its volume, strip mode paused until FLIP is off
-  (Rea-Sixty leaves the fader on the strip's fader); the send views also take the fader while they are on. The fader moves the parameter's range in a straight line.
+  Not yet: the strip's name in the colour bar. FLIP (chosen)
+  keeps the plug-in in control and swaps its fader and pan: faders on the plug-in's pan, V-pots on its fader
+  (Rea-Sixty leaves the fader on the strip's fader); a strip without one flips the track's own. The send views take
+  the fader and V-pot back while they are on. The fader moves the parameter's range in a straight line.
 - **Send views** (forced, partly). As Rea-Sixty: SEND / PLUGIN 1–8 put send N of each track on the faders, a long
   FLIP the selected track's sends on the V-pots, CHANNEL is home. Differences: no send pan (the API has none), so the
   V-pot stays on the track's pan in Send N and FLIP does not swap a send's level and pan; SOLO stays the track's solo
