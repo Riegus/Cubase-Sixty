@@ -2,6 +2,7 @@
 
 Behaviour that is fixed in code today but should become a setting once Cubase-Sixty has a place for settings
 (a settings file read by the bridge, or a settings page). Each entry: what it is now, and what the choice would be.
+The Settings page that will hold them is step 4 of the [release plan](release-plan.md).
 
 Some settings are in `cubase\settings.txt` now (written with the defaults the first time the bridge starts; edit it,
 no restart needed): `track-stepping` = mixconsole (default) / project / all; `uc1-encoder2` = bus-comp (default) / strips / cs-fav / bc-fav.
