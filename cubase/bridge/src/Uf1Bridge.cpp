@@ -653,10 +653,10 @@ void paintSoftKeys()
     static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
     static const char* const kMeterKeys[4] = {"OVERVIEW", "RESET", "FINE", "PRESETS"};   // the METER view's own keys
     const bool meter = g_view == kViewMeter;
-    const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen;
+    const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen && !g_noProject;
     const bool browser = g_presetsOpen && !g_modeHeld;
     for (int i = 0; i < 4; ++i) {
-        const std::string label = g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i] : "";
+        const std::string label = g_noProject ? "" : g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i] : "";
         std::vector<uint8_t> p;
         p.push_back(uint8_t(i));
         uint32_t rgb = 0;   // dark
@@ -670,7 +670,7 @@ void paintSoftKeys()
             p.insert(p.end(), label.begin(), label.end());
         }
         g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
-        if (g_modeHeld) {
+        if (g_modeHeld && !g_noProject) {
             const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
         }
@@ -1015,6 +1015,7 @@ void paintHeader(bool force)
                                   : std::string(g_sends58 ? "2/2" : "1/2");
     std::memcpy(h.data() + 75, page.data(), std::min<size_t>(page.size(), 24));
     std::memcpy(h.data() + 100, g_fine ? "ON" : "OFF", g_fine ? 2 : 3);
+    if (g_noProject) h.fill(0);   // no project: the fields blank (the UF1's own captions stay)
     if (!force && h == shown) return;
     shown = h;
     g_dev.send(::uf1::buildScreen(::uf1::scr::kHeaderRow, h));
@@ -1235,6 +1236,8 @@ void uf1NoProject()
     screenText(::uf1::scr::kChSoftKey, "");
     showStripNumber();
     paintCsType(true);
+    paintHeader(true);   // the big display: the CHANNEL, SOFT KEY and FINE CTRL fields blank
+    paintSoftKeys();
     {
         std::lock_guard<std::mutex> lk(g_lineMx);
         g_homeHasBar = false;
@@ -1250,6 +1253,8 @@ void uf1ProjectOpen()
     screenText(::uf1::scr::kChSoftKey, "BYPASS");
     showStripNumber();
     paintCsType(true);
+    paintHeader(true);
+    paintSoftKeys();
 }
 
 void onSysex(const std::vector<unsigned char>& m)
