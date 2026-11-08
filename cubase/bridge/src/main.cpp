@@ -359,6 +359,9 @@ void handleFrame(const uf8frames::Frame& fr)
             if (!pressed) break;
             const int slot = d[3] - 0x18;
             note2(uint8_t((g_navView ? 18 : 10) + slot));
+            // A cycle marker only sets the locators: then the cursor to the left one (its start), 40 ms later
+            // (back-to-back notes can be lost).
+            if (g_navView) std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note2(26); }).detach();
             g_navLast = g_navView * 8 + slot;
             paintSoftKeys();
             break;
