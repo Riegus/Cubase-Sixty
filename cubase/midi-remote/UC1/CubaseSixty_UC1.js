@@ -339,7 +339,14 @@ function rescan(activeDevice) {
 		// SSL 360 Core in, which is how the bridge finds their gain-reduction streams.
 		var csMatch = bc ? null : findMap(CHANNEL_STRIPS, o.title)
 		var sslOrd = bc || (csMatch && csMatch.label) ? sslCount++ : -1
-		if (bc && !state.bcSelected) { state.bcSelected = makeTarget(da, id, bc, o.title); state.bcSelected.sslOrd = bcCount; state.bcSelected.slotObj = slotAbove; dumpParams(da, id, o.title) }
+		if (bc && !state.bcSelected) {
+			state.bcSelected = makeTarget(da, id, bc, o.title)
+			state.bcSelected.sslOrd = bcCount
+			state.bcSelected.slotObj = slotAbove
+			var bcSlotAt = objects[i].parent   // its insert slot, for its window (the secondary encoder's push)
+			if (bcSlotAt >= 0 && objects[bcSlotAt].type === 'Slot') state.bcSelected.insertIndex = parseInt(info(da, objects[bcSlotAt].id).title, 10) - 1
+			dumpParams(da, id, o.title)
+		}
 		if (bc) { ++bcCount; continue }
 		var cs = csMatch
 		if (cs && cs.label) {
@@ -647,11 +654,11 @@ function switchOnModuleFor(activeDevice, target, knob, clicks) {
 
 // The magnifier key: the next channel strip on the track (wrapping). The large name row shows the previous / current /
 // next strip under the track's name for a moment (SSL 360's instance carousel), then the Bus Comp names again.
-function nextStrip(activeDevice) {
+function nextStrip(activeDevice, dir) {
 	var list = state.csList
 	if (list.length < 2) { readout(activeDevice, ZONE_CS, 'One strip only', ''); return }
 	var i = list.indexOf(state.cs)
-	var next = (i + 1) % list.length
+	var next = ((i + (dir || 1)) % list.length + list.length) % list.length
 	state.cs = list[next]
 	state.csChoice[state.csBase] = state.cs.key
 	// The neighbours as they sit in the list (no wrapping in the display: with two strips, wrapping showed the
@@ -664,6 +671,139 @@ function nextStrip(activeDevice) {
 	state.restoreBcAt = Date.now() + 1600
 	sysex(activeDevice, [0x35, ZONE_CS])
 	paintAll(activeDevice)
+}
+
+// ---------------------------------------------------------------------------
+// The secondary encoder (right of the screen; Rea-Sixty's Encoder 2). Its rotation has four jobs: 'bus-comp' (the
+// Bus Comp section through the project's bus comps, the default), 'strips' (the track's channel strips, as the
+// magnifier key, both ways), 'cs-fav' / 'bc-fav' (the favourites, as the UF8's CS Fav / BC Fav). The default comes
+// from cubase\settings.txt (uc1-encoder2; the bridge sends it as SysEx 4C <0-3>); hold the push and turn to pick
+// another (shown in the readout). A short push opens / closes the window of the plug-in the encoder is on.
+// ---------------------------------------------------------------------------
+var ENC2_MODES = [
+	{ key: 'bus-comp', name: 'Bus Comp' }, { key: 'strips', name: 'Strips' },
+	{ key: 'cs-fav', name: 'CS Fav' }, { key: 'bc-fav', name: 'BC Fav' }
+]
+var enc2 = { mode: 0, held: false, turned: false, started: false }
+function enc2Show(activeDevice) {
+	readout(activeDevice, ZONE_BC, 'Encoder: ' + ENC2_MODES[enc2.mode].name, (enc2.mode + 1) + '/' + ENC2_MODES.length)
+}
+function enc2Turn(activeDevice, clicks) {
+	// Lists: one entry per turn message, and none for 80 ms after a step (a quick turn skipped entries).
+	var now = Date.now()
+	if (now - (enc2.stepAt || 0) < 80) return
+	enc2.stepAt = now
+	clicks = clicks > 0 ? 1 : -1
+	if (enc2.held) {   // picking a job
+		enc2.turned = true
+		enc2.mode = Math.max(0, Math.min(ENC2_MODES.length - 1, enc2.mode + (clicks > 0 ? 1 : -1)))
+		enc2Show(activeDevice)
+		return
+	}
+	var dir = clicks > 0 ? 1 : -1
+	switch (ENC2_MODES[enc2.mode].key) {
+	case 'strips': for (var s = 0; s < Math.abs(clicks); ++s) nextStrip(activeDevice, dir); break
+	case 'cs-fav': for (var c = 0; c < Math.abs(clicks); ++c) favStep(activeDevice, 'cs', dir); break
+	case 'bc-fav': for (var b = 0; b < Math.abs(clicks); ++b) favStep(activeDevice, 'bc', dir); break
+	default: onBcEncoder(activeDevice, clicks)
+	}
+}
+function enc2Push(activeDevice, pressed) {
+	if (pressed) { enc2.held = true; enc2.turned = false; return }
+	enc2.held = false
+	if (enc2.turned) { log('secondary encoder: ' + ENC2_MODES[enc2.mode].name); return }
+	var key = ENC2_MODES[enc2.mode].key
+	if (key === 'strips' || key === 'cs-fav') { toggleWindow(activeDevice); return }
+	// The bus comp's window: only for one on the selected track (the window switches are the selected track's).
+	var bc = busComp(), mine = state.bcSelected
+	if (bc && mine && bc.obj === mine.obj && mine.insertIndex >= 0) {
+		sysex(activeDevice, [0x3A, CC_INSERT_EDIT + mine.insertIndex, insertEditOpen[mine.insertIndex] >= 0.5 ? 0 : 127])
+		return
+	}
+	readout(activeDevice, ZONE_BC, 'Window', 'not this track')
+}
+
+// ---------------------------------------------------------------------------
+// EXT FUNCS (Rea-Sixty's, SSL's own lists): BACK on the main screen opens a list of the channel strip's parameters
+// without a knob of their own; the secondary encoder scrolls it, its push switches between scrolling and adjusting
+// the one shown, BACK (or CONFIRM) closes it. The bridge owns the screen: the script asks for it (SysEx 4B <1 open>),
+// the bridge sends the encoder and keys while it is open (4D <op: 1 turn / 2 push / 3 closed> <64 + steps>), the
+// script draws through it (4A <prev> 00 <current> 00 <next> 00 <long name> 00 <value> 00 <pos 0-127> <active>).
+// The lists are SSL's minus PLUG-IN, A/B and HQ (no plug-in parameter in Cubase) and SOLO SAFE (as Rea-Sixty).
+// Indices: the plug-ins' parameter order (the same in Cubase as in Rea-Sixty's tables).
+// ---------------------------------------------------------------------------
+function toAscii7(text) {
+	var out = []
+	text = String(text)
+	for (var i = 0; i < text.length; ++i) { var c = text.charCodeAt(i); out.push(c >= 32 && c < 127 ? c : 63) }
+	return out
+}
+function xf(short, long, idx, sw) { return { short: short, long: long, idx: idx, sw: !!sw } }
+var EXT_FUNCS = {
+	'CS 2': [xf('COMP MIX', 'Mix', 26), xf('FILT IN', 'Filters', 46, 1), xf('PAN', 'Pan', 41), xf('WIDTH', 'Width', 40),
+		xf('OUT TRIM', 'Out Trim', 39), xf('WIDTH MD', 'Width Mode', 47, 1), xf('WIDTH FQ', 'Width Freq', 48),
+		xf('AUTO MKP', 'Auto Makeup', 49, 1), xf('MKP OFST', 'Auto Makeup Offset', 50)],
+	'4K B': [xf('COMP MIX', 'Mix', 33), xf('PRE', 'Pre', 3, 1), xf('MIC', 'Mic', 4), xf('FILT IN', 'Filters', 44, 1),
+		xf('PAN', 'Pan', 9), xf('WIDTH', 'Width', 8), xf('OUT TRIM', 'Out Trim', 7), xf('ANLG VCA', 'Analogue', 43, 1),
+		xf('WIDTH MD', 'Width Mode', 45, 1), xf('WIDTH FQ', 'Width Freq', 46), xf('AUTO MKP', 'Auto Makeup', 47, 1),
+		xf('MKP OFST', 'Auto Makeup Offset', 48)],
+	'4K E': [xf('COMP MIX', 'Mix', 38), xf('PRE', 'Pre', 3, 1), xf('MIC', 'Mic', 4), xf('FILT IN', 'Filters', 13, 1),
+		xf('PAN', 'Pan', 12), xf('WIDTH', 'Width', 9), xf('OUT TRIM', 'Out Trim', 8), xf('ANLG VCA', 'Analogue', 7, 1),
+		xf('WIDTH MD', 'Width Mode', 10, 1), xf('WIDTH FQ', 'Width Freq', 11), xf('AUTO MKP', 'Auto Makeup', 40, 1),
+		xf('MKP OFST', 'Auto Makeup Offset', 41)],
+	'4K G': [xf('COMP MIX', 'Mix', 42), xf('PRE', 'Pre', 9, 1), xf('MIC', 'Mic', 10), xf('IMPED IN', 'Impedance Circuit', 7, 1),
+		xf('IMPEDANCE', 'Impedance', 8), xf('FILT IN', 'Filters', 19, 1), xf('PAN', 'Pan', 18), xf('WIDTH', 'Width', 15),
+		xf('OUT TRIM', 'Out Trim', 14), xf('ANLG VCA', 'Analogue', 13, 1), xf('WIDTH MD', 'Width Mode', 16, 1),
+		xf('WIDTH FQ', 'Width Freq', 17), xf('AUTO MKP', 'Auto Makeup', 44, 1), xf('MKP OFST', 'Auto Makeup Offset', 45)]
+}
+var ext = { open: false, idx: 0, active: false }
+function extList() {
+	var t = state.cs
+	return t && t.map && EXT_FUNCS[t.map.label] ? EXT_FUNCS[t.map.label] : []
+}
+function extTag(item) {
+	var t = state.cs
+	try { return t.da.getParameterTagByIndex(am, t.obj, item.idx) } catch (e) { return -1 }
+}
+function extDraw(activeDevice) {
+	var list = extList(), n = list.length
+	var z = [0x00]
+	if (!n) { sysex(activeDevice, [0x4A].concat(toAscii7(''), z, toAscii7('(none)'), z, toAscii7(''), z, toAscii7('EXT FUNCS'), z, toAscii7(''), z, [0, 0])); return }
+	ext.idx = ((ext.idx % n) + n) % n
+	var cur = list[ext.idx], prev = list[(ext.idx - 1 + n) % n], next = list[(ext.idx + 1) % n]
+	var value = '', pos = 0, tag = extTag(cur)
+	if (tag >= 0) {
+		try {
+			var v = state.cs.da.getParameterProcessValue(am, state.cs.obj, tag)
+			pos = Math.round(Math.max(0, Math.min(1, v)) * 127)
+			value = String(state.cs.da.getParameterDisplayValue(am, state.cs.obj, tag)).replace(/^\s+/, '')
+			var units = state.cs.da.getParameterDisplayUnits(am, state.cs.obj, tag)
+			if (units && value.indexOf(units) < 0 && value.length + units.length < 9) value += units
+		} catch (e) {}
+	}
+	sysex(activeDevice, [0x4A].concat(toAscii7(prev.short), z, toAscii7(cur.short), z, toAscii7(next.short), z,
+		toAscii7(cur.long), z, toAscii7(value.substring(0, 8)), z, [pos, ext.active ? 1 : 0]))
+}
+function extOpen(activeDevice) {
+	ext.open = true
+	ext.idx = 0
+	ext.active = false
+	sysex(activeDevice, [0x4B, 1])
+	extDraw(activeDevice)
+}
+function extEvent(activeDevice, op, steps) {
+	if (op === 3) { ext.open = false; ext.active = false; return }
+	if (!ext.open) return
+	var list = extList()
+	if (op === 2) { ext.active = !ext.active; extDraw(activeDevice); return }
+	if (op !== 1 || !list.length) return
+	if (!ext.active) { ext.idx += steps; extDraw(activeDevice); return }
+	var item = list[((ext.idx % list.length) + list.length) % list.length], tag = extTag(item)
+	if (tag < 0) return
+	var acc = state.cs.da, cur = acc.getParameterProcessValue(am, state.cs.obj, tag)
+	var v = item.sw ? (steps > 0 ? 1 : 0) : Math.max(0, Math.min(1, cur + steps / 64 * (state.fine ? 0.25 : 1)))
+	acc.setParameterProcessValue(am, state.cs.obj, tag, v)
+	extDraw(activeDevice)
 }
 
 // The UF1's SHIFT + CHANNEL encoder picked a strip for its PLUGIN view (SysEx 45 <kind> <ordinal>, via the bridge;
@@ -835,7 +975,7 @@ function onBcEncoder(activeDevice, steps) {
 // cubase\favourites.txt; the bridge reads the file and sends the two lists (SysEx 43 <0 = CS, 1 = BC> <names,
 // 7F 7F 7F between>) when asked (SysEx 42, on activation and when stepping after a pause). The UF8's CHANNEL
 // encoder in CS Fav / BC Fav mode steps through them (SysEx 44 <domain> <1 = forward, 0 = back>): the UC1's name
-// rows show the previous / current / next favourite at once, and half a second after the last step the plug-in in
+// rows show the previous / current / next favourite at once, and 0.8 s after the last step the plug-in in
 // the slot is replaced by the one shown (one load per pause, not one per notch). The controls both plug-ins have
 // on the UC1 are carried across (by value, in their units), so the sound stays. On a track with none, the
 // favourite goes into the first free insert slot after the last plug-in.
@@ -847,7 +987,8 @@ var fav = {
 	uids: {},                    // plug-in name -> class id (from the plug-in manager's collections)
 	pick: null,                  // while stepping: { domain, index, slotObj, until }
 	commitAt: 0,
-	pending: null                // after a swap: { slotObj, name, values, until }
+	pending: null,               // after a swap: { slotObj, name, values, until }
+	loaded: null                 // the last swap: { slotObj, name, at } (Cubase shows it to the script seconds later)
 }
 function favIndex(domain, name) {
 	var list = fav.lists[domain] || []
@@ -872,7 +1013,13 @@ function onFavList(message) {
 function favContext(domain) {
 	var t = domain === 'cs' ? (state.cs && state.cs.key !== 'cubase' ? state.cs : null) : busComp()
 	var on = state.favOn ? state.favOn[domain] : null
-	if (t && t.slotObj >= 0) return { acc: t.da, slotObj: t.slotObj, name: t.name, target: t, track: domain === 'bc' && t.track ? t.track : state.trackName }
+	if (t && t.slotObj >= 0) {
+		// Just swapped, and Cubase does not show the new plug-in yet: count from it, not from the old one.
+		var ld = fav.loaded
+		if (ld && ld.slotObj === t.slotObj && Date.now() - ld.at < 8000 && ld.name !== t.name)
+			return { acc: t.da, slotObj: t.slotObj, name: ld.name, target: null, track: domain === 'bc' && t.track ? t.track : state.trackName }
+		return { acc: t.da, slotObj: t.slotObj, name: t.name, target: t, track: domain === 'bc' && t.track ? t.track : state.trackName }
+	}
 	if (on) return { acc: on.acc, slotObj: on.slotObj, name: on.name, target: null, track: state.trackName }
 	// None on the track: the first free insert slot after the last one in use, else the first free one.
 	var slots = state.insertSlots || [], free = null
@@ -901,7 +1048,7 @@ function favStep(activeDevice, domain, dir) {
 	if (cur < 0) next = dir > 0 ? 0 : list.length - 1
 	else next = ((cur + dir) % list.length + list.length) % list.length
 	fav.pick = { domain: domain, index: next, slotObj: ctx.slotObj }
-	fav.commitAt = Date.now() + 500
+	fav.commitAt = Date.now() + 800
 	favShow(activeDevice, domain, next, ctx.track)
 }
 function favUid(acc, slotObj, name) {
@@ -1003,12 +1150,15 @@ function favCommit(activeDevice) {
 	if (!name || favIndex(domain, ctx.name) === p.index) return
 	var uid = favUid(ctx.acc, ctx.slotObj, name)
 	if (!uid) { log('favourite "' + name + '": not in Cubase\'s plug-in list (check the name in favourites.txt)'); readout(activeDevice, zone, favShort(name), 'NOT FOUND'); return }
-	var values = ctx.target ? favSnapshot(ctx.target) : null
+	// The settings to carry: the plug-in's own, or, while Cubase has not shown the last swap yet, the ones that swap
+	// was carrying.
+	var values = ctx.target ? favSnapshot(ctx.target) : fav.pending && fav.pending.slotObj === ctx.slotObj ? fav.pending.values : null
 	var ok = false
 	try { ok = ctx.acc.mPluginManager.trySetSlotPlugin(am, ctx.slotObj, uid, true) } catch (e) { log('trySetSlotPlugin failed: ' + e) }
 	log('favourite: "' + (ctx.name || '(empty slot)') + '" -> "' + name + '": ' + (ok ? 'done' : 'refused'))
 	if (!ok) { readout(activeDevice, zone, favShort(name), 'FAILED'); return }
-	fav.pending = values ? { slotObj: ctx.slotObj, name: name, values: values, until: Date.now() + 4000 } : null
+	fav.pending = values ? { slotObj: ctx.slotObj, name: name, values: values, until: Date.now() + 8000 } : null
+	fav.loaded = { slotObj: ctx.slotObj, name: name, at: Date.now() }
 	state.rescanAt = Date.now() + 300
 	state.mixScanAt = Date.now() + 400
 }
@@ -1077,6 +1227,7 @@ function reportStripChoice(activeDevice) {
 	sysex(activeDevice, [0x41, kind, kind === 1 ? (state.cs.sslOrd || 0) & 0x7F : 0])
 }
 function paintAll(activeDevice) {
+	if (ext.open) { try { extDraw(activeDevice) } catch (e) {} }   // another strip / track: its EXT FUNCS
 	reportRouting(activeDevice)
 	reportStripChoice(activeDevice)
 	reportGr(activeDevice)
@@ -1207,7 +1358,7 @@ function paintLeds(activeDevice) {
 }
 
 function onKnob(activeDevice, id, clicks) {
-	if (id === 0x15) { onBcEncoder(activeDevice, clicks); return }
+	if (id === 0x15) { enc2Turn(activeDevice, clicks); return }
 	var target = targetFor(id)
 	if (!target) return
 	var rf = target.knobs[id]
@@ -1252,6 +1403,7 @@ function onButton(activeDevice, id) {
 		}
 		if (id === B.Back) { closePicker(activeDevice, 'Cancelled'); return }
 	}
+	if (id === B.Back) { extOpen(activeDevice); return }   // EXT FUNCS
 	// DYN IN on Cubase's strip without a compressor: load the Standard Compressor straight away.
 	if (id === B.DynIn && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
 		loadModule(activeDevice, state.cs, 'comp', STRIP_MODULES.comp[0])
@@ -1433,6 +1585,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
 	if (cmd === 0x43) { onFavList(message); return }
 	if (cmd === 0x45 && am) { followUf1(activeDevice, message[5], message[6]); return }
+	// The start setting, once: the bridge sends it with every favourites reply (the favourite cycle asks again
+	// after a pause), which must not undo a job picked with the push.
+	if (cmd === 0x4C) { if (!enc2.started) { enc2.started = true; enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder at start: ' + ENC2_MODES[enc2.mode].name) } return }
+	if (cmd === 0x4D && am) { try { extEvent(activeDevice, message[5], message[6] - 64) } catch (e) { log('EXT FUNCS: ' + e) } return }
 	if (cmd === 0x44 && am) { try { favStep(activeDevice, message[5] === 0 ? 'cs' : 'bc', message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) } return }
 	if (cmd === 0x3E && am && message.length >= 11) { try { setRouting(activeDevice, message) } catch (e) { log('routing: ' + e) } return }
 	if (cmd !== 0x20 && cmd !== 0x21) return
@@ -1449,6 +1605,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 			if (held >= 600) openCompPicker(activeDevice, state.cs)
 			else onButton(activeDevice, B.DynIn)
 		}
+		else if (message[5] === B.SecEncPush) enc2Push(activeDevice, message[6] === 1)
 		else if (message[6] === 1) onButton(activeDevice, message[5])
 	} catch (e) {
 		if (++sysexErrors <= 10) log('event 0x' + cmd.toString(16) + ' id 0x' + message[5].toString(16) + ' failed: ' + e)
@@ -1461,6 +1618,7 @@ function onParameterChange(activeDevice, objectID, tag) {
 	var target = state.cs && state.cs.objs[objectID] ? state.cs : bc && bc.objs[objectID] ? bc : null
 	if (!target) return
 	if (target === state.cs && state.cs.routing) reportRouting(activeDevice)
+	if (target === state.cs && ext.open) extDraw(activeDevice)   // EXT FUNCS shows the value
 	try {
 		var knob = target.knobByKey[objectID + ':' + tag]
 		if (knob !== undefined) paintRing(activeDevice, knob)

@@ -25,7 +25,13 @@ const char* const kDefault =
     "#   project    = the tracks shown in the Project window (Cubase's Navigate Up / Down; the Project window\n"
     "#                should have the focus)\n"
     "#   all        = every track, hidden ones included (Cubase's Select Track: Prev / Next)\n"
-    "track-stepping = mixconsole\n";
+    "track-stepping = mixconsole\n"
+    "\n"
+    "# What the UC1's secondary encoder (right of the screen) turns at start (hold its push and turn to change it):\n"
+    "#   bus-comp = the Bus Comp section through the project's bus comps\n"
+    "#   strips   = the track's channel strips (as the magnifier key)\n"
+    "#   cs-fav / bc-fav = the channel strip / bus comp favourites (favourites.txt)\n"
+    "uc1-encoder2 = bus-comp\n";
 
 std::string trim(const std::string& s)
 {

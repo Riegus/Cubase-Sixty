@@ -7,7 +7,6 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 
 ## Suggested next (value for the effort)
 
-1. The UC1's secondary encoder modes.
 
 
 ## UF8
@@ -41,7 +40,9 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
   parameters, a multi-instance picker.
 - **GR calibration** and GR meter override.
 - **Sticky Pot**, **Parameter Groups**, **Selection Sets**.
-- The secondary encoder's modes.
+- The secondary encoder: bus comp, strips and favourite cycles plus the window push are done; missing are FX /
+  instance cycles across all plug-ins and FX Move (no API for non-SSL plug-ins in the PLUGIN sense / reordering).
+- EXT FUNCS: SSL's lists are done; missing are PLUG-IN, A/B and HQ in the list, and user-curated lists.
 
 ## UF1
 
