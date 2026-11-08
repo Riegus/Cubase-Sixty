@@ -607,12 +607,45 @@ std::atomic<int> g_freezeGen{0};
 std::atomic<bool> g_freezeHeld{false};
 std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ... 13 00): bursts leave it on
 void replayUf8Cache();
+void onMidiIn(std::vector<unsigned char>& msg);
+// No project (the script's driver deactivated): every strip as an empty one (name, colour, meter, dB, its LEDs),
+// faders down, value lines and V-pot bars off, the LEDs Cubase drives off. What Cubase sends on the next project
+// paints it all again.
+void uf8NoProject()
+{
+    g_uf8Frozen = false;
+    std::vector<int> notes;
+    {
+        std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+        for (auto& kv : g_uf8Cache) if (kv.first < 0x10000) notes.push_back(kv.first);
+    }
+    for (int s = 0; s < kStrips; ++s) {
+        std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
+        std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
+        std::vector<unsigned char> fader{uint8_t(0xE0 | s), 0, 0};
+        onMidiIn(name);
+        onMidiIn(colour);
+        onMidiIn(fader);
+        g_panLine[s].clear();
+        g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
+    }
+    for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
+    g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{3, 3, 3, 3, 3, 3, 3, 3}));
+}
 
+void uf8NoProject();
 void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
     if (cs::scriptLogSysex(m.data(), m.size())) return;
+    // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
+    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
+        if (m[5] == 0) uf8NoProject();
+        else g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1}));
+        if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
     // Trace: when each strip's name arrives (timing of bank changes).
     if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
         std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());

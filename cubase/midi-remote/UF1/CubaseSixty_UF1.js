@@ -1645,3 +1645,12 @@ function asciiAll(text) {
 	for (var i = 0; i < text.length; ++i) { var c = text.charCodeAt(i); r.push(c >= 0x20 && c < 0x80 ? c : 0x3F) }
 	return r
 }
+
+// Closing a project (Cubase shows the Hub) deactivates the driver, opening one activates it again: the bridge shows
+// "No Project" meanwhile (SysEx 7C 00 / 01); what the scripts send on the next project paints the surface again.
+deviceDriver.mOnDeactivate = function (activeDevice) {
+	out('[CubaseSixty UF1] inactive (no project)')
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x00, 0xF7]))
+	try { flushLog(activeDevice) } catch (e) {}
+}
+deviceDriver.mOnActivate = function (activeDevice) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7])) }

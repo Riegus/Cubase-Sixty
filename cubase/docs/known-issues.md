@@ -9,7 +9,7 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   scripts' drivers are deactivated on close and activated again on open, but the UF8's start-up follow does not run
   again.
 - **Closing a project leaves the surfaces showing the last state** (names, faders, meters, LEDs) while Cubase shows
-  the Hub. Being fixed (release plan step 1).
+  the Hub. Being fixed (release plan step 1): the surfaces now go to "No Project"; to be confirmed.
 
 ## UF1
 

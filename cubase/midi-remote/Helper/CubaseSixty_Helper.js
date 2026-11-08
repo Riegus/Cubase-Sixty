@@ -139,24 +139,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	sendSolo(activeDevice)
 }
 
-// Probe (closing / opening projects): which of Cubase's callbacks fire when a project closes (Cubase shows the Hub)
-// and another opens. Logs the driver's and the page's activate / deactivate, whether the page's idle callback keeps
-// running (checked from the driver's idle every second), and the selected track's name.
-var probe = { pageIdleAt: 0, pageIdle: null, driverIdleAt: 0 }
-deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] probe: driver activated') }
-deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] probe: driver deactivated'); flushLog(activeDevice) }
-page.mOnActivate = function (activeDevice, activeMapping) { out('[CubaseSixty Helper] probe: page activated') }
-page.mOnDeactivate = function (activeDevice, activeMapping) { out('[CubaseSixty Helper] probe: page deactivated'); flushLog(activeDevice) }
-page.mOnIdle = function (activeDevice, activeMapping) { probe.pageIdleAt = Date.now() }
-page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
-	out('[CubaseSixty Helper] probe: selected track "' + title + '"')
-}
-deviceDriver.mOnIdle = function (activeDevice) {
-	var now = Date.now()
-	if (now - probe.driverIdleAt >= 1000) {
-		probe.driverIdleAt = now
-		var running = now - probe.pageIdleAt < 1500
-		if (running !== probe.pageIdle) { probe.pageIdle = running; out('[CubaseSixty Helper] probe: page idle ' + (running ? 'running' : 'stopped')) }
-	}
-	flushLog(activeDevice)
-}
+// Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
+deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
+deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); flushLog(activeDevice) }
+deviceDriver.mOnIdle = function (activeDevice) { flushLog(activeDevice) }

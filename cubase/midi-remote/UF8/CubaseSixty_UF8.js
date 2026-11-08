@@ -689,6 +689,7 @@ function meterToMidi(value) {
 //     second for 30 s from the first idle call, until the selected track has been seen on a strip.
 // ---------------------------------------------------------------------------
 
+var followRestart = function () {}, followStop = function () {}, driverActivations = 0
 ;(function () {
 	var CHANNELS = 256
 	var allTitles = []
@@ -701,6 +702,16 @@ function meterToMidi(value) {
 	// At start-up the UF8 is held frozen while the tries run (Cubase ignores presses at first, so it can take
 	// several), and shows the bank once the selected track is on a strip (SysEx 13 01 / 13 00).
 	var startupFrozen = false
+	// A project closed and another opened (the driver deactivated and activated again): the start-up follow again.
+	followRestart = function (activeDevice) {
+		startupUntil = 0
+		followTries = 0
+		dueMs = 0
+		selectedIndex = -1
+		lastTryOffset = -1
+		allTitles = []
+	}
+	followStop = function (activeDevice) { startupUntil = -1; dueMs = 0; startupFreeze(activeDevice, false) }
 	function startupFreeze(activeDevice, on) {
 		if (startupFrozen === on) return
 		startupFrozen = on
@@ -875,6 +886,22 @@ function meterToMidi(value) {
 // ---------------------------------------------------------------------------
 var listNamesSeen = 0
 var listRequestAt = 0
+// Closing a project (Cubase shows the Hub) deactivates the driver, opening one activates it again: the bridge blanks
+// the UF8 meanwhile (SysEx 7C 00 / 01), and the follow and the track lists start over.
+deviceDriver.mOnDeactivate = function (activeDevice) {
+	out('[CubaseSixty] inactive (no project)')
+	try { followStop(activeDevice) } catch (e) {}
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x00, 0xF7]))
+	flushLog(activeDevice)
+}
+deviceDriver.mOnActivate = function (activeDevice) {
+	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7]))
+	if (!driverActivations++) return   // the first activation is Cubase's start: everything starts anyway
+	out('[CubaseSixty] active again (a project is open)')
+	listNamesSeen = 0
+	listRequestAt = 0
+	try { followRestart(activeDevice) } catch (e) {}
+}
 function requestListsIfNeeded(activeDevice, now) {
 	if (listNamesSeen > 0 || now < listRequestAt) return
 	listRequestAt = now + 2000

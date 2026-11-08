@@ -1202,10 +1202,41 @@ void showStripNumber()
 }
 
 // Sysex from the Cubase script: 01 name, 02 colour (strip 0), 03 level text.
+void onMidiIn(std::vector<unsigned char>& msg);
+// No project (the script's driver deactivated, Cubase shows the Hub): "No Project" as the track, no colour, level or
+// value line, meters and fader down, the LEDs Cubase drives off. The next project paints it all again.
+void uf1NoProject()
+{
+    std::vector<int> notes;
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMx);
+        for (auto& kv : g_cache) if (kv.first < 0x100) notes.push_back(kv.first);
+    }
+    std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
+    for (char c : std::string("No Project")) name.push_back(uint8_t(c));
+    name.push_back(0xF7);
+    std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
+    std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
+    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0}, fader{0xE0, 0, 0};
+    onMidiIn(name);
+    onMidiIn(colour);
+    onMidiIn(level);
+    onMidiIn(meterL);
+    onMidiIn(meterR);
+    onMidiIn(fader);
+    for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
+    valueHome("");
+}
+
 void onSysex(const std::vector<unsigned char>& m)
 {
     if (!isOurSysex(m)) return;
     if (scriptLogSysex(m.data(), m.size())) return;
+    if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
+        if (m[5] == 0) uf1NoProject();
+        if (g_trace) std::printf("UF1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
     if (auto n = parseName(m)) {
         if (n->strip != 0) return;
         std::string t(n->text.begin(), n->text.end());
