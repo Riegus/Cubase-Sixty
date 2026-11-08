@@ -114,6 +114,7 @@ std::atomic<bool> g_soloActive{false};
 std::atomic<bool> g_presetsOpen{false};
 std::atomic<int> g_browserScroll{0};        // V-pot 4 detents not yet applied
 std::atomic<bool> g_browserLoad{false};     // V-pot 4 pushed
+void panTurned();
 void plugEvent(uint8_t kind, uint8_t a, uint8_t b)
 {
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x53, kind, a, b, uint8_t(g_fine ? 1 : 0), 0xF7});
@@ -123,6 +124,7 @@ bool plugActive() { return g_view == kViewPlugin && g_plugPresent; }
 // The hand's position goes to the script (PLUGIN event kind 6), Cubase's volume is ignored, and the strip's value
 // (SysEx 5B) drives the motor. g_volPos keeps Cubase's last volume for the way back.
 std::atomic<bool> g_stripFader{false};
+std::atomic<bool> g_stripPan{false};   // the pan knob on the strip's pan (PLUGIN event kind 7)
 std::atomic<int> g_volPos{-1};
 void paintHeader(bool force = false);
 void paintCsType(bool force);
@@ -393,6 +395,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (g_view == kViewSends || g_view == kViewPlugin) paintSendCells(false);
             break;
         }
+        if (ev.id == 0) panTurned();
+        if (ev.id == 0 && g_stripPan) { plugEvent(7, 0, uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }   // strip mode: the strip's pan
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
         break;
     case K::Button:
@@ -1164,6 +1168,13 @@ void barTemporary(uint8_t pos, uint8_t style) {
     g_tempUntil = now + kTemporaryMs;
     showBarLocked(pos, style);
 }
+// The pan knob was turned: its value line (the home view) comes back at once, and cell updates the turn causes
+// (the strip's pan is a plug-in parameter too) do not take it over for a moment.
+void panTurned() {
+    std::lock_guard<std::mutex> lk(g_lineMx);
+    g_quietUntil = nowMs() + 400;
+    if (g_tempUntil) { g_tempUntil = 0; showHomeLocked(); }
+}
 void selectionChanged() {
     std::lock_guard<std::mutex> lk(g_lineMx);
     g_quietUntil = nowMs() + kSelectionQuietMs;
@@ -1294,6 +1305,7 @@ void onSysex(const std::vector<unsigned char>& m)
         uc1FollowStrip(m[5], m[6]);   // SHIFT + CHANNEL picked a strip: the UC1 follows
     } else if (m[4] == 0x5A && m.size() >= 7) {
         g_stripFader = m[5] != 0;
+        g_stripPan = m.size() >= 8 && m[6] == 1;
         if (g_trace) std::printf("UF1 strip mode: fader on %s\n", g_stripFader ? "the channel strip" : "the track's volume");
         if (!g_stripFader && g_volPos >= 0 && !g_touched) motorTo(uint16_t(g_volPos.load()));
     } else if (m[4] == 0x5B && m.size() >= 8) {

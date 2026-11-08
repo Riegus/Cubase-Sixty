@@ -167,7 +167,7 @@ for (var st = 0; st < 8; ++st) sendTitles.push(['', '', '', '', '', '', '', ''])
 var routeSelected = page.mHostAccess.mTrackSelection.mMixerChannel
 function routeChanged(activeDevice) {
 	uf8FlipActive = route.fader === 'pan'
-	for (var r = 0; r < flipResets.length; ++r) flipResets[r]()
+	for (var r = 0; r < flipResets.length; ++r) flipResets[r](activeDevice)
 	for (var i = 0; i < STRIPS; ++i) paintStripName(activeDevice, i)
 	if (stripModeOn) stripModeUpdateAll(activeDevice)   // FLIP and the send views take the fader back
 }
@@ -205,6 +205,7 @@ function paintStripName(activeDevice, index) {
 // SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
 var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
 var trackDb = [], dbResend = []
+var trackPan = [], panResend = [], stripPanShow = []
 for (var i = 0; i < STRIPS; ++i) {
 	var channel = bankZone.makeMixerBankChannel()
 	var strip = strips[i]
@@ -252,7 +253,8 @@ for (var i = 0; i < STRIPS; ++i) {
 		if (!skDa[index]) return
 		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 			skAm = activeMapping
-			if (skStrip[index].faderOn && objectID === skStrip[index].obj && tag === skStrip[index].faderTag) stripFaderSend(activeDevice, index)
+			if (skStrip[index].faderOn && objectID === skStrip[index].obj && tag === skStrip[index].fTag) stripFaderSend(activeDevice, index)
+			if (skStrip[index].panOn && objectID === skStrip[index].obj && tag === skStrip[index].vTag) stripPanSend(activeDevice, index)
 			// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
 			if (skFocus && objectID === skStrip[index].tagObj && tag === skStrip[index].tag) skReport(activeDevice, index)
 		}
@@ -315,14 +317,27 @@ for (var i = 0; i < STRIPS; ++i) {
 	// readout. Normally pan comes from the V-pot and the level from the fader; under FLIP the other way round.
 	;(function (index, vpot, fader) {
 		var lastPanText = null, lastPanPos = null, lastDb = null
-		flipResets.push(function () { lastPanText = lastPanPos = lastDb = null })
+		// The controls' last values, whatever they were on: Cubase sends the new bindings' values before the sub-page
+		// change is announced, so they are drawn again once it is (FLIP showed the pan in the dB field otherwise).
+		var vpotShown = { value: null, units: '', pos: null }, faderShown = { value: null, units: '', pos: null }
+		flipResets.push(function (activeDevice) {
+			lastPanText = lastPanPos = lastDb = null
+			if (!activeDevice) return
+			// (The handlers by name: Cubase does not give back a callback read from the surface value.)
+			if (faderShown.value !== null) faderDisplay(activeDevice, faderShown.value, faderShown.units)
+			if (faderShown.pos !== null) faderProcess(activeDevice, faderShown.pos)
+			if (vpotShown.value !== null) vpotDisplay(activeDevice, vpotShown.value, vpotShown.units)
+			if (vpotShown.pos !== null) vpotProcess(activeDevice, vpotShown.pos)
+		})
 		function panText(activeDevice, value, units) {
+			if (stripOwnsPan(index)) return   // strip mode: the value line shows the plug-in's pan
 			var text = String(value) + (units ? units : '')
 			if (text === lastPanText) return
 			lastPanText = text
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
 		}
 		function panPos(activeDevice, value) {
+			if (stripOwnsPan(index)) return
 			var pos = Math.max(0, Math.min(127, Math.round(value * 127)))
 			if (pos === lastPanPos) return
 			lastPanPos = pos
@@ -344,27 +359,47 @@ for (var i = 0; i < STRIPS; ++i) {
 		function dbText(activeDevice, value) {
 			var text = String(value)
 			if (route.fader === 'vol') trackDb[index] = text   // for leaving strip mode
-			if (skStrip[index] && skStrip[index].faderOn) return   // strip mode: the dB field is the strip's fader
+			if (stripOwnsDb(index)) return   // strip mode: the dB field shows the plug-in's control
 			if (text === lastDb) return
 			lastDb = text
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 		}
 		dbResend[index] = function (activeDevice) { lastDb = null; if (trackDb[index] !== undefined) dbText(activeDevice, trackDb[index]) }
-		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		// Strip mode: the V-pot on the SSL strip's pan; Cubase's track pan is kept for the way back.
+		panResend[index] = function (activeDevice) {
+			lastPanText = null; lastPanPos = null
+			if (trackPan[index]) { panText(activeDevice, trackPan[index].value, trackPan[index].units); panPos(activeDevice, trackPan[index].pos) }
+		}
+		stripPanShow[index] = function (activeDevice, text, pos) {
+			lastPanText = null; lastPanPos = null
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, Math.max(0, Math.min(127, Math.round(pos * 127))), 0xF7]))
+		}
+		function vpotDisplay(activeDevice, value, units) {
+			vpotShown.value = value; vpotShown.units = units
+			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || { pos: 0.5 }; trackPan[index].value = value; trackPan[index].units = units }
 			if (route.vpot === 'sends') sendText(activeDevice, value, units)
 			else if (route.vpot === 'vol') dbText(activeDevice, value)
 			else panText(activeDevice, value, units)
 		}
-		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		function vpotProcess(activeDevice, value) {
+			vpotShown.pos = value
+			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || {}; trackPan[index].pos = value }
 			if (route.vpot === 'sends') sendPos(activeDevice, value)
 			else if (route.vpot === 'pan') panPos(activeDevice, value)
 		}
-		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		function faderDisplay(activeDevice, value, units) {
+			faderShown.value = value; faderShown.units = units
 			if (route.fader === 'pan') panText(activeDevice, value, units); else dbText(activeDevice, value)
 		}
-		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		function faderProcess(activeDevice, value) {
+			faderShown.pos = value
 			if (route.fader === 'pan') panPos(activeDevice, value)
 		}
+		vpot.mSurfaceValue.mOnDisplayValueChange = vpotDisplay
+		vpot.mSurfaceValue.mOnProcessValueChange = vpotProcess
+		fader.mSurfaceValue.mOnDisplayValueChange = faderDisplay
+		fader.mSurfaceValue.mOnProcessValueChange = faderProcess
 	})(i, strip.vpot, strip.fader)
 
 	;(function (index, fader) {
@@ -847,7 +882,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
-	if (m[4] >= 0x21 && m[4] <= 0x25) {
+	if (m[4] >= 0x21 && m[4] <= 0x29) {
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
@@ -984,50 +1019,91 @@ function skReportAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) skReport(a
 // ---------------------------------------------------------------------------
 // SSL Strip Mode (the PLUGIN key): each strip's fader on its SSL channel strip's own fader / output gain instead of
 // the track's volume; a strip whose track has none keeps volume. The bridge says on / off (SysEx 24 <0/1>) and
-// sends a hand's position (25 <strip> <msb> <lsb>); the script answers per strip whether its fader is on a strip
-// (26 <strip> <0/1>; the bridge then ignores Cubase's volume there) and the strip fader's value for the motor
-// (27 <strip> <msb> <lsb>), with its value in the dB field.
+// sends a hand's position (25 <strip> <msb> <lsb>); the script answers per strip whether its fader / V-pot are on
+// the strip (26 <strip> <fader 0/1> <pan 0/1>; the bridge then ignores Cubase's volume there, and sends the V-pot as
+// 28 <strip> <64 + delta>, its push as 29 <strip> = centre) and the strip fader's value for the motor
+// (27 <strip> <msb> <lsb>), with its value in the dB field; the pan shows as the track's pan does (06 / 07).
 // ---------------------------------------------------------------------------
 var stripModeOn = false
 var STRIP_FADER_NAMES = ['fader level', 'fader', 'output gain', 'out gain', 'output level']
-function stripFaderTag(index) {
+var STRIP_PAN_NAMES = ['pan', 'panning', 'stereo pan', 'pan/bal', 'balance']
+// The strip's fader and pan parameters, found by name once per plug-in.
+function stripTags(index) {
 	var st = skStrip[index], da = skDa[index]
 	if (!st.scanned) skScan(index)
-	if (st.obj < 0 || !da || !skAm) return -1
-	if (st.faderObj === st.obj) return st.faderTag
+	if (st.obj < 0 || !da || !skAm) return false
+	if (st.faderObj === st.obj) return true
 	st.faderObj = st.obj
 	st.faderTag = -1
+	st.panTag = -1
 	var n = 0
-	try { n = da.getNumberOfParameters(skAm, st.obj) } catch (e) { return -1 }
+	try { n = da.getNumberOfParameters(skAm, st.obj) } catch (e) { return false }
 	var titles = []
 	for (var i = 0; i < n && i < 400; ++i) {
 		try { var tag = da.getParameterTagByIndex(skAm, st.obj, i); titles.push({ tag: tag, t: String(da.getParameterTitle(skAm, st.obj, tag, 48)).toLowerCase() }) } catch (e) {}
 	}
-	for (var w = 0; w < STRIP_FADER_NAMES.length && st.faderTag < 0; ++w)
-		for (var k = 0; k < titles.length; ++k) if (titles[k].t === STRIP_FADER_NAMES[w]) { st.faderTag = titles[k].tag; break }
-	return st.faderTag
+	function find(names) {
+		for (var w = 0; w < names.length; ++w) for (var k = 0; k < titles.length; ++k) if (titles[k].t === names[w]) return titles[k].tag
+		return -1
+	}
+	st.faderTag = find(STRIP_FADER_NAMES)
+	st.panTag = find(STRIP_PAN_NAMES)
+	return true
 }
+function stripFaderTag(index) { return stripTags(index) ? skStrip[index].faderTag : -1 }
+function stripPanTag(index) { return stripTags(index) ? skStrip[index].panTag : -1 }
+// What each control is on in strip mode: without FLIP the fader on the plug-in's fader and the V-pot on its pan;
+// with FLIP the other way round (the plug-in stays in control). st.fTag / st.vTag: the parameter the fader / V-pot
+// moves (-1 = the track's own, as without strip mode). The send views take both back.
+// 26 <strip> <fader 0/1> <V-pot 0/1>: whether the strip's fader / V-pot are on a plug-in parameter.
 function stripModeUpdate(activeDevice, index) {
 	var st = skStrip[index]
-	var on = stripModeOn && route.fader === 'vol' && stripFaderTag(index) >= 0
-	if (on !== !!st.faderOn) {
-		st.faderOn = on
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, 0xF7]))
-		if (!on) dbResend[index](activeDevice)
+	var normal = route.fader === 'vol' && route.vpot === 'pan', flipped = route.fader === 'pan' && route.vpot === 'vol'
+	var fTag = -1, vTag = -1
+	if (stripModeOn && (normal || flipped) && stripTags(index)) {
+		fTag = normal ? st.faderTag : st.panTag
+		vTag = normal ? st.panTag : st.faderTag
+	}
+	var on = fTag >= 0, pan = vTag >= 0
+	var changed = on !== !!st.faderOn || pan !== !!st.panOn || fTag !== st.fTag || vTag !== st.vTag
+	st.faderOn = on
+	st.panOn = pan
+	st.fTag = fTag
+	st.vTag = vTag
+	if (changed) {
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
+		flipResets[index](activeDevice)   // the track's own values where the plug-in no longer has them
 	}
 	if (on) stripFaderSend(activeDevice, index)
+	if (pan) stripPanSend(activeDevice, index)
 }
-function stripModeUpdateAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i) }
-function stripFaderText(index) {
+// Who shows in the dB field / on the value line: the plug-in where its fader / pan is on a control.
+function stripOwnsDb(index) {
+	var st = skStrip[index]
+	return !!st && ((st.faderOn && st.fTag === st.faderTag) || (st.panOn && st.vTag === st.faderTag))
+}
+function stripOwnsPan(index) {
+	var st = skStrip[index]
+	return !!st && ((st.faderOn && st.fTag === st.panTag) || (st.panOn && st.vTag === st.panTag))
+}
+function stripParamText(index, tag) {
 	var st = skStrip[index], da = skDa[index], text = ''
-	try { text = String(da.getParameterDisplayValue(skAm, st.obj, st.faderTag)) } catch (e) {}
+	try { text = String(da.getParameterDisplayValue(skAm, st.obj, tag)) } catch (e) {}
 	return text.replace(/\s+/g, ' ').trim()
 }
+// A plug-in parameter shown where its kind belongs: the fader level in the dB field, the pan on the value line.
+function stripShow(activeDevice, index, tag) {
+	var st = skStrip[index]
+	if (tag === st.panTag) stripPanShow[index](activeDevice, stripParamText(index, tag), skDa[index].getParameterProcessValue(skAm, st.obj, tag))
+	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(stripParamText(index, tag)), [0xF7]))
+}
+function stripPanSend(activeDevice, index) { stripShow(activeDevice, index, skStrip[index].vTag) }   // (the V-pot's)
+function stripModeUpdateAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i) }
 function stripFaderSend(activeDevice, index) {
 	var st = skStrip[index], da = skDa[index]
-	var v = Math.round(Math.max(0, Math.min(1, da.getParameterProcessValue(skAm, st.obj, st.faderTag))) * 16383)
+	var v = Math.round(Math.max(0, Math.min(1, da.getParameterProcessValue(skAm, st.obj, st.fTag))) * 16383)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x27, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(stripFaderText(index)), [0xF7]))
+	stripShow(activeDevice, index, st.fTag)
 }
 
 function skMessage(activeDevice, m) {
@@ -1037,11 +1113,27 @@ function skMessage(activeDevice, m) {
 		stripModeUpdateAll(activeDevice)
 		return
 	}
-	if (m[4] === 0x25 && m.length >= 9) {
+	if (m[4] === 0x28 && m.length >= 8) {   // a V-pot turn on the plug-in's control (64 = no change)
+		var pi = m[5]
+		if (pi >= STRIPS || !skStrip[pi].panOn) return
+		var st = skStrip[pi], da = skDa[pi]
+		var cur = da.getParameterProcessValue(skAm, st.obj, st.vTag)
+		da.setParameterProcessValue(skAm, st.obj, st.vTag, Math.max(0, Math.min(1, cur + (m[6] - 64) / 100)))
+		stripPanSend(activeDevice, pi)
+		return
+	}
+	if (m[4] === 0x29 && m.length >= 7) {   // V-pot push: centre the plug-in's pan (when the V-pot is on it)
+		var ci = m[5]
+		if (ci >= STRIPS || !skStrip[ci].panOn || skStrip[ci].vTag !== skStrip[ci].panTag) return
+		skDa[ci].setParameterProcessValue(skAm, skStrip[ci].obj, skStrip[ci].vTag, 0.5)
+		stripPanSend(activeDevice, ci)
+		return
+	}
+	if (m[4] === 0x25 && m.length >= 9) {   // the hand on a fader that is on the plug-in's control
 		var si = m[5]
 		if (si >= STRIPS || !skStrip[si].faderOn) return
-		skDa[si].setParameterProcessValue(skAm, skStrip[si].obj, skStrip[si].faderTag, ((m[6] << 7) | m[7]) / 16383)
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, si], toAscii7(stripFaderText(si)), [0xF7]))
+		skDa[si].setParameterProcessValue(skAm, skStrip[si].obj, skStrip[si].fTag, ((m[6] << 7) | m[7]) / 16383)
+		stripShow(activeDevice, si, skStrip[si].fTag)
 		return
 	}
 	if (m[4] === 0x21 && m.length >= 8) {

@@ -6,9 +6,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
 
 ## Suggested next (value for the effort)
 
-1. Strip mode on the pan knobs: the UF8's V-pots and the UF1's pan knob on the SSL strip's own pan.
-2. Nav Mode on the UF8: markers and regions across the strips, SEL jumps to one.
-3. The UC1's secondary encoder modes.
+1. Nav Mode on the UF8: markers and regions across the strips, SEL jumps to one.
+2. The UC1's secondary encoder modes.
 
 
 ## UF8
@@ -20,8 +19,8 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
   FX Cycle (also across tracks), FX Move, Selset Cycle, focused favourite cycle, Lanes.
 - **Soft keys on the top row**: SSL's channel-strip pages are done (V-POT, 1-5); the bus comp pages (Q2) too; missing are
   Q3 and the user sets, user bindings and layers, dynamic soft-key banks.
-- **SSL Strip Mode / UF8 Plug-in Mode**: Strip Mode's faders are done (PLUGIN); missing are its V-pots on the strip's
-  pan, the CS name in the colour bar, and UF8 Plug-in Mode (one plug-in's controls across the eight strips).
+- **SSL Strip Mode / UF8 Plug-in Mode**: Strip Mode's faders and V-pots (pan) are done (PLUGIN); missing are the CS
+  name in the colour bar, and UF8 Plug-in Mode (one plug-in's controls across the eight strips).
 - **Send and Receive views**: the send views are done (Send N on the faders, the selected track's sends on the
   V-pots); missing are the Receive views (no receives in the API), send pan, send solo, paging past send 8.
 - **Nav Mode**: markers and regions on the strips (with auto-follow).
@@ -56,7 +55,6 @@ these may not be possible, or only partly, through Cubase's MIDI Remote API; tha
   stepping through plug-ins that are not SSL's.
 - **PLUGIN**: Cubase's own channel strip in pages (tried and rolled back), jump to the page of a control touched in
   the plug-in window, HQ MODE / A/B, the Harrison 32C.
-- Strip mode: the pan knob on the strip's pan (the fader is done).
 
 ## General
 
