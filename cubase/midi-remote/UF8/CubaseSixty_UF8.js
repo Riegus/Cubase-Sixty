@@ -323,10 +323,11 @@ for (var i = 0; i < STRIPS; ++i) {
 		flipResets.push(function (activeDevice) {
 			lastPanText = lastPanPos = lastDb = null
 			if (!activeDevice) return
-			if (faderShown.value !== null) fader.mSurfaceValue.mOnDisplayValueChange(activeDevice, faderShown.value, faderShown.units)
-			if (faderShown.pos !== null) fader.mSurfaceValue.mOnProcessValueChange(activeDevice, faderShown.pos)
-			if (vpotShown.value !== null) vpot.mSurfaceValue.mOnDisplayValueChange(activeDevice, vpotShown.value, vpotShown.units)
-			if (vpotShown.pos !== null) vpot.mSurfaceValue.mOnProcessValueChange(activeDevice, vpotShown.pos)
+			// (The handlers by name: Cubase does not give back a callback read from the surface value.)
+			if (faderShown.value !== null) faderDisplay(activeDevice, faderShown.value, faderShown.units)
+			if (faderShown.pos !== null) faderProcess(activeDevice, faderShown.pos)
+			if (vpotShown.value !== null) vpotDisplay(activeDevice, vpotShown.value, vpotShown.units)
+			if (vpotShown.pos !== null) vpotProcess(activeDevice, vpotShown.pos)
 		})
 		function panText(activeDevice, value, units) {
 			var text = String(value) + (units ? units : '')
@@ -372,7 +373,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, Math.max(0, Math.min(127, Math.round(pos * 127))), 0xF7]))
 		}
-		vpot.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		function vpotDisplay(activeDevice, value, units) {
 			vpotShown.value = value; vpotShown.units = units
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || { pos: 0.5 }; trackPan[index].value = value; trackPan[index].units = units }
 			if (route.vpot === 'pan' && skStrip[index] && skStrip[index].panOn) return
@@ -380,21 +381,25 @@ for (var i = 0; i < STRIPS; ++i) {
 			else if (route.vpot === 'vol') dbText(activeDevice, value)
 			else panText(activeDevice, value, units)
 		}
-		vpot.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		function vpotProcess(activeDevice, value) {
 			vpotShown.pos = value
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || {}; trackPan[index].pos = value }
 			if (route.vpot === 'pan' && skStrip[index] && skStrip[index].panOn) return
 			if (route.vpot === 'sends') sendPos(activeDevice, value)
 			else if (route.vpot === 'pan') panPos(activeDevice, value)
 		}
-		fader.mSurfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+		function faderDisplay(activeDevice, value, units) {
 			faderShown.value = value; faderShown.units = units
 			if (route.fader === 'pan') panText(activeDevice, value, units); else dbText(activeDevice, value)
 		}
-		fader.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		function faderProcess(activeDevice, value) {
 			faderShown.pos = value
 			if (route.fader === 'pan') panPos(activeDevice, value)
 		}
+		vpot.mSurfaceValue.mOnDisplayValueChange = vpotDisplay
+		vpot.mSurfaceValue.mOnProcessValueChange = vpotProcess
+		fader.mSurfaceValue.mOnDisplayValueChange = faderDisplay
+		fader.mSurfaceValue.mOnProcessValueChange = faderProcess
 	})(i, strip.vpot, strip.fader)
 
 	;(function (index, fader) {
