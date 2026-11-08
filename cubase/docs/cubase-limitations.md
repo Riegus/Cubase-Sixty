@@ -46,6 +46,8 @@ in [Missing features](missing-features.md); where it made Cubase-Sixty behave di
   viewers made every track change lag; the plug-in window is opened through one viewer, moved by the script and
   checked by the plug-in's name. Increment / decrement on its edit switch do nothing (a small step on a switch):
   it is set through a bound value variable.
+- **A swapped plug-in shows up late.** After loading a plug-in into a slot (favourites), Direct Access shows the new
+  one only seconds later; the script counts from what it loaded meanwhile.
 - **Send levels lag** when moved from a script (fader or V-pot), on every surface.
 - **Callbacks cannot be read back.** A function assigned to a surface value's callback is not returned when read; the
   scripts keep their own reference.
