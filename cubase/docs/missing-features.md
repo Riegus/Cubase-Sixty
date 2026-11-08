@@ -3,6 +3,7 @@
 What Rea-Sixty has that Cubase-Sixty does not (yet), from Rea-Sixty's user manual. Where Cubase-Sixty does the same
 job differently, see [On second thought](on-second-thought.md); bugs are in [Known issues](known-issues.md). Some of
 these may not be possible, or only partly, through Cubase's MIDI Remote API; that is checked when one is taken up.
+What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.md).
 
 ## Suggested next (value for the effort)
 
