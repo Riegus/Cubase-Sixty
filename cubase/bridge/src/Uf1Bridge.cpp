@@ -1241,8 +1241,8 @@ void uf1NoProject()
     {
         std::lock_guard<std::mutex> lk(g_lineMx);
         g_homeHasBar = false;
-        g_barStyleShown = 0x00;
-        const uint8_t off = 0x00;
+        g_barStyleShown = 0x04;
+        const uint8_t off = 0x04;   // bar style 04 = off
         g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&off, 1)));
     }
 }
@@ -1480,7 +1480,8 @@ void onSysex(const std::vector<unsigned char>& m)
         std::vector<uint8_t> p;
         p.push_back(0x00);
         for (size_t k = 0; k < 6; ++k) p.push_back(k < v.size() ? uint8_t(v[k]) : 0x00);
-        p.push_back('d'); p.push_back('B');
+        const bool blank = v.find_first_not_of(' ') == std::string::npos;   // no project: no "dB" either
+        p.push_back(blank ? 0x00 : 'd'); p.push_back(blank ? 0x00 : 'B');
         g_dev.send(::uf1::buildScreen(::uf1::scr::kOutputDb, p));
     }
 }
