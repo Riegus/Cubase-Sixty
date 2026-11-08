@@ -102,7 +102,12 @@ const char* const kBcSoftKeyLabels[6][8] = {
     { "", "", "", "", "", "", "", "" }, { "", "", "", "", "", "", "", "" },
     { "", "", "", "", "", "", "", "" }, { "", "", "", "", "", "", "", "" },
 };
-std::atomic<int> g_skDomain{0};   // 0 = channel strip (Q1), 1 = bus comp (Q2)
+std::atomic<int> g_skDomain{0};
+// Nav Mode (NAV held): the top soft keys jump to Cubase's numbered markers (view 0, To Marker 1-8, script channel 2
+// notes 10-17) or recall its cycle markers (view 1, Recall Cycle Marker 1-8, notes 18-25); Q1 = cycle, Q2 = markers.
+// Cubase gives scripts no marker list, so the keys are by number, without names or colours.
+std::atomic<bool> g_nav{false};
+std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = channel strip (Q1), 1 = bus comp (Q2)
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
 const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
@@ -311,20 +316,54 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
-        if (d[3] == 0x73 || d[3] == 0x74) {   // NAV / NUDGE: Markers / Nudge on and off
+        if (d[3] == 0x73) {   // NAV: a tap = encoder on Markers on / off; held 0.4 s = Nav Mode on / off
+            static std::atomic<int> gen{0};
             if (pressed) {
-                const int m = d[3] == 0x73 ? kEncMarkers : kEncNudge;
-                g_encMode = g_encMode == m ? kEncSelect : m;
+                const int g = ++gen;
+                std::thread([g] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                    if (g != gen) return;
+                    gen = -1;   // the release does nothing more
+                    g_nav = !g_nav;
+                    if (g_nav && g_focus >= 0) unfocus();
+                    if (g_trace8) std::printf("UF8 Nav Mode %s\n", g_nav ? "on" : "off");
+                    paintSoftKeys();
+                }).detach();
+            } else if (gen > 0) {
+                ++gen;   // a tap
+                g_encMode = g_encMode == kEncMarkers ? kEncSelect : kEncMarkers;
                 paintEncLeds();
             }
             break;
         }
-        if (d[3] == 0x43 || d[3] == 0x44) {   // Q1 / Q2: the soft keys on the channel strip / the bus comp
-            if (pressed) { g_skDomain = d[3] == 0x44 ? 1 : 0; paintSoftKeys(); }
+        if (d[3] == 0x74) {   // NUDGE: Nudge on and off
+            if (pressed) {
+                g_encMode = g_encMode == kEncNudge ? kEncSelect : kEncNudge;
+                paintEncLeds();
+            }
+            break;
+        }
+        if (d[3] == 0x43 || d[3] == 0x44) {   // Q1 / Q2: the soft keys on the channel strip / the bus comp (Nav Mode: cycle / markers)
+            if (pressed) {
+                if (g_nav) g_navView = d[3] == 0x43 ? 1 : 0;
+                else g_skDomain = d[3] == 0x44 ? 1 : 0;
+                paintSoftKeys();
+            }
             break;
         }
         if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
             if (pressed) { g_skBank = d[3] - 0x68; paintSoftKeys(); }
+            break;
+        }
+        if (d[3] >= 0x18 && d[3] <= 0x1F && g_nav) {   // Nav Mode: jump to marker / recall cycle marker 1-8
+            if (!pressed) break;
+            const int slot = d[3] - 0x18;
+            note2(uint8_t((g_navView ? 18 : 10) + slot));
+            // A cycle marker only sets the locators: then the cursor to the left one (its start), 40 ms later
+            // (back-to-back notes can be lost).
+            if (g_navView) std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note2(26); }).detach();
+            g_navLast = g_navView * 8 + slot;
+            paintSoftKeys();
             break;
         }
         if (d[3] >= 0x18 && d[3] <= 0x1F) {   // top soft key: focus / unfocus its parameter
@@ -492,6 +531,16 @@ void paintSel(int strip)
 }
 void paintSoftKeys()
 {
+    if (g_nav) {   // Nav Mode: the eight keys are markers / cycle markers 1-8, the last one pressed lit
+        const int view = g_navView;
+        for (int s = 0; s < kStrips; ++s) {
+            sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), g_navLast == view * 8 + s ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
+            g_dev.send(uf8::buildPluginSlotName(uint8_t(s), (std::string(view ? "Cycle " : "Marker ") + char('1' + s)).c_str()));
+        }
+        sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick1, view == 1));
+        sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick2, view == 0));
+        return;
+    }
     const int bank = g_skBank, focus = g_focus, dom = g_skDomain;
     for (int s = 0; s < kStrips; ++s) {
         const bool live = softKeyLive(dom, bank, s);

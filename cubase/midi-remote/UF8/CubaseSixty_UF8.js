@@ -606,6 +606,13 @@ var encoderCommands = [
 	{ note: 6, category: 'Navigate', command: 'Up' },     // Channel Select with track-stepping = project
 	{ note: 7, category: 'Navigate', command: 'Down' }
 ]
+// Nav Mode (NAV held, the top soft keys): channel 2 notes 10-17 = To Marker 1-8, 18-25 = Recall Cycle Marker 1-8.
+for (var nm = 1; nm <= 8; ++nm) {
+	encoderCommands.push({ note: 9 + nm, category: 'Transport', command: 'To Marker ' + nm })
+	encoderCommands.push({ note: 17 + nm, category: 'Transport', command: 'Recall Cycle Marker ' + nm })
+}
+// After a cycle marker is recalled (which only sets the locators), the cursor goes to its start.
+encoderCommands.push({ note: 26, category: 'Transport', command: 'To Left Locator' })
 for (var ec = 0; ec < encoderCommands.length; ++ec) {
 	var encButton = surface.makeButton(ec, 16, 1, 1)
 	encButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, encoderCommands[ec].note)
