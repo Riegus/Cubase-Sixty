@@ -1208,8 +1208,11 @@ void showStripNumber()
 void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated, Cubase shows the Hub): "No Proj." as the track (the name cell is 8 wide), no colour, level or
 // value line, meters and fader down, the LEDs Cubase drives off. The next project paints it all again.
+std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
 void uf1NoProject()
 {
+    const bool first = !g_noProject;
+    if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBefore = g_cache; }
     std::vector<int> notes;
     {
         std::lock_guard<std::mutex> lk(g_cacheMx);
@@ -1230,6 +1233,7 @@ void uf1NoProject()
     for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
     std::vector<unsigned char> time{0xF0, 0x7D, 0x52, 0x36, 0x0D, ' ', 0xF7};
     onMidiIn(time);
+    if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBlanked = g_cache; }
     valueHome("");
     // Only "No Proj." on the strip display: no BYPASS label, channel number, plug-in model or V-pot bar.
     g_noProject = true;
@@ -1247,9 +1251,22 @@ void uf1NoProject()
     }
 }
 // A project is open again: the strip display's own parts back (Cubase sends the rest).
+// Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
+// before the close is put back for every kind nothing new has arrived for since the blanking.
 void uf1ProjectOpen()
 {
     if (!g_noProject.exchange(false)) return;
+    std::vector<std::vector<unsigned char>> again;
+    {
+        std::lock_guard<std::mutex> lk(g_cacheMx);
+        for (auto& kv : g_npBefore) {
+            if (kv.first == 0x17C || kv.first == 0x17E) continue;   // the driver state, the log
+            auto b = g_npBlanked.find(kv.first);
+            auto c = g_cache.find(kv.first);
+            if (b != g_npBlanked.end() && c != g_cache.end() && c->second == b->second) again.push_back(kv.second);
+        }
+    }
+    for (auto& mm : again) onMidiIn(mm);
     screenText(::uf1::scr::kChSoftKey, "BYPASS");
     showStripNumber();
     paintCsType(true);
@@ -1496,6 +1513,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_cacheMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[1] == 0x7D) g_cache[0x100 + m[4]] = m;
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80 || (m[0] & 0xF0) == 0xA0)) g_cache[m[1]] = m;
+        else if (m.size() >= 3 && (m[0] & 0xF0) == 0xE0) g_cache[0x200] = m;   // the fader
     }
     if (!m.empty() && m[0] == 0xF0) { onSysex(m); return; }
     if (m.size() < 3) return;
@@ -1566,7 +1584,7 @@ void restoreChannelView()
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
     for (auto& kv : cache)   // the script's texts (not its log lines)
-        if (kv.first >= 0x100 && kv.first != 0x17E) { auto msg = kv.second; onMidiIn(msg); }
+        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C) { auto msg = kv.second; onMidiIn(msg); }
     { std::lock_guard<std::mutex> lk(g_lineMx); g_tempUntil = 0; showHomeLocked(); }
     showStripNumber();
     paintSoftKeys();

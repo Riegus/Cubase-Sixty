@@ -615,8 +615,11 @@ void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated): every strip as an empty one (name, colour, meter, dB, its LEDs),
 // faders down, value lines and V-pot bars off, the LEDs Cubase drives off. What Cubase sends on the next project
 // paints it all again.
+std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
 void uf8NoProject()
 {
+    const bool first = !g_noProject;
+    if (first) { std::lock_guard<std::mutex> lk(g_uf8CacheMx); g_npBefore = g_uf8Cache; }
     g_uf8Frozen = false;
     std::vector<int> notes;
     {
@@ -634,6 +637,7 @@ void uf8NoProject()
         g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
     }
     for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
+    if (first) { std::lock_guard<std::mutex> lk(g_uf8CacheMx); g_npBlanked = g_uf8Cache; }
     g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{3, 3, 3, 3, 3, 3, 3, 3}));
     // The bridge's own keys: the soft keys' labels and LEDs, Q1 / Q2, the soft key pages, NORM / REC / AUTO,
     // NAV / NUDGE, PLUGIN. They stay dark until a project opens (the paint functions check g_noProject).
@@ -648,9 +652,21 @@ void uf8NoProject()
         sendLedFrames(uf8::buildUf8GlobalLed(l, false));
 }
 // A project is open again: the bridge's own keys as they were.
+// Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
+// before the close is put back for every kind nothing new has arrived for since the blanking.
 void uf8ProjectOpen()
 {
-    g_noProject = false;
+    if (!g_noProject.exchange(false)) return;
+    std::vector<std::vector<unsigned char>> again;
+    {
+        std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+        for (auto& kv : g_npBefore) {
+            auto b = g_npBlanked.find(kv.first);
+            auto c = g_uf8Cache.find(kv.first);
+            if (b != g_npBlanked.end() && c != g_uf8Cache.end() && c->second == b->second) again.push_back(kv.second);
+        }
+    }
+    for (auto& mm : again) onMidiIn(mm);
     paintSoftKeys();
     paintSelMode();
     paintEncLeds();

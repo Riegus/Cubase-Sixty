@@ -495,8 +495,13 @@ void renderExt(const std::vector<uint8_t>& m);
 void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated, Cubase shows the Hub): "No Project" as the track, no colour or model,
 // the 7-segment blank, the knob rings and the LEDs the script drives off, any menu screen closed.
+std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
+bool g_noProject = false;
 void uc1NoProject()
 {
+    const bool first = !g_noProject;
+    g_noProject = true;
+    if (first) { std::lock_guard<std::mutex> lk(g_stateMx); g_npBefore = g_cache; }
     std::vector<int> keys;
     {
         std::lock_guard<std::mutex> lk(g_stateMx);
@@ -521,6 +526,25 @@ void uc1NoProject()
     // The bus comp row (the channel the UC1's bus comp is on) empty too.
     { std::lock_guard<std::mutex> lk(g_stateMx); for (auto& n : g_bcNames) n.clear(); }
     send(largeRow());
+    if (first) { std::lock_guard<std::mutex> lk(g_stateMx); g_npBlanked = g_cache; }
+}
+// Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
+// before the close is put back for every kind nothing new has arrived for since the blanking.
+void uc1ProjectOpen()
+{
+    if (!g_noProject) return;
+    g_noProject = false;
+    std::vector<std::vector<unsigned char>> again;
+    {
+        std::lock_guard<std::mutex> lk(g_stateMx);
+        for (auto& kv : g_npBefore) {
+            if (kv.first == 0x17C) continue;   // the driver state
+            auto b = g_npBlanked.find(kv.first);
+            auto c = g_cache.find(kv.first);
+            if (b != g_npBlanked.end() && c != g_cache.end() && c->second == b->second) again.push_back(kv.second);
+        }
+    }
+    for (auto& mm : again) onMidiIn(mm);
 }
 
 void onSysex(const std::vector<unsigned char>& m)
@@ -528,7 +552,7 @@ void onSysex(const std::vector<unsigned char>& m)
     if (m.size() < 6 || m[1] != 0x7D || m[2] != 0x52 || m[3] != 0x36) return;
     if (scriptLogSysex(m.data(), m.size())) return;
     if (m[4] == 0x7C && m.size() >= 7) {   // the script's driver: 00 deactivated (no project), 01 active again
-        if (m[5] == 0) uc1NoProject();
+        if (m[5] == 0) uc1NoProject(); else uc1ProjectOpen();
         if (g_trace) std::printf("UC1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
         return;
     }
