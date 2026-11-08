@@ -14,7 +14,8 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   bus comp's pages; BUS COMP shows the compressor in (On = compressing) where Rea-Sixty shows the plug-in's bypass
   as it is (chosen).
 - **SSL Strip Mode** (partly). As Rea-Sixty: PLUGIN puts each fader on its track's SSL channel strip fader, tracks
-  without one keep volume. Not yet: the V-pots on the strip's pan, the strip's name in the colour bar. FLIP (chosen) is a
+  without one keep volume. The V-pots go on the strip's pan where it has one (push = centre).
+  Not yet: the strip's name in the colour bar. FLIP (chosen) is a
   plain swap there too: faders on the track's pan, V-pots on its volume, strip mode paused until FLIP is off
   (Rea-Sixty leaves the fader on the strip's fader); the send views also take the fader while they are on. The fader moves the parameter's range in a straight line.
 - **Send views** (forced, partly). As Rea-Sixty: SEND / PLUGIN 1–8 put send N of each track on the faders, a long
@@ -95,8 +96,8 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
 - **PLUGIN strips** (not yet). Rea-Sixty also has the Harrison 32C and FX-Learned plug-ins, and Cubase-Sixty does not
   show Cubase's own channel strip here yet.
 - **Strip mode** (partly). As Rea-Sixty: PLUG-IN puts the fader on the SSL channel strip's own fader / output gain
-  (lit while on; a track without one keeps volume). Not yet: the pan knob on the strip's pan. The fader moves the
-  parameter's 0–1 range in a straight line (Cubase's volume taper does not apply).
+  (lit while on; a track without one keeps volume). The pan knob goes on the strip's pan where it has one. The fader
+  moves the parameter's 0–1 range in a straight line (Cubase's volume taper does not apply).
 - **METER view V-pots** (not yet). Rea-Sixty: the meter's settings. Cubase-Sixty: they do nothing in METER (so they
   cannot change sends unseen). FINE, PRESETS and the Analogue / RTA / Loudness screens are not there yet.
 - **METER bar scale** (forced, for now). Rea-Sixty reads the plug-in's Digital Type; Cubase-Sixty always uses the

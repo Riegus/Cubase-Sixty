@@ -193,6 +193,7 @@ std::atomic<int> g_routeSend{-1};
 // from the script). Those strips send the hand to the script (25) and ignore Cubase's volume; g_volPb keeps it.
 std::atomic<bool> g_stripMode{false};
 std::array<std::atomic<bool>, 8> g_stripFader{};
+std::array<std::atomic<bool>, 8> g_stripPan{};   // the V-pot on the strip's pan (turns as 28, push as 29)
 std::array<std::atomic<int>, 8> g_volPb{-1, -1, -1, -1, -1, -1, -1, -1};
 void driveFader(int s, uint16_t v14)
 {
@@ -338,6 +339,10 @@ void handleFrame(const uf8frames::Frame& fr)
             paintVpots();
             break;
         }
+        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && g_stripPan[d[3] - 0x08]) {   // strip mode: centre the strip's pan
+            if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x29, uint8_t(d[3] - 0x08), 0xF7});
+            break;
+        }
         if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus >= 0) {   // V-pot push with a focused parameter: to the script
             if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x23, uint8_t(d[3] - 0x08), 0xF7});
             break;
@@ -407,6 +412,7 @@ void handleFrame(const uf8frames::Frame& fr)
         const int delta = uf8frames::vpotDelta(d[4]);
         if (delta == 0) break;
         if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
+        else if (g_stripPan[s]) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // strip mode: the strip's pan
         else sendMidi({0xB0, uint8_t(kCcVPot + s), vpotToCc(delta)});
         break;
     }
@@ -730,6 +736,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             // Strip mode per strip: on = the fader follows the strip's fader (27); off = back to the track's volume.
             const int s = m[5];
             g_stripFader[s] = m[6] != 0;
+            g_stripPan[s] = m.size() >= 9 && m[7] == 1;
             if (!g_stripFader[s] && g_volPb[s] >= 0 && !g_touched[s]) driveFader(s, uint16_t(g_volPb[s].load()));
         } else if (m.size() >= 9 && m[4] == 0x27 && m[5] < kStrips) {
             const int s = m[5];
