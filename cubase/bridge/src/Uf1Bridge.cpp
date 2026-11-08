@@ -62,6 +62,7 @@ MidiInPort  g_in;
 std::mutex g_outMx;
 std::atomic<bool> g_touched{false};
 std::atomic<bool> g_open{false};
+std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the strip display says only "No Proj."
 std::atomic<bool> g_trace{false};
 bool g_engaged = false;
 std::mutex g_engMx;
@@ -1026,7 +1027,7 @@ void paintCsType(bool force)
     if (!g_open) return;
     static std::string shown = "\x01";
     std::string t;
-    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent ? g_plugModel : std::string(); }
+    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent && !g_noProject ? g_plugModel : std::string(); }
     if (t.empty()) t.assign(12, ' ');
     if (!force && t == shown) return;
     shown = t;
@@ -1195,6 +1196,7 @@ void revertLoop() {
 std::atomic<int> g_stripNo{0};
 void showStripNumber()
 {
+    if (g_noProject) { screenText(::uf1::scr::kChNumber, ""); return; }
     // The track number when the script knows it, else the UF8 strip; blank on MASTER.
     if (!g_open) return;
     const int n = g_trackNo > 0 ? int(g_trackNo) : int(g_stripNo);
@@ -1225,7 +1227,29 @@ void uf1NoProject()
     onMidiIn(meterR);
     onMidiIn(fader);
     for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
+    std::vector<unsigned char> time{0xF0, 0x7D, 0x52, 0x36, 0x0D, ' ', 0xF7};
+    onMidiIn(time);
     valueHome("");
+    // Only "No Proj." on the strip display: no BYPASS label, channel number, plug-in model or V-pot bar.
+    g_noProject = true;
+    screenText(::uf1::scr::kChSoftKey, "");
+    showStripNumber();
+    paintCsType(true);
+    {
+        std::lock_guard<std::mutex> lk(g_lineMx);
+        g_homeHasBar = false;
+        g_barStyleShown = 0x00;
+        const uint8_t off = 0x00;
+        g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&off, 1)));
+    }
+}
+// A project is open again: the strip display's own parts back (Cubase sends the rest).
+void uf1ProjectOpen()
+{
+    if (!g_noProject.exchange(false)) return;
+    screenText(::uf1::scr::kChSoftKey, "BYPASS");
+    showStripNumber();
+    paintCsType(true);
 }
 
 void onSysex(const std::vector<unsigned char>& m)
@@ -1233,7 +1257,7 @@ void onSysex(const std::vector<unsigned char>& m)
     if (!isOurSysex(m)) return;
     if (scriptLogSysex(m.data(), m.size())) return;
     if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
-        if (m[5] == 0) uf1NoProject();
+        if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
         if (g_trace) std::printf("UF1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
         return;
     }
