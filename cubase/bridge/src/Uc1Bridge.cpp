@@ -518,6 +518,9 @@ void uc1NoProject()
         else if (k < 0x100) msgs.push_back({0x80, uint8_t(k), 0});
     }
     for (auto& mm : msgs) onMidiIn(mm);
+    // The bus comp row (the channel the UC1's bus comp is on) empty too.
+    { std::lock_guard<std::mutex> lk(g_stateMx); for (auto& n : g_bcNames) n.clear(); }
+    send(largeRow());
 }
 
 void onSysex(const std::vector<unsigned char>& m)

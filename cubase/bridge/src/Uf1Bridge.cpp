@@ -1203,7 +1203,7 @@ void showStripNumber()
 
 // Sysex from the Cubase script: 01 name, 02 colour (strip 0), 03 level text.
 void onMidiIn(std::vector<unsigned char>& msg);
-// No project (the script's driver deactivated, Cubase shows the Hub): "No Project" as the track, no colour, level or
+// No project (the script's driver deactivated, Cubase shows the Hub): "No Proj." as the track (the name cell is 8 wide), no colour, level or
 // value line, meters and fader down, the LEDs Cubase drives off. The next project paints it all again.
 void uf1NoProject()
 {
@@ -1213,7 +1213,7 @@ void uf1NoProject()
         for (auto& kv : g_cache) if (kv.first < 0x100) notes.push_back(kv.first);
     }
     std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
-    for (char c : std::string("No Project")) name.push_back(uint8_t(c));
+    for (char c : std::string("No Proj.")) name.push_back(uint8_t(c));
     name.push_back(0xF7);
     std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
     std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
