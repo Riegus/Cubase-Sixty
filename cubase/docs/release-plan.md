@@ -10,6 +10,9 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - On open: everything picked up again (UF8 follow, UF1 PLUGIN, UC1 strip and bus comp, favourites, settings).
 - Found (8.11.2026): on close each script's driver is deactivated (mOnDeactivate), on open activated again with the
   page; there is no project callback. After reopening, the UF8 did not bank to the selected track.
+- Built (wip/project-close, to be tested): the scripts send SysEx 7C 00 / 01 on deactivate / activate; the bridge
+  blanks each surface ("No Project", faders down, LEDs and rings off); on activate everything is sent again and the
+  UF8's start-up follow runs again.
 
 ## 2. Different setups of the surfaces
 
