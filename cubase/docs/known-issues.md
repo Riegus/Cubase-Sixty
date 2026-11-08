@@ -2,15 +2,6 @@
 
 Bugs seen in testing and noted for later. Each entry: what happens, where, and what is known about the cause.
 
-## Projects
-
-- **After a project is closed and another opened, the UF8 does not bank to the selected track** (8.11.2026). At
-  Cubase's start it does. Part of step 1 of the [release plan](release-plan.md) (closing and opening projects): the
-  scripts' drivers are deactivated on close and activated again on open, but the UF8's start-up follow does not run
-  again.
-- **Closing a project leaves the surfaces showing the last state** (names, faders, meters, LEDs) while Cubase shows
-  the Hub. Being fixed (release plan step 1): the surfaces now go to "No Project"; to be confirmed.
-
 ## UF1
 
 - **Send levels lag** (UF8 send views, UF1 send V-pots). Moving a send with a fader or V-pot follows a little behind;

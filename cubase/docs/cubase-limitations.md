@@ -55,5 +55,8 @@ in [Missing features](missing-features.md); where it made Cubase-Sixty behave di
   to. Action bindings (track selection, insert viewer, mixer bank) can be triggered from the script.
 - **Loading a plug-in into a slot** needs API 1.3 (Cubase 15.0.20 or later): trySetSlotPlugin, with the class id
   found by name in the plug-in manager's collections.
+- **No project callback.** Closing a project (Cubase goes to the Hub) and opening one are seen only as the script's
+  driver being deactivated and activated. On activation Cubase sends only what changed, so the bridge keeps what
+  each surface showed and puts back the rest.
 - **Key command names.** The Key Commands file lists only part of Cubase's commands, so a command's exact name
   ("To Marker 1", "To Left Locator") can only be confirmed by trying it.
