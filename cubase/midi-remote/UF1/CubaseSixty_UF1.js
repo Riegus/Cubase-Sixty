@@ -586,9 +586,6 @@ function stepTrack(activeDevice, dir, n) {
 					++moved
 				}
 				if (!moved) return   // no visible track that way
-				// A longer step from here learned before (the folders it crosses): that instead of the single steps'.
-				var longKey = cur + ':' + dir + ':' + n
-				if (n > 1 && STEP_PAST_FOLDERS && stepExtra[longKey] !== undefined) extra = stepExtra[longKey]
 				count = Math.abs(k - at) + extra
 				stepLast = { id: list[k].id, at: now }
 				// A step is checked for a folder it stops on (one more step then). A single step learns it; one that
@@ -621,10 +618,9 @@ function stepCheckLanding() {
 	if (atTo < 0 || p.fixes >= 3 || !STEP_PAST_FOLDERS) { stepPending = null; return }
 	var steps = 0, why = ''
 	if (atCur >= 0) {
-		p.extraFor = null
-		steps = (atTo - atCur) * p.dir   // > 0: short, < 0: past it
-		why = steps > 0 ? steps + ' short' : -steps + ' past'
-		if (!steps) return
+		// On a track: on the way (Cubase reports tracks it passes, late), or where a long step that crossed a
+		// folder ended, one short. Left as it is: making up steps from these reports went wrong.
+		return
 	} else if (cur >= 0) {
 		stepPending = null   // a track with a channel the list does not hold (not a folder): left alone
 		return
@@ -639,9 +635,7 @@ function stepCheckLanding() {
 	}
 	p.fixes = (p.fixes || 0) + 1
 	p.at = Date.now()
-	p.extra += steps
-	if (p.learn) stepExtra[p.from + ':' + p.dir] = Math.max(0, p.extra)
-	else stepExtra[p.from + ':' + p.dir + ':' + p.n] = p.extra
+	if (p.learn && steps > 0) stepExtra[p.from + ':' + p.dir] = (stepExtra[p.from + ':' + p.dir] || 0) + 1
 	out('[CubaseSixty UF1] track step: ' + why + ' ("' + selectedInfo.title + '"); ' + Math.abs(steps) + (steps > 0 ? ' more' : ' back'))
 	var fwd = (steps > 0) === (p.dir > 0)
 	var act = fwd ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
