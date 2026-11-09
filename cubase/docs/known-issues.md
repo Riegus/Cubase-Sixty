@@ -14,4 +14,6 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 - **Track change may lag a little** (since the CHANNEL encoder push / SHIFT + turn, 7.11.2026). Stepping the track
   with the UF1's CHANNEL encoder felt slower; sixteen insert viewers were replaced by one, which helped, but it is not
   sure it is as quick as before. To check against `cubase` without the change; suspects: the PLUGIN scan's extra slot
-  reads, the insert viewer.
+  reads, the insert viewer. Still slow (9.11.2026). Measured since: Cubase reports a new selection 0.7-0.9 s after
+  the step (bridge.log), so the UF1's name and values follow that late. May be the same regression as the V-pots
+  (above): to look at together. See [Banking and track stepping](banking.md).
