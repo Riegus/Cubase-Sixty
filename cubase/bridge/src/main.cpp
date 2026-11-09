@@ -1057,19 +1057,23 @@ void cs::uf8BankSelect(bool right)
             note(right ? kNoteBankRight : kNoteBankLeft, true);
             note(right ? kNoteBankRight : kNoteBankLeft, false);
         }
-        // The strips have moved when the script reports a new position (SysEx 12) or Cubase sends strip 1's name.
+        // The strips have moved when the script reports a new, known position (SysEx 12). While the names change it
+        // reports -1 (they match nowhere), and strip 1's name comes first: SEL on either landed on the old bank
+        // (bridge.log, 9.11.2026: four presses in ten). Moved took 60-530 ms.
+        (void)names;
         int i = 0;
-        for (; i < 40 && g_bankOffset == before && g_stripNameSeq == names; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        auto moved = [&] { const int o = g_bankOffset; return o >= 0 && o != before; };
+        for (; i < 70 && !moved(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
         const long long waited = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
         // One line per press in bridge.log (without --trace): what was sent and what came back.
-        if (i == 40) {   // nothing moved (the first / last bank)
+        if (i == 70) {   // nothing moved (the first / last bank)
             std::printf("UF1 BANK %s (no UF8): %s from bank position %d; nothing moved in %lld ms, no SEL\n",
                         right ? "right" : "left", shifts ? "single shifts" : "bank key", before, waited);
             return;
         }
         std::printf("UF1 BANK %s (no UF8): %s from bank position %d; moved after %lld ms (%s), SEL strip %d\n",
                     right ? "right" : "left", shifts ? "single shifts" : "bank key", before, waited,
-                    g_bankOffset != before ? ("position " + std::to_string(g_bankOffset.load())).c_str() : "strip 1 name", strip + 1);
+                    ("position " + std::to_string(g_bankOffset.load())).c_str(), strip + 1);
         std::this_thread::sleep_for(std::chrono::milliseconds(30));   // the rest of the strips' names
         note(uint8_t(kNoteSel + strip), true);
         note(uint8_t(kNoteSel + strip), false);

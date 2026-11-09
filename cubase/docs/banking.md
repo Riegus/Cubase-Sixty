@@ -92,6 +92,13 @@ The selection has to move by a bank. Tried, in order:
    - Now: the bridge tells the UF8 script to keep follow quiet for 2.5 s per press (SysEx 5D), and takes the
      strips as moved when either the script's position (SysEx 12) or a new strip-1 name arrives. To be confirmed.
 
+   - bridge.log (9.11.2026, ten presses, four did not bank): the "moved" signal was wrong. **While Cubase changes
+     the strips, the UF8 script reports bank position -1** (the names match nowhere halfway), and **strip 1's name
+     arrives first**: SEL on either (60-80 ms after the press) landed on the old bank. A real new position came
+     after 200-530 ms. Now SEL waits for a known (>= 0), different position, up to ~1 s.
+
+**Lesson: wait for a known new position (>= 0), not for "something changed".**
+
 **Lesson: anything that moves the UF8 script's strips or the selection must keep follow selection out of it, or
 follow pulls the strips back to where the late selection report says.**
 
