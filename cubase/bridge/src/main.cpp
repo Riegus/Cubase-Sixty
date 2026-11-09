@@ -108,6 +108,7 @@ std::atomic<int> g_skDomain{0};
 // Cubase gives scripts no marker list, so the keys are by number, without names or colours.
 std::atomic<bool> g_nav{false};
 std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's own keys stay dark
+std::atomic<std::chrono::steady_clock::time_point> g_uf8ConnectedAt{};   // the foot switches are ignored just after it
 std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = channel strip (Q1), 1 = bus comp (Q2)
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
@@ -409,10 +410,10 @@ void handleFrame(const uf8frames::Frame& fr)
         }
         if (auto n = buttonToNote(d[3])) {
             // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
-            // which started the transport. Ignore the foot switches for the first seconds.
-            static const auto t0 = std::chrono::steady_clock::now();
+            // which started the transport. Ignore the foot switches for the first seconds after each
+            // connect (at start, and when the UF8 is plugged in again).
             const bool foot = (*n == 62 || *n == 63);
-            if (foot && std::chrono::steady_clock::now() - t0 < std::chrono::seconds(4)) break;
+            if (foot && std::chrono::steady_clock::now() - g_uf8ConnectedAt.load() < std::chrono::seconds(4)) break;
             if (*n == kNoteBankRight && userBankRight(pressed)) break;
             note(*n, pressed);
             if (pressed && *n >= kNoteAutoOff && *n <= kNoteAutoTouch) cs::autoModePressed(*n);
@@ -1035,6 +1036,7 @@ bool uf8Connect(bool quiet)
                                  g_dev.lastError().c_str());
         return false;
     }
+    g_uf8ConnectedAt = std::chrono::steady_clock::now();
     g_dev.setRawInputHandler(onUsbInput);
     { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
     g_meterShown = {};
