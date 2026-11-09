@@ -1676,6 +1676,7 @@ void onMcuIn(std::vector<unsigned char>& m)
 bool uf1Connect(bool quiet);
 static long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
 static bool g_missingSaid = false;  // "not found" is said once, not every two seconds
+static bool g_portsOpen = false;    // the UF1 script's ports (it steps tracks for the UF8 and UC1 too)
 
 // The ports are made whether or not the UF1 is connected (Cubase sees ports only when it starts, and the script
 // loads only when its ports are there). The UF1 itself comes and goes: see uf1Poll.
@@ -1686,6 +1687,7 @@ bool uf1Start()
     g_missingSaid = !uf1Connect(false);
     g_nextTry = nowMs() + 2000;
     const bool ports = g_out.open(kPortTo) && g_in.open(kPortFrom, &onMidiIn);
+    g_portsOpen = ports;
     if (!ports) std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortTo, kPortFrom);
     g_mcuOpen = g_mcuOut.open(kMcuTo) && g_mcuIn.open(kMcuFrom, &onMcuIn);
     if (!g_mcuOpen) std::fprintf(stderr, "Mackie ports for scrubbing not available; SCRUB falls back to fast nudging.\n");
@@ -1743,9 +1745,10 @@ void uf1SetStripNumber(int n)
 
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 
+// The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
 bool uf1StepTrack(int dir)
 {
-    if (!g_open) return false;
+    if (!g_portsOpen) return false;
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
     return true;
 }
