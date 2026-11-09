@@ -1022,6 +1022,50 @@ bool cs::uf8BankPress(bool right)
     return true;
 }
 
+std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again
+bool g_uf8MissingSaid = false;                          // "not found" is said once, not every two seconds
+
+// Opens the UF8 and draws the last state Cubase sent (the cache is kept while the UF8 is away). Used at start,
+// when it is plugged in, and after it stopped answering. The MIDI ports stay as they are.
+bool uf8Connect(bool quiet)
+{
+    if (!g_dev.open()) {
+        if (!quiet) std::fprintf(stderr, "UF8 not found (%s); it is picked up when it is connected.\n"
+                                         "(If it is connected: is SSL 360 or SSL 360 Core running? Quit it.)\n",
+                                 g_dev.lastError().c_str());
+        return false;
+    }
+    g_dev.setRawInputHandler(onUsbInput);
+    { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
+    g_meterShown = {};
+    g_uf8Running = true;
+    replayUf8Cache();
+    cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
+    paintSelMode();
+    paintSoftKeys();
+    std::printf("UF8 connected (serial %s).\n", g_dev.serial().c_str());
+    return true;
+}
+
+// From the main loop: a UF8 that stopped answering or was unplugged is let go of, and a missing one is looked
+// for every two seconds.
+void uf8Poll()
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (g_uf8Running) {
+        if (!g_dev.needsReopen()) return;
+        std::fprintf(stderr, "The UF8 stopped answering or was unplugged (%s); looking for it again.\n", g_dev.lastError().c_str());
+        g_uf8Running = false;
+        g_dev.close();
+        g_uf8MissingSaid = true;
+        g_uf8NextTry = now + std::chrono::seconds(1);
+        return;
+    }
+    if (now < g_uf8NextTry) return;
+    g_uf8NextTry = now + std::chrono::seconds(2);
+    g_uf8MissingSaid = !uf8Connect(g_uf8MissingSaid);
+}
+
 int main(int argc, char** argv)
 {
     cs::redirectTempToLogs(argc > 0 ? argv[0] : nullptr);
@@ -1040,51 +1084,30 @@ int main(int argc, char** argv)
     std::signal(SIGINT, onSignal);
     std::signal(SIGTERM, onSignal);
 
-    // Each surface is optional: it is skipped (with a message) if its ports or device are missing.
-    bool uf8Ok = false;
-    {
-        // The device sometimes is not ready right after the previous bridge let go of it: try three times.
-        bool opened = g_dev.open();
-        for (int attempt = 2; !opened && attempt <= 3; ++attempt) {
-            std::fprintf(stderr, "UF8: could not open the device (%s); trying again (%d of 3)...\n", g_dev.lastError().c_str(), attempt);
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-            opened = g_dev.open();
-        }
-        if (!opened) {
-            std::fprintf(stderr, "UF8: could not open the device: %s\n"
-                                 "Is SSL 360 (or SSL 360 Core) still running? Quit it first.\n",
-                         g_dev.lastError().c_str());
-        } else if (!g_out.open(kPortToCubase) || !g_in.open(kPortFromCubase, &onMidiIn)) {
-            std::fprintf(stderr, "UF8: could not open the MIDI ports \"%s\" / \"%s\"; skipping the UF8.\n",
-                         kPortToCubase, kPortFromCubase);
-            g_dev.close();
-        } else {
-            g_dev.setRawInputHandler(onUsbInput);
-            std::printf("UF8 open (serial %s).\n", g_dev.serial().c_str());
-            // The helper's ports: its channel names go straight on to the UF8 script.
-            g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
-                if (cs::scriptLogSysex(msg.data(), msg.size())) return;
-                if (msg.size() >= 7 && msg[0] == 0xF0 && msg[4] == 0x1D) { cs::uf1SetSoloActive(msg[5] != 0); return; }   // anything soloed
-                if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
-                std::lock_guard<std::mutex> lk(g_outMx);
-                try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
-            });
-            if (!g_helperOpen) std::fprintf(stderr, "Helper ports not available: the UF8 does not follow the selection, and its record keys stay dark.\n");
-            uf8Ok = true;
-            g_uf8Running = true;
-            cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
-            paintSelMode();
-            paintSoftKeys();
-        }
-    }
-    const bool uf1Ok = cs::uf1Start();
-    bool uc1Ok = cs::uc1Start();
-    if (!uf8Ok && !uf1Ok && !uc1Ok) {
-        std::fprintf(stderr, "Nothing to bridge. Exiting.\n");
+    // Every surface's ports are made whether or not the surface is connected: Cubase sees MIDI ports only when it
+    // starts, and a script loads only when its ports are there. The surfaces themselves come and go (uf8Poll,
+    // cs::uf1Poll, cs::uc1Poll); what Cubase sends meanwhile is cached and drawn when one is connected.
+    g_uf8MissingSaid = !uf8Connect(false);
+    g_uf8NextTry = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const bool uf8Ports = g_out.open(kPortToCubase) && g_in.open(kPortFromCubase, &onMidiIn);
+    if (!uf8Ports) std::fprintf(stderr, "UF8: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortToCubase, kPortFromCubase);
+    // The helper's ports: its channel names go straight on to the UF8 script.
+    g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
+        if (cs::scriptLogSysex(msg.data(), msg.size())) return;
+        if (msg.size() >= 7 && msg[0] == 0xF0 && msg[4] == 0x1D) { cs::uf1SetSoloActive(msg[5] != 0); return; }   // anything soloed
+        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
+        std::lock_guard<std::mutex> lk(g_outMx);
+        try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
+    });
+    if (!g_helperOpen) std::fprintf(stderr, "Helper ports not available: the UF8 does not follow the selection, and its record keys stay dark.\n");
+    const bool uf1Ports = cs::uf1Start();
+    const bool uc1Ports = cs::uc1Start();
+    if (!uf8Ports && !uf1Ports && !uc1Ports) {
+        std::fprintf(stderr, "No MIDI ports could be made (is loopMIDI installed?). Exiting.\n");
         return 1;
     }
     std::printf("Bridging; Ctrl+C to stop.\n");
-    if (uf8Ok && !cs::midiPortsAreVirtual()) {
+    if (uf8Ports && !cs::midiPortsAreVirtual()) {
         // Cubase sent the track names and colours when it started, before the bridge was listening, and it only
         // sends changes. If nothing has arrived a couple of seconds after start-up, press bank-next and then
         // bank-previous: Cubase then sends everything again (names, colours, faders, LEDs). This assumes Cubase is
@@ -1097,7 +1120,7 @@ int main(int argc, char** argv)
             note(kNoteBankLeft, true);   note(kNoteBankLeft, false);
         }).detach();
     }
-    if (uf1Ok) {
+    {
         bool lamp = false;
         for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--lamptest") lamp = true;
         if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
@@ -1105,41 +1128,11 @@ int main(int argc, char** argv)
 
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        if (cs::uf1NeedsReopen()) {
-            std::fprintf(stderr, "UF1 stopped answering (%s); reopening...\n", cs::uf1LastError().c_str());
-            if (!cs::uf1Reopen()) { std::fprintf(stderr, "UF1 could not be reopened; exiting (restart the bridge).\n"); break; }
-        }
-        if (uc1Ok && cs::uc1NeedsReopen()) {
-            std::fprintf(stderr, "The UC1 stopped answering (%s); reopening...\n", cs::uc1LastError().c_str());
-            if (!cs::uc1Reopen()) { std::fprintf(stderr, "The UC1 could not be reopened; it stays dark until the bridge is restarted.\n"); uc1Ok = false; }
-        }
-        if (uf8Ok && g_dev.needsReopen()) {
-            // Reopen it (three tries) and replay the last state Cubase sent; the MIDI ports stay as they are.
-            std::fprintf(stderr, "The UF8 stopped answering (%s); reopening...\n", g_dev.lastError().c_str());
-            g_dev.close();
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            bool reopened = false;
-            for (int attempt = 1; attempt <= 3 && !reopened; ++attempt) {
-                if (attempt > 1) std::this_thread::sleep_for(std::chrono::seconds(2));
-                reopened = g_dev.open();
-            }
-            if (!reopened) {
-                std::fprintf(stderr, "The UF8 could not be reopened (%s); exiting (restart the bridge).\n", g_dev.lastError().c_str());
-                g_uf8Running = false;
-                uf8Ok = false;
-                break;
-            }
-            g_dev.setRawInputHandler(onUsbInput);
-            { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
-            g_meterShown = {};
-            replayUf8Cache();
-            cs::autoModePressed(0);
-            paintSelMode();
-            paintSoftKeys();
-            std::printf("UF8 reopened.\n");
-        }
+        cs::uf1Poll();
+        cs::uc1Poll();
+        uf8Poll();
     }
-    if (uf8Ok) g_dev.close();
+    if (g_uf8Running) { g_uf8Running = false; g_dev.close(); }
     cs::uf1Stop();
     cs::uc1Stop();
     return 0;

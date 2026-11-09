@@ -415,6 +415,7 @@ bool UF1Device::ledFrameIsRepeat_(const std::vector<uint8_t>& frame)
 
 void UF1Device::send(std::vector<uint8_t> frame)
 {
+    if (!handle_) return;   // no device (not connected yet, or unplugged): nothing to queue for
     {
         std::lock_guard<std::mutex> lk(pending_->mu);
         if (ledFrameIsRepeat_(frame)) return;
@@ -446,6 +447,7 @@ void UF1Device::endCycle()
 
 void UF1Device::sendBurst(std::vector<std::vector<uint8_t>> frames)
 {
+    if (!handle_) return;   // no device (not connected yet, or unplugged): nothing to queue for
     if (frames.empty()) return;
     {
         std::lock_guard<std::mutex> lk(pending_->mu);
@@ -456,6 +458,7 @@ void UF1Device::sendBurst(std::vector<std::vector<uint8_t>> frames)
 
 void UF1Device::sendPriority(std::vector<uint8_t> frame)
 {
+    if (!handle_) return;   // no device (not connected yet, or unplugged): nothing to queue for
     {
         std::lock_guard<std::mutex> lk(pending_->mu);
         if (ledFrameIsRepeat_(frame)) return;

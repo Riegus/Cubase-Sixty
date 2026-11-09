@@ -5,17 +5,17 @@
 // UF1 side of the bridge: owns the UF1 USB device and its own pair of MIDI ports
 // ("Cubase-Sixty UF1 to Cubase" / "... from Cubase"). See Uf1Bridge.cpp.
 namespace cs {
-// Returns true if the UF1 and both ports were opened. Prints the reason if not.
+// Makes the UF1's ports (always, connected or not) and opens the UF1 if it is there. False if the ports could
+// not be made.
 bool uf1Start();
 // Print every UF1 event and every MIDI message to the console (run the bridge with --trace).
 void uf1SetTrace(bool on);
 // Lights each UF1 LED we drive in turn (call a few seconds after start-up, once the init is done).
 void uf1LampTest();
 void uf1Stop();
-bool uf1NeedsReopen();
-// Why the UF1 needs a reopen, and the reopen itself (keeps the MIDI ports, replays the last state).
-std::string uf1LastError();
-bool uf1Reopen();
+// From the main loop: lets go of a UF1 that stopped answering or was unplugged, and picks up one that is
+// connected (tried every two seconds; the last state Cubase sent is drawn on it).
+void uf1Poll();
 // Defined in main.cpp: one bank step on the UF8 (the UF1's BANK keys use it). False if no UF8 is running.
 bool uf8BankPress(bool right);
 // Defined in main.cpp: an automation mode key was pressed (note 58-61); updates the UF8's mode LEDs.
