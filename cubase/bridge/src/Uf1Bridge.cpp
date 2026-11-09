@@ -1283,7 +1283,12 @@ void uf1ProjectOpen()
 
 void onSysex(const std::vector<unsigned char>& m)
 {
-    if (!isOurSysex(m)) return;
+    // Two of the script's messages have no data byte (54: the script started; 0A: a new track, show its pan), one
+    // byte shorter than isOurSysex takes: they never got through (found 9.11.2026: the V-pot page, the start view
+    // and the pan line on a track change were never done).
+    const bool shortOk = m.size() == 6 && m[0] == 0xF0 && m[1] == 0x7D && m[2] == 0x52 && m[3] == 0x36 && m[5] == 0xF7 &&
+                         (m[4] == 0x54 || m[4] == 0x0A);
+    if (!shortOk && !isOurSysex(m)) return;
     if (scriptLogSysex(m.data(), m.size())) return;
     if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
         if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
@@ -1395,13 +1400,13 @@ void onSysex(const std::vector<unsigned char>& m)
         if (!g_stripFader && g_volPos >= 0 && !g_touched) motorTo(uint16_t(g_volPos.load()));
     } else if (m[4] == 0x5B && m.size() >= 8) {
         if (g_stripFader && !g_touched) motorTo(uint16_t((m[5] << 7) | m[6]));
-    } else if (m[4] == 0x58 && m.size() >= 7) {
-        g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
-        if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
     } else if (m[4] == 0x54) {
         // The script (re)started: the view to start in (Settings: UF1 view at start), and its V-pot page.
         std::printf("UF1 script started: view at start = %s\n", settings::get("uf1-start-view", "daw").c_str());
         showView(startView());
+    } else if (m[4] == 0x58 && m.size() >= 7) {
+        g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
+        if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
     } else if (m[4] == 0x50 && m.size() >= 11) {
         // PLUGIN view: the SSL plug-in on the selected track (present, page, pages, EQ in, ordinal, model).
         const bool present = m[5] != 0;
