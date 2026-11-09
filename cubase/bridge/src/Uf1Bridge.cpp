@@ -1742,10 +1742,10 @@ void uf1SetStripNumber(int n)
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
-bool uf1StepTrack(int dir, int count)
+bool uf1StepTrack(int dir)
 {
     if (!g_portsOpen) return false;
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), uint8_t(std::clamp(count, 1, 64)), 0xF7});
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
     return true;
 }
 
