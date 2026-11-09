@@ -493,7 +493,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
-		try { stepTrack(activeDevice, m[5] ? 1 : -1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+		try { stepTrack(activeDevice, m[5] ? 1 : -1, m.length >= 8 && m[6] >= 1 && m[6] <= 64 ? m[6] : 1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 		return
 	}
 	if (m[4] === 0x57 && m.length >= 8) {
@@ -560,10 +560,12 @@ function stepChannels() {
 	list.sort(function (a, b) { return a.idx - b.idx })
 	return list
 }
-function stepTrack(activeDevice, dir) {
+// n = how many visible tracks (1 = a step; 8 = the UF1's BANK keys without a UF8). The end of the list stops it.
+function stepTrack(activeDevice, dir, n) {
 	if (!plugAm) return
+	n = n || 1
 	var action = dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
-	var count = 1
+	var count = n
 	if (stepMix) {
 		try {
 			var list = stepChannels()
@@ -574,18 +576,27 @@ function stepTrack(activeDevice, dir) {
 			var key = list.map(function (c) { return c.id }).join(',')
 			if (key !== stepExtraKey) { stepExtra = {}; stepExtraKey = key }
 			if (at >= 0) {
-				var k = at + dir
-				while (k >= 0 && k < list.length && !list[k].vis) k += dir
-				if (k < 0 || k >= list.length) return   // no visible track that way
-				count = Math.abs(k - at) + (STEP_PAST_FOLDERS ? (stepExtra[cur + ':' + dir] || 0) : 0)
+				var k = at, extra = 0, moved = 0
+				for (var v = 0; v < n; ++v) {
+					var t = k + dir
+					while (t >= 0 && t < list.length && !list[t].vis) t += dir
+					if (t < 0 || t >= list.length) break
+					if (STEP_PAST_FOLDERS) extra += stepExtra[list[k].id + ':' + dir] || 0   // known folders on the way
+					k = t
+					++moved
+				}
+				if (!moved) return   // no visible track that way
+				count = Math.abs(k - at) + extra
 				stepLast = { id: list[k].id, at: now }
-				// A step that already goes past a known folder passes through it on the way: no checking then.
-				stepPending = (STEP_PAST_FOLDERS && stepExtra[cur + ':' + dir]) ? null : { from: cur, to: list[k].id, dir: dir, at: now, extraFor: null }
+				// A single step is checked for a folder it stops on (and learns it); a step that already goes past a
+				// known folder, or a longer one, is not.
+				stepPending = (n === 1 && !extra) ? { from: cur, to: list[k].id, dir: dir, at: now, extraFor: null } : null
 			}
-			if (at < 0 && !stepListed) {
-				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it')
+			if (at < 0 && cur >= 0 && !stepListed) {
+				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it. The channels:')
 				stepListed = true
-				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
+				var parts = list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') })
+				for (var q = 0; q < parts.length; q += 8) out('[CubaseSixty UF1]   ' + parts.slice(q, q + 8).join(', '))
 			}
 		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 	}
@@ -600,6 +611,7 @@ function stepCheckLanding() {
 	if (cur === p.to) { stepPending = null; return }   // arrived
 	var list = stepChannels()
 	for (var i = 0; i < list.length; ++i) if (list[i].id === cur) return   // on the way (a track Cubase reports first)
+	if (cur >= 0) { stepPending = null; return }   // a track with a channel the list does not hold (not a folder)
 	// Cubase reports a folder more than once (the title, then again): one extra step per folder reached.
 	if (p.extraFor === cur) return
 	p.extraFor = cur

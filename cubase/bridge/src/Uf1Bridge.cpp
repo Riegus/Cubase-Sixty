@@ -516,6 +516,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (!ev.pressed) break;
             const bool right = ev.id == 0x23;
             if (uf8BankPress(right)) break;
+            // No UF8: eight tracks at once, past the hidden ones (the script counts them; track-stepping = mixconsole).
+            if (settings::trackStepping() == settings::Stepping::MixConsole && uf1StepTrack(right ? 1 : -1, 8)) break;
             // No UF8: step the selection eight tracks instead (spaced out; back-to-back pulses were merged).
             std::thread([right] {
                 for (int i = 0; i < 8; ++i) {
@@ -1746,10 +1748,10 @@ void uf1SetStripNumber(int n)
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
-bool uf1StepTrack(int dir)
+bool uf1StepTrack(int dir, int count)
 {
     if (!g_portsOpen) return false;
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), uint8_t(std::clamp(count, 1, 64)), 0xF7});
     return true;
 }
 
