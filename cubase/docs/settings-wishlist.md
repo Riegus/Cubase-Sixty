@@ -6,7 +6,8 @@ The Settings page that will hold them is step 4 of the [release plan](release-pl
 
 The Settings page (tray icon: click, or Settings in its menu) shows what is settable now; it writes
 `cubase\settings.txt` and `cubase\favourites.txt`, which can still be edited by hand. On it so far: track stepping,
-the UC1 secondary encoder's job at start, the script log, and the favourites (eight per domain). A new setting is one
+the UC1 secondary encoder's job at start, long track names (abbreviated, the default, or cut; Rea-Sixty's "Smart
+abbreviate"), the script log, and the favourites (eight per domain). A new setting is one
 entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
 
 ## Logging

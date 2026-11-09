@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include "Names.h"
 #include "Uc1Bridge.h"
 #include "Settings.h"
 
@@ -1290,7 +1291,7 @@ void onSysex(const std::vector<unsigned char>& m)
         g_uf1RightSeen = false;   // another track: mono until it sends a right side
         if (t.empty()) return;
         std::printf("UF1 track: %s\n", t.c_str());   // (bridge.log: which track Cubase reports, and when)
-        if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
+        t = fitName(t, 8);   // the UF1 name cell is 8 characters wide (abbreviated or cut: Settings)
         screenText(::uf1::scr::kTrackName, t);
     } else if (auto c = parseColour(m)) {
         if (c->strip != 0) return;

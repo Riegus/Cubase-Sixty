@@ -27,6 +27,7 @@
 #include "MidiPorts.h"
 #include "StopEvent.h"
 #include "SettingsServer.h"
+#include "Names.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -722,7 +723,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         if (!g_ownText && !g_cubaseFirstMs) g_cubaseFirstMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         if (auto n = parseName(m)) {
             std::string t(n->text.begin(), n->text.end());
-            if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
+            t = cs::fitName(t, int(uf8::kUf8ScribbleChars));   // abbreviated or cut (Settings: Long track names)
             g_dev.send(uf8::buildStripTextUpper(uint8_t(n->strip), t));
             g_rightSeen[n->strip] = false;   // another track: mono until it sends a right side
             if (!t.empty() && g_stripEmpty[n->strip]) {

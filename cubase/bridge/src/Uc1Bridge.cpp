@@ -37,6 +37,7 @@
 // Byte maps (knob / button ids, LED cells, frame layouts) are Rea-Sixty's (extension/src/UC1Protocol.h).
 
 #include "Uc1Bridge.h"
+#include "Names.h"
 
 #include <algorithm>
 #include <climits>
@@ -162,7 +163,7 @@ void send(std::vector<uint8_t> f) { if (g_open) g_dev.send(std::move(f)); }
 std::vector<uint8_t> largeRow()
 {
     std::lock_guard<std::mutex> lk(g_stateMx);
-    auto cut = [](std::string n) { if (n.size() > 12) n.resize(12); return n; };   // the glass shows 12
+    auto cut = [](const std::string& n) { return fitName(n, 12); };   // the glass shows 12 (abbreviated or cut: Settings)
     return ::uc1::buildTrackNameTripleLarge(cut(g_bcNames[0]), cut(g_bcNames[1]), cut(g_bcNames[2]));
 }
 // While the Bus Comp scroll header shows, the model field gives way to it (SSL 360: layout 02 + header).
@@ -177,7 +178,7 @@ void paintCentre()
         name = g_name; label = g_label; palette = g_palette; header = g_header;
         headerOn = !header.empty() && std::chrono::steady_clock::now() < g_headerUntil;
     }
-    if (name.size() > 12) name.resize(12);
+    name = fitName(name, 12);   // abbreviated or cut (Settings: Long track names)
     if (headerOn) {
         send(::uc1::buildCentralMode(::uc1::CentralMode::Main, 0x02));
         send(::uc1::buildLcdHeader(header));
