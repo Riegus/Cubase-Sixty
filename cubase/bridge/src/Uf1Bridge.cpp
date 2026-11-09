@@ -175,8 +175,9 @@ void showView(int view)
         g_view = view;
         paintSendCells(true);
         paintHeader(false);
-        if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
     }
+    // (Always in bridge.log: which view, and whether it changed.)
+    std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
     paintSoftKeys();
 }
 
@@ -1399,6 +1400,7 @@ void onSysex(const std::vector<unsigned char>& m)
         if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
     } else if (m[4] == 0x54) {
         // The script (re)started: the view to start in (Settings: UF1 view at start), and its V-pot page.
+        std::printf("UF1 script started: view at start = %s\n", settings::get("uf1-start-view", "daw").c_str());
         showView(startView());
     } else if (m[4] == 0x50 && m.size() >= 11) {
         // PLUGIN view: the SSL plug-in on the selected track (present, page, pages, EQ in, ordinal, model).
