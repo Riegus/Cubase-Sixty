@@ -854,7 +854,8 @@ try {
 try {
 	var mixKey = surface.makeButton(16, 4, 1, 1)
 	mixKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, CC_MIXCONSOLE)
-	page.makeCommandBinding(mixKey.mSurfaceValue, 'Studio', 'MixConsole')   // Cubase 12+: Studio > MixConsole
+	// The MixConsole keeps its old internal name: Devices > Mixer (Cubase 15's Key Commands.xml, checked 9.11.2026).
+	page.makeCommandBinding(mixKey.mSurfaceValue, 'Devices', 'Mixer')
 } catch (e) { log('MixConsole command could not be bound: ' + e) }
 
 // What the magnifier, 360 and secondary encoder push keys do (Settings: UC1 keys; the bridge sends SysEx 4F <key 0
