@@ -25,6 +25,7 @@
 
 #include "RtMidi.h"
 #include "MidiPorts.h"
+#include "StopEvent.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -151,6 +152,7 @@ std::string g_dbText[8];               // last fader-level text per strip, shown
    // the UF8 and its ports are open
 std::atomic<long long> g_cubaseFirstMs{0};   // when Cubase first sent anything (steady clock, ms)
 std::atomic<bool> g_cubaseSpoke{false};
+bool g_ownText = false;   // the bridge feeds its own text through onMidiIn ("Waiting for Cubase"): not Cubase speaking
 
 // Bank-right by the user (UF8 key or UF1 BANK): stop at the bank where the last track is on strip 8,
 // instead of a bank with empty strips at the end. The script reports the bank's track count and position
@@ -686,7 +688,8 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
         if (m[5] == 0) uf8NoProject();
         else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
-        if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        // (Always logged: the tray app shows it.)
+        std::printf("Cubase: %s\n", m[5] ? "project open" : "no project (the Hub)");
         return;
     }
     // Trace: when each strip's name arrives (timing of bank changes).
@@ -711,8 +714,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
     const uint8_t status = m[0] & 0xF0;
 
     if (m[0] == 0xF0) {   // SysEx: names and colours
-        g_cubaseSpoke = true;
-        if (!g_cubaseFirstMs) g_cubaseFirstMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (!g_ownText) {
+            if (!g_cubaseSpoke) std::printf("Cubase connected (the UF8 script is talking).\n");   // (the tray app shows it)
+            g_cubaseSpoke = true;
+        }
+        if (!g_ownText && !g_cubaseFirstMs) g_cubaseFirstMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         if (auto n = parseName(m)) {
             std::string t(n->text.begin(), n->text.end());
             if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
@@ -1119,6 +1125,18 @@ bool uf8Connect(bool quiet)
     g_meterShown = {};
     g_uf8Running = true;
     replayUf8Cache();
+    if (!g_cubaseSpoke) {
+        // Nothing from Cubase yet (the bridge has just started; Cubase connects to new ports after a while).
+        const char* words[] = {"Waiting", "for", "Cubase"};
+        for (int s = 0; s < 3; ++s) {
+            std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s)};
+            for (const char* c = words[s]; *c; ++c) name.push_back(uint8_t(*c));
+            name.push_back(0xF7);
+            g_ownText = true;
+            onMidiIn(name);
+            g_ownText = false;
+        }
+    }
     cs::autoModePressed(0);   // automation mode keys dim from the start (the mode is not known yet)
     paintSelMode();
     paintSoftKeys();
@@ -1205,13 +1223,22 @@ int main(int argc, char** argv)
         if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
     }
 
+    cs::stopEventInit();
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        if (cs::stopRequested()) { std::printf("Stop asked for (tray app): blanking the surfaces.\n"); break; }
         cs::uf1Poll();
         cs::uc1Poll();
         uf8Poll();
     }
-    if (g_uf8Running) { g_uf8Running = false; g_dev.close(); }
+    // Leaving: the surfaces blank (as with no project) before they are let go of, so they do not keep showing the
+    // last tracks. (Ctrl+C and the tray app's Quit come here; a killed process cannot.)
+    if (g_uf8Running) {
+        uf8NoProject();
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));   // let the frames go out
+        g_uf8Running = false;
+        g_dev.close();
+    }
     cs::uf1Stop();
     cs::uc1Stop();
     return 0;

@@ -95,6 +95,8 @@ int g_headerGen = 0;
 int g_sevenSeg = -1;                                 // the 7-segment number, -1 = blank
 uint8_t g_palette = 0;
 std::map<int, std::vector<unsigned char>> g_cache;   // last message per kind, replayed after a reopen
+bool g_ownText = false;        // the bridge feeds its own text through onMidiIn ("Waiting for Cubase")
+bool g_waitingShown = false;   // that text is on the UC1 until Cubase sends something
 
 // The PRESETS screen (see "PRESETS screen" below).
 std::mutex g_presetMx;
@@ -497,7 +499,7 @@ void onMidiIn(std::vector<unsigned char>& msg);
 // the 7-segment blank, the knob rings and the LEDs the script drives off, any menu screen closed.
 std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
 bool g_noProject = false;
-void uc1NoProject()
+void uc1NoProject(const char* label = "No Project")
 {
     const bool first = !g_noProject;
     g_noProject = true;
@@ -509,7 +511,7 @@ void uc1NoProject()
     }
     { std::lock_guard<std::mutex> lk(g_presetMx); setPresetsMode(false); setRoutingMode(false); setExtMode(false); }
     std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x30};
-    for (char c : std::string("No Project")) { name.push_back(0); name.push_back(0); name.push_back(uint8_t(c)); }
+    for (char c : std::string(label)) { name.push_back(0); name.push_back(0); name.push_back(uint8_t(c)); }
     name.push_back(0xF7);
     std::vector<std::vector<unsigned char>> msgs{
         name,
@@ -657,6 +659,14 @@ void onMidiIn(std::vector<unsigned char>& msg)
     const auto& m = msg;
     traceMidi("in", m);
     if (m.empty()) return;
+    if (g_waitingShown && !g_ownText) {
+        // Cubase has spoken: the "for Cubase" label goes (the script may never send a label of its own).
+        g_waitingShown = false;
+        std::vector<unsigned char> clear{0xF0, 0x7D, 0x52, 0x36, 0x32, 0xF7};
+        g_ownText = true;
+        onMidiIn(clear);
+        g_ownText = false;
+    }
     {
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
@@ -1135,7 +1145,7 @@ bool uc1Connect(bool quiet);
 static std::chrono::steady_clock::time_point g_nextTry;   // uc1Poll: when to look for the UC1 again
 static bool g_missingSaid = false;                          // "not found" is said once, not every two seconds
 
-// The ports are made whether or not the UC1 is connected (Cubase sees ports only when it starts, and the script
+// The ports are made whether or not the UC1 is connected (the script
 // loads only when its ports are there). The UC1 itself comes and goes: see uc1Poll.
 bool uc1Start()
 {
@@ -1173,7 +1183,11 @@ void uc1Stop()
     g_grRun = false;
     if (g_grThread.joinable()) g_grThread.join();
     sslcore::stop();
-    if (g_open) { g_dev.close(); g_open = false; }
+    if (!g_open) return;
+    uc1NoProject("Bridge off");   // blank, as with no project, before letting go (the name shows 12 characters)
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    g_dev.close();
+    g_open = false;
 }
 
 void uc1SetTrace(bool on) { g_trace = on; }
@@ -1199,6 +1213,23 @@ bool uc1Connect(bool quiet)
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_stateMx); cache = g_cache; }
     for (auto& kv : cache) { if (kv.first == 0x17C) continue; auto msg = kv.second; onMidiIn(msg); }
+    if (cache.empty()) {
+        // Nothing from Cubase yet (the bridge has just started; Cubase connects to new ports after a while).
+        // The name shows 12 characters: "Waiting" there, "for Cubase" in the label above it.
+        auto text = [](uint8_t cmd, const char* t) {
+            std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, cmd};
+            for (const char* c = t; *c; ++c) { m.push_back(0); m.push_back(0); m.push_back(uint8_t(*c)); }
+            m.push_back(0xF7);
+            return m;
+        };
+        auto name = text(0x30, "Waiting");
+        auto label = text(0x32, "for Cubase");
+        g_ownText = true;
+        onMidiIn(name);
+        onMidiIn(label);
+        g_ownText = false;
+        g_waitingShown = true;
+    }
     return true;
 }
 

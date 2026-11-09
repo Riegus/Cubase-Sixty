@@ -1204,7 +1204,7 @@ void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated, Cubase shows the Hub): "No Proj." as the track (the name cell is 8 wide), no colour, level or
 // value line, meters and fader down, the LEDs Cubase drives off. The next project paints it all again.
 std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
-void uf1NoProject()
+void uf1NoProject(const char* label = "No Proj.")
 {
     const bool first = !g_noProject;
     if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBefore = g_cache; }
@@ -1214,7 +1214,7 @@ void uf1NoProject()
         for (auto& kv : g_cache) if (kv.first < 0x100) notes.push_back(kv.first);
     }
     std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
-    for (char c : std::string("No Proj.")) name.push_back(uint8_t(c));
+    for (char c : std::string(label)) name.push_back(uint8_t(c));
     name.push_back(0xF7);
     std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
     std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
@@ -1674,7 +1674,7 @@ static long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
 static bool g_missingSaid = false;  // "not found" is said once, not every two seconds
 static bool g_portsOpen = false;    // the UF1 script's ports (it steps tracks for the UF8 and UC1 too)
 
-// The ports are made whether or not the UF1 is connected (Cubase sees ports only when it starts, and the script
+// The ports are made whether or not the UF1 is connected (the script
 // loads only when its ports are there). The UF1 itself comes and goes: see uf1Poll.
 bool uf1Start()
 {
@@ -1711,7 +1711,11 @@ void uf1Poll()
 
 void uf1Stop()
 {
-    if (g_open) { g_dev.close(); g_open = false; }
+    if (!g_open) return;
+    uf1NoProject("Off");   // blank, as with no project, before letting go
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    g_dev.close();
+    g_open = false;
 }
 
 void uf1SetTrace(bool on) { g_trace = on; }
@@ -1763,7 +1767,23 @@ bool uf1Connect(bool quiet)
     std::thread(revertLoop).detach();
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
-    for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
+    bool fromCubase = false;
+    for (auto& kv : cache) {
+        // State only: not the driver state, log lines, a send's temporary line or requests (as in the reopen).
+        const int k = kv.first;
+        if (k == 0x17C || k == 0x17E || k == 0x104 || k == 0x105 || k == 0x154 || k == 0x159) continue;
+        if (k >= 0x100) fromCubase = true;
+        auto msg = kv.second;
+        onMidiIn(msg);
+    }
+    if (!fromCubase) {
+        // Nothing from Cubase yet (the bridge has just started; Cubase connects to new ports after a while).
+        std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
+        for (char c : std::string("Waiting")) name.push_back(uint8_t(c));
+        name.push_back(0xF7);
+        onMidiIn(name);
+        valueHome("for Cubase");
+    }
     setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
     setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
     setLed(uf1m::Led{0x20, 0xFFFFFF}, g_flip);
