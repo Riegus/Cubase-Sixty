@@ -14,6 +14,7 @@
   #pragma comment(lib, "ws2_32.lib")
   using socket_t = SOCKET;
   static constexpr socket_t kInvalid = INVALID_SOCKET;
+  #undef SC_CLOSE   // winuser.h has a SC_CLOSE of its own (a window command); this file's is the socket close
   #define SC_CLOSE closesocket
   // WSAPoll wants Vista+; the SDK's sdkddkver.h already defaults _WIN32_WINNT to
   // the newest supported target, so it needs no define of our own here.
