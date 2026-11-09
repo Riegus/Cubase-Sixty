@@ -924,7 +924,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x5D && m.length >= 7) {   // the UF1 banks these strips: no follow for <n> x 100 ms
-		followQuietUntil = nowMs() + m[5] * 100
+		followQuietUntil = Date.now() + m[5] * 100   // (nowMs is inside the follow block)
 		return
 	}
 	if (m[4] === 0x18 && m.length >= 8) {
