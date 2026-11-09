@@ -3,7 +3,8 @@
 What Cubase (15 Pro, MIDI Remote API 1.3) does not let Cubase-Sixty do, or only in a roundabout way, found while
 porting Rea-Sixty. Each entry says what is missing and what Cubase-Sixty does instead. What this costs in features is
 in [Missing features](missing-features.md); where it made Cubase-Sixty behave differently from Rea-Sixty, in
-[On second thought](on-second-thought.md).
+[On second thought](on-second-thought.md). Everything about banking and track stepping (timings, folders, what was tried)
+is collected in [Banking and track stepping](banking.md).
 
 ## Not available to scripts at all
 
