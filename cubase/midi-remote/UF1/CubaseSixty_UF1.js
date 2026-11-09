@@ -570,7 +570,9 @@ function stepTrack(activeDevice, dir, n) {
 		try {
 			var list = stepChannels()
 			var now = Date.now()
-			var cur = now - stepLast.at < 600 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
+			// Cubase reports the new selection up to ~0.8 s later: until then (or while a step has not arrived) a
+			// press counts from where the last one went, not from the old selection (that ran past the first track).
+			var cur = (stepPending || now - stepLast.at < 1500) && stepLast.id >= 0 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
 			var at = -1
 			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
 			var key = list.map(function (c) { return c.id }).join(',')
