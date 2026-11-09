@@ -18,6 +18,8 @@ void uf1Stop();
 void uf1Poll();
 // Defined in main.cpp: one bank step on the UF8 (the UF1's BANK keys use it). False if no UF8 is running.
 bool uf8BankPress(bool right);
+// Defined in main.cpp: BANK without a UF8: the UF8 script banks, and the track on the same strip is selected.
+void uf8BankSelect(bool right);
 // Defined in main.cpp: an automation mode key was pressed (note 58-61); updates the UF8's mode LEDs.
 void autoModePressed(uint8_t note);
 // The UF8 strip (1-8) that holds the selected track, 0 = not on the UF8's current bank. Shown in the UF1's

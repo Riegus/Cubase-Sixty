@@ -516,16 +516,9 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (!ev.pressed) break;
             const bool right = ev.id == 0x23;
             if (uf8BankPress(right)) break;
-            // No UF8: eight tracks at once, past the hidden ones (the script counts them; track-stepping = mixconsole).
-            if (settings::trackStepping() == settings::Stepping::MixConsole && uf1StepTrack(right ? 1 : -1, 8)) break;
-            // No UF8: step the selection eight tracks instead (spaced out; back-to-back pulses were merged).
-            std::thread([right] {
-                for (int i = 0; i < 8; ++i) {
-                    note(uint8_t(right ? 41 : 40), true);
-                    note(uint8_t(right ? 41 : 40), false);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
-                }
-            }).detach();
+            // No UF8: the UF8 script banks anyway (its strips skip hidden tracks and folders) and the track on the
+            // selection's strip in the new bank is selected.
+            uf8BankSelect(right);
             break;
         }
         if (ev.id == 0x24 || ev.id == 0x26) {

@@ -157,6 +157,7 @@ std::atomic<bool> g_cubaseSpoke{false};
 // (SysEx 12). Near the end, the bridge sends the needed single-track shifts (the Page-right note) instead
 // of a bank step; on the last full bank it does nothing. Unknown count or position: a normal bank step.
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
+std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
 void note(uint8_t n, bool on);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
@@ -494,6 +495,7 @@ void setLed(int strip, int cls, bool on)
             selOn[strip] = on;
             int n = 0;
             for (int i = 0; i < 8; ++i) if (selOn[i]) { n = i + 1; break; }
+            g_selStrip = n;
             cs::uf1SetStripNumber(n);
         }
         break;
@@ -1021,6 +1023,28 @@ bool cs::uf8BankPress(bool right)
     note(right ? kNoteBankRight : kNoteBankLeft, true);
     note(right ? kNoteBankRight : kNoteBankLeft, false);
     return true;
+}
+
+// The UF1's BANK keys without a UF8: the UF8 script (loaded whether or not the UF8 is connected) banks its strips,
+// which follow the MixConsole (hidden tracks and folders are not on strips), and the track on the same strip of
+// the new bank is selected (strip 1 if the selection was not on the bank). Nothing is selected when the bank did
+// not move (its first / last bank).
+void cs::uf8BankSelect(bool right)
+{
+    const int before = g_bankOffset;
+    const int strip = g_selStrip > 0 ? g_selStrip - 1 : 0;
+    if (!(right && userBankRight(true))) {
+        note(right ? kNoteBankRight : kNoteBankLeft, true);
+        note(right ? kNoteBankRight : kNoteBankLeft, false);
+    }
+    std::thread([before, strip] {
+        // The script reports the new bank position (SysEx 12) when Cubase has moved it.
+        for (int i = 0; i < 20 && g_bankOffset == before; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        if (g_bankOffset == before && before >= 0) return;   // did not move
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        note(uint8_t(kNoteSel + strip), true);
+        note(uint8_t(kNoteSel + strip), false);
+    }).detach();
 }
 
 static std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again
