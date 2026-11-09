@@ -1767,7 +1767,23 @@ bool uf1Connect(bool quiet)
     std::thread(revertLoop).detach();
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
-    for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
+    bool fromCubase = false;
+    for (auto& kv : cache) {
+        // State only: not the driver state, log lines, a send's temporary line or requests (as in the reopen).
+        const int k = kv.first;
+        if (k == 0x17C || k == 0x17E || k == 0x104 || k == 0x105 || k == 0x154 || k == 0x159) continue;
+        if (k >= 0x100) fromCubase = true;
+        auto msg = kv.second;
+        onMidiIn(msg);
+    }
+    if (!fromCubase) {
+        // Nothing from Cubase yet (the bridge has just started; Cubase connects to new ports after a while).
+        std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
+        for (char c : std::string("Waiting")) name.push_back(uint8_t(c));
+        name.push_back(0xF7);
+        onMidiIn(name);
+        valueHome("for Cubase");
+    }
     setLed(uf1m::Led{0x0A, 0xFFFFFF}, g_sends58);
     setLed(uf1m::Led{0x21, 0xFFFFFF}, g_master);
     setLed(uf1m::Led{0x20, 0xFFFFFF}, g_flip);

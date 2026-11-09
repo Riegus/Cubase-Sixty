@@ -198,7 +198,7 @@ void restartBridge(bool automatic)
 {
     const bool cubaseWasThere = g_status.cubase != "not seen yet";
     stopBridge();
-    Sleep(3000);   // let Windows release the USB devices and the ports (dev-restart.ps1 found the same)
+    Sleep(1500);   // let Windows release the USB devices and the ports (the bridge now closes them itself first)
     if (!startBridge()) return;
     if (automatic)
         notify(L"The bridge stopped and was started again",

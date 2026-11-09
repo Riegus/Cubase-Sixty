@@ -1203,6 +1203,13 @@ bool uc1Connect(bool quiet)
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_stateMx); cache = g_cache; }
     for (auto& kv : cache) { if (kv.first == 0x17C) continue; auto msg = kv.second; onMidiIn(msg); }
+    if (cache.empty()) {
+        // Nothing from Cubase yet (the bridge has just started; Cubase connects to new ports after a while).
+        std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x30};
+        for (char c : std::string("Waiting for Cubase")) { name.push_back(0); name.push_back(0); name.push_back(uint8_t(c)); }
+        name.push_back(0xF7);
+        onMidiIn(name);
+    }
     return true;
 }
 
