@@ -91,6 +91,17 @@ if(WIN32)
     target_compile_definitions(cubase_sixty_bridge PRIVATE NOMINMAX)
 endif()
 
+# The tray app (Windows): runs the bridge in the background, restarts it if it stops, tray icon with status.
+if(WIN32)
+    add_executable(cubase_sixty_tray WIN32 src/tray/TrayApp.cpp)
+    set_target_properties(cubase_sixty_tray PROPERTIES OUTPUT_NAME "CubaseSixty")
+    target_compile_definitions(cubase_sixty_tray PRIVATE UNICODE _UNICODE NOMINMAX)
+    target_link_libraries(cubase_sixty_tray PRIVATE shell32 user32 gdi32 advapi32)
+    if(MSVC)
+        target_compile_options(cubase_sixty_tray PRIVATE /utf-8 /permissive-)
+    endif()
+endif()
+
 # Pure mapping logic, testable without hardware or MIDI ports.
 add_executable(test_mapping tests/test_mapping.cpp ${EXT_SRC}/Palette.cpp)
 target_include_directories(test_mapping PRIVATE src ${EXT_SRC})

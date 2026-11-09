@@ -12,7 +12,7 @@ changes need much less.
 | Both | both of the above | |
 | First time, or the ports changed | `.\dev-restart.ps1 -Build` | The full round. |
 
-`-Trace` works with all of them (`cubase\logs\bridge.log`); the scripts' lines are in `cubase\logs\scripts.log`.
+`-Tray` starts the bridge through the tray app (no console) instead. `-Trace` works with all of them (`cubase\logs\bridge.log`); the scripts' lines are in `cubase\logs\scripts.log`.
 
 ## The loopMIDI setup (once)
 

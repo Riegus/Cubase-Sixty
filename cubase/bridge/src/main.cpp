@@ -686,7 +686,8 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
         if (m[5] == 0) uf8NoProject();
         else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
-        if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        // (Always logged: the tray app shows it.)
+        std::printf("Cubase: %s\n", m[5] ? "project open" : "no project (the Hub)");
         return;
     }
     // Trace: when each strip's name arrives (timing of bank changes).
@@ -711,6 +712,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
     const uint8_t status = m[0] & 0xF0;
 
     if (m[0] == 0xF0) {   // SysEx: names and colours
+        if (!g_cubaseSpoke) std::printf("Cubase connected (the UF8 script is talking).\n");   // (the tray app shows it)
         g_cubaseSpoke = true;
         if (!g_cubaseFirstMs) g_cubaseFirstMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         if (auto n = parseName(m)) {

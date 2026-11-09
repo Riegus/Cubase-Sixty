@@ -17,6 +17,8 @@
 #   -BridgeOnly           Leave Cubase running: stop the bridge, (with -Build) rebuild it, start it again on ports
 #                         made in loopMIDI (--loopmidi). Needs the ten Cubase-Sixty ports created once in loopMIDI
 #                         and Cubase started while they existed (see cubase\docs\development.md).
+#   -Tray                 Start the bridge through the tray app (CubaseSixty.exe: no console, restarts the bridge if
+#                         it stops) instead of in a console window.
 #   -ScriptsOnly          Only install the MIDI Remote scripts; then reload them in Cubase (MIDI Remote: Reload
 #                         Scripts). Cubase and the bridge keep running.
 
@@ -29,6 +31,7 @@ param(
     [switch]$Force,
     [switch]$NoStartCubase,
     [switch]$BridgeOnly,
+    [switch]$Tray,
     [switch]$ScriptsOnly
 )
 
@@ -97,6 +100,11 @@ if ($cubase -and -not $BridgeOnly) {
 }
 
 # --- 2. Stop the bridge --------------------------------------------------------------------------------
+# The tray app first: it would start the bridge again.
+Get-Process -Name 'CubaseSixty' -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Host 'Stopping the tray app...'
+    $_ | Stop-Process -Force
+}
 Get-Process -Name 'cubase_sixty_bridge' -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Host 'Stopping the bridge...'
     $_ | Stop-Process -Force
@@ -134,10 +142,11 @@ $bridgeUp = $false
 for ($try = 1; $try -le 3 -and -not $bridgeUp; $try++) {
     if ($try -gt 1) { Write-Warning "The bridge exited at start-up; starting it again ($try of 3)..."; Start-Sleep -Seconds 3 }
     else { Write-Host 'Starting the bridge...' }
+    $exe = if ($Tray) { Join-Path (Split-Path $bridgeExe) 'CubaseSixty.exe' } else { $bridgeExe }
     if ($bridgeArgs.Count -gt 0) {
-        Start-Process -FilePath $bridgeExe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe)
+        Start-Process -FilePath $exe -ArgumentList $bridgeArgs -WorkingDirectory (Split-Path $bridgeExe)
     } else {
-        Start-Process -FilePath $bridgeExe -WorkingDirectory (Split-Path $bridgeExe)
+        Start-Process -FilePath $exe -WorkingDirectory (Split-Path $bridgeExe)
     }
     Start-Sleep -Seconds 4     # let it open the surfaces and create the ports before Cubase looks for them
     $bridgeUp = [bool](Get-Process -Name 'cubase_sixty_bridge' -ErrorAction SilentlyContinue)

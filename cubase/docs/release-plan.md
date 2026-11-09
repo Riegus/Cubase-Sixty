@@ -39,6 +39,11 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - Restarts itself if it crashes.
 - Not a Windows service: services run in their own session, where the MIDI ports (WinMM), closing SSL 360 Core and the
   SSL plug-ins' connection would not work reliably.
+- Built (wip/tray, to be tested): `CubaseSixty.exe` runs the bridge without a console, restarts it if it stops (five
+  times a minute at most), tray icon green / yellow / red with each surface's and Cubase's state from bridge.log,
+  Restart bridge, Open logs folder, Start with Windows, Quit. Status lines in bridge.log without --trace ("Cubase
+  connected", "Cubase: project open / no project"). Open: a restarted bridge needs Cubase restarted (its ports are
+  new), unless loopMIDI ports are used; the installer (step 5) sets Start with Windows.
 
 ## 4. Settings
 
