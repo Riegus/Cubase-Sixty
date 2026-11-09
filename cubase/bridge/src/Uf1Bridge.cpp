@@ -1673,8 +1673,8 @@ void onMcuIn(std::vector<unsigned char>& m)
 }
 
 bool uf1Connect(bool quiet);
-long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
-bool g_missingSaid = false;  // "not found" is said once, not every two seconds
+static long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
+static bool g_missingSaid = false;  // "not found" is said once, not every two seconds
 
 // The ports are made whether or not the UF1 is connected (Cubase sees ports only when it starts, and the script
 // loads only when its ports are there). The UF1 itself comes and goes: see uf1Poll.

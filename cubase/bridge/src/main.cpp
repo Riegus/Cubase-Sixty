@@ -1022,8 +1022,8 @@ bool cs::uf8BankPress(bool right)
     return true;
 }
 
-std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again
-bool g_uf8MissingSaid = false;                          // "not found" is said once, not every two seconds
+static std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again
+static bool g_uf8MissingSaid = false;                          // "not found" is said once, not every two seconds
 
 // Opens the UF8 and draws the last state Cubase sent (the cache is kept while the UF8 is away). Used at start,
 // when it is plugged in, and after it stopped answering. The MIDI ports stay as they are.
