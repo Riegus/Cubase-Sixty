@@ -157,6 +157,8 @@ std::atomic<bool> g_cubaseSpoke{false};
 // (SysEx 12). Near the end, the bridge sends the needed single-track shifts (the Page-right note) instead
 // of a bank step; on the last full bank it does nothing. Unknown count or position: a normal bank step.
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
+std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
+std::atomic<int> g_stripNameSeq{0};   // counts strip 1's names from Cubase (the strips moved)
 void note(uint8_t n, bool on);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
@@ -494,6 +496,7 @@ void setLed(int strip, int cls, bool on)
             selOn[strip] = on;
             int n = 0;
             for (int i = 0; i < 8; ++i) if (selOn[i]) { n = i + 1; break; }
+            g_selStrip = n;
             cs::uf1SetStripNumber(n);
         }
         break;
@@ -687,6 +690,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
         return;
     }
+    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x01 && m[5] == 0) ++g_stripNameSeq;   // (uf8BankSelect)
     // Trace: when each strip's name arrives (timing of bank changes).
     if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
         std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
@@ -1021,6 +1025,83 @@ bool cs::uf8BankPress(bool right)
     note(right ? kNoteBankRight : kNoteBankLeft, true);
     note(right ? kNoteBankRight : kNoteBankLeft, false);
     return true;
+}
+
+// The UF1's BANK keys without a UF8: the UF8 script (loaded whether or not the UF8 is connected) banks its strips,
+// which follow the MixConsole (hidden tracks and folders are not on strips), and the track on the same strip of
+// the new bank is selected (strip 1 if the selection was not on the bank).
+void cs::uf8BankSelect(bool right)
+{
+    // One press after the other (quick presses queue up): each waits until the script reports its bank's new
+    // position (SysEx 12, sent when Cubase has put the new tracks on the strips) and then presses SEL. SEL sent
+    // before that (a fixed 40 ms) landed on the old bank: the selection did not move and presses seemed lost.
+    static std::mutex order;
+    static int lastStrip = 0;                        // the strip the last press selected
+    static std::chrono::steady_clock::time_point lastAt;
+    std::printf("UF1 BANK %s pressed (no UF8)\n", right ? "right" : "left");   // the click, before it queues
+    std::thread([right] {
+        std::lock_guard<std::mutex> lk(order);
+        const int before = g_bankOffset;
+        // Right after a press Cubase's SEL LEDs are in flux (the old selection leaves the strips before the new one
+        // is reported): within 3 s the strip of the last press counts.
+        const bool recent = std::chrono::steady_clock::now() - lastAt < std::chrono::seconds(3);
+        const int strip = recent ? lastStrip : g_selStrip > 0 ? g_selStrip - 1 : 0;
+        // The script's follow selection stays out of it for 2.5 s (SysEx 5D): Cubase reports the selection late,
+        // still on the old bank, and follow banked straight back.
+        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5D, 40, 0xF7});   // 4 s
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));   // messages back to back can be lost
+        const auto t0 = std::chrono::steady_clock::now();
+        const int names = g_stripNameSeq;
+        // Already at the end that way: nothing will move, so no wait (the queue was held 2.6 s by such a press).
+        // The press selects the first / last track instead.
+        const int total = g_bankTotal;
+        if (before >= 0 && g_selStrip != 0 && ((!right && before == 0) || (right && total >= 0 && before + 8 >= total))) {
+            const int end = right ? std::min(total - before, 8) - 1 : 0;   // the last track's strip / strip 1
+            std::printf("UF1 BANK %s (no UF8): already at the %s (bank position %d): SEL strip %d\n", right ? "right" : "left",
+                        right ? "last bank" : "first bank", before, end + 1);
+            if (end >= 0 && end + 1 != g_selStrip) {
+                note(uint8_t(kNoteSel + end), true);
+                note(uint8_t(kNoteSel + end), false);
+                lastStrip = end;
+                lastAt = std::chrono::steady_clock::now();
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            }
+            return;
+        }
+        const bool shifts = right && userBankRight(true);
+        if (!shifts) {
+            note(right ? kNoteBankRight : kNoteBankLeft, true);
+            note(right ? kNoteBankRight : kNoteBankLeft, false);
+        }
+        // The strips have moved when the script reports a new, known position (SysEx 12). While the names change it
+        // reports -1 (they match nowhere), and strip 1's name comes first: SEL on either landed on the old bank
+        // (bridge.log, 9.11.2026: four presses in ten). Moved took 60-530 ms.
+        (void)names;
+        int i = 0;
+        auto moved = [&] { const int o = g_bankOffset; return o >= 0 && o != before; };
+        // Up to 2.5 s: Cubase sometimes took more than 1.1 s, and a SEL left out then left the selection behind the
+        // strips (bridge.log 9.11.2026: strips on the last bank, selection on the one before; BANK right did nothing).
+        for (; i < 167 && !moved(); ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        const long long waited = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        // One line per press in bridge.log (without --trace): what was sent and what came back.
+        if (i == 167) {   // nothing moved (the first / last bank)
+            // The selection not on the strips (left behind earlier): select on the strips where they are.
+            const bool behind = g_selStrip == 0;
+            std::printf("UF1 BANK %s (no UF8): %s from bank position %d; nothing moved in %lld ms, %s\n",
+                        right ? "right" : "left", shifts ? "single shifts" : "bank key", before, waited,
+                        behind ? ("the selection is not on the strips: SEL strip " + std::to_string(strip + 1)).c_str() : "no SEL");
+            if (!behind) return;
+        }
+        else std::printf("UF1 BANK %s (no UF8): %s from bank position %d; moved after %lld ms (%s), SEL strip %d\n",
+                    right ? "right" : "left", shifts ? "single shifts" : "bank key", before, waited,
+                    ("position " + std::to_string(g_bankOffset.load())).c_str(), strip + 1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));   // the rest of the strips' names
+        note(uint8_t(kNoteSel + strip), true);
+        note(uint8_t(kNoteSel + strip), false);
+        lastStrip = strip;
+        lastAt = std::chrono::steady_clock::now();
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));   // notes back to back can merge
+    }).detach();
 }
 
 static std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again

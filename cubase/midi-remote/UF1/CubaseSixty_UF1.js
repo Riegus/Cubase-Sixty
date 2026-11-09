@@ -493,7 +493,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
-		try { stepTrack(activeDevice, m[5] ? 1 : -1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+		try { stepTrack(activeDevice, m[5] ? 1 : -1, m.length >= 8 && m[6] >= 1 && m[6] <= 64 ? m[6] : 1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 		return
 	}
 	if (m[4] === 0x57 && m.length >= 8) {
@@ -532,6 +532,14 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 var stepMix = null
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
+// Folder tracks (and other tracks without a channel) are not among the MixConsole's channels, but the next /
+// previous track action stops on them. When a step lands on one, the script steps once more the same way, and
+// remembers it (from that track, that way: one more) so the next step there goes past at once. The memory is
+// dropped when the MixConsole's channels change.
+var stepPending = null              // the last step: { from, to, dir, at }
+var stepExtra = {}                  // "<from id>:<dir>" -> extra steps
+var stepExtraKey = ''               // the channel list the memory belongs to
+var STEP_PAST_FOLDERS = true
 var stepListed = false   // (the channel list is logged once, when the selected track is not in it)
 // Every track's channel in the MixConsole, in MixConsole order: the VST Mixer's children, except the inputs and
 // outputs. (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
@@ -552,32 +560,87 @@ function stepChannels() {
 	list.sort(function (a, b) { return a.idx - b.idx })
 	return list
 }
-function stepTrack(activeDevice, dir) {
+// n = how many visible tracks (1 = a step; 8 = the UF1's BANK keys without a UF8). The end of the list stops it.
+function stepTrack(activeDevice, dir, n) {
 	if (!plugAm) return
+	n = n || 1
 	var action = dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
-	var count = 1
+	var count = n
 	if (stepMix) {
 		try {
 			var list = stepChannels()
 			var now = Date.now()
-			var cur = now - stepLast.at < 600 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
+			// Cubase reports the new selection up to ~0.8 s later: until then (or while a step has not arrived) a
+			// press counts from where the last one went, not from the old selection (that ran past the first track).
+			var cur = (stepPending || now - stepLast.at < 1500) && stepLast.id >= 0 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
 			var at = -1
 			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
+			var key = list.map(function (c) { return c.id }).join(',')
+			if (key !== stepExtraKey) { stepExtra = {}; stepExtraKey = key }
 			if (at >= 0) {
-				var k = at + dir
-				while (k >= 0 && k < list.length && !list[k].vis) k += dir
-				if (k < 0 || k >= list.length) return   // no visible track that way
-				count = Math.abs(k - at)
+				var k = at, extra = 0, moved = 0
+				for (var v = 0; v < n; ++v) {
+					var t = k + dir
+					while (t >= 0 && t < list.length && !list[t].vis) t += dir
+					if (t < 0 || t >= list.length) break
+					if (STEP_PAST_FOLDERS) extra += stepExtra[list[k].id + ':' + dir] || 0   // known folders on the way
+					k = t
+					++moved
+				}
+				if (!moved) return   // no visible track that way
+				count = Math.abs(k - at) + extra
+				if (n > 1) out('[CubaseSixty UF1] bank step: from ' + at + (cur === stepLast.id ? ' (the last target)' : '') + ' to ' + k + ' of ' + list.length + ', ' + count + ' step(s)')
 				stepLast = { id: list[k].id, at: now }
+				// A step is checked for a folder it stops on (one more step then). A single step learns it; one that
+				// already goes past a known folder is not checked (it passes the folder on the way).
+				stepPending = (n === 1 && extra) ? null : { from: cur, to: list[k].id, dir: dir, n: n, extra: extra, at: now, extraFor: null, learn: n === 1, fixes: 0 }
 			}
-			if (at < 0 && !stepListed) {
-				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it')
+			if (at < 0 && n > 1) out('[CubaseSixty UF1] bank step: from object ' + cur + ' ("' + selectedInfo.title + '"), not a channel: ' + count + ' step(s)')
+			if (at < 0 && cur >= 0 && !stepListed) {
+				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it. The channels:')
 				stepListed = true
-				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
+				var parts = list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') })
+				for (var q = 0; q < parts.length; q += 8) out('[CubaseSixty UF1]   ' + parts.slice(q, q + 8).join(', '))
 			}
 		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 	}
 	for (var c = 0; c < count; ++c) action.trigger(plugAm)
+}
+// After a step: did it land where it was meant to? Cubase's next / previous track action also stops on folders (and
+// other tracks without a channel, such as the ruler and marker tracks at the top), which the channel list does not
+// hold. On a track short of or past the target: the steps missing (or back), and the step remembered. On a folder:
+// one more step the same way (the other way if there is no track beyond the target). At most three corrections.
+function stepCheckLanding() {
+	var p = stepPending
+	if (!p || !stepMix || !plugAm || Date.now() - p.at > 4000) { stepPending = null; return }
+	var cur = -1
+	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
+	if (cur === p.to) { stepPending = null; return }   // arrived
+	var list = stepChannels()
+	var atCur = -1, atTo = -1
+	for (var i = 0; i < list.length; ++i) { if (list[i].id === cur) atCur = i; if (list[i].id === p.to) atTo = i }
+	if (atTo < 0 || p.fixes >= 3 || !STEP_PAST_FOLDERS) { stepPending = null; return }
+	var steps = 0, why = ''
+	if (atCur >= 0) {
+		// On a track (a long step that crossed a folder ends one short): left as it is.
+		stepPending = null
+		return
+	} else if (cur >= 0) {
+		stepPending = null   // a track with a channel the list does not hold (not a folder): left alone
+		return
+	} else {
+		var beyond = false
+		for (var b = atTo + p.dir; b >= 0 && b < list.length; b += p.dir) if (list[b].vis) { beyond = true; break }
+		steps = beyond ? 1 : -1
+		why = 'on a track without a channel'
+	}
+	p.fixes = (p.fixes || 0) + 1
+	p.at = Date.now()
+	if (p.learn && steps > 0) stepExtra[p.from + ':' + p.dir] = (stepExtra[p.from + ':' + p.dir] || 0) + 1
+	out('[CubaseSixty UF1] track step: ' + why + ' ("' + selectedInfo.title + '"); ' + Math.abs(steps) + (steps > 0 ? ' more' : ' back'))
+	var fwd = (steps > 0) === (p.dir > 0)
+	var act = fwd ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
+	for (var c = 0; c < Math.abs(steps); ++c) act.trigger(plugAm)
 }
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
@@ -585,6 +648,9 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
+	// Cubase reports the tracks a step passes too (folders among them), late: the landing is looked at once the
+	// reports have stopped for a moment (page.mOnIdle).
+	if (stepPending) stepPending.settleAt = Date.now() + 450
 	if (masterActive) return
 	sendName(activeDevice, title)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
@@ -1397,6 +1463,10 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 }
 var eqPollAt = 0
 page.mOnIdle = function (activeDevice, activeMapping) {
+	if (stepPending && stepPending.settleAt && Date.now() >= stepPending.settleAt) {
+		stepPending.settleAt = 0
+		try { stepCheckLanding() } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+	}
 	plugAm = activeMapping
 	// Cubase's EQ is also read here, about seven times a second: its changes do not reliably arrive as parameter
 	// changes.

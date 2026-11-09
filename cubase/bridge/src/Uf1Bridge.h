@@ -18,6 +18,8 @@ void uf1Stop();
 void uf1Poll();
 // Defined in main.cpp: one bank step on the UF8 (the UF1's BANK keys use it). False if no UF8 is running.
 bool uf8BankPress(bool right);
+// Defined in main.cpp: BANK without a UF8: the UF8 script banks, and the track on the same strip is selected.
+void uf8BankSelect(bool right);
 // Defined in main.cpp: an automation mode key was pressed (note 58-61); updates the UF8's mode LEDs.
 void autoModePressed(uint8_t note);
 // The UF8 strip (1-8) that holds the selected track, 0 = not on the UF8's current bank. Shown in the UF1's
@@ -29,6 +31,7 @@ void uf1SetSoloActive(bool on);
 // selected, SysEx 1C).
 void uf1SendToScript(const std::vector<unsigned char>& msg);
 // One track back / forward (dir -1 / +1) past the tracks hidden in the MixConsole (track-stepping = mixconsole): the
-// UF1 script steps and steps again while the new track is hidden (SysEx 5C). False when the UF1 is not open.
-bool uf1StepTrack(int dir);
+// UF1 script steps and steps again while the new track is hidden (SysEx 5C), whether or not the UF1 is connected.
+// False if its ports could not be made.
+bool uf1StepTrack(int dir, int count = 1);
 }

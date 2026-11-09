@@ -15,17 +15,21 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   Project", bus comp row empty, rings and LEDs off). On open each surface puts back what Cubase does not send again
   (it sends only what changed), and the UF8's start-up follow runs again.
 
-## 2. Different setups of the surfaces
+## 2. Different setups of the surfaces (done 9.11.2026)
 
 - Always create every surface's MIDI ports, so all scripts load whatever is connected (Cubase only sees ports at start).
 - Hot-plug: a surface connected or disconnected while Cubase runs comes and goes without a restart.
 - Done (9.11.2026): the bridge makes all ports at start; a missing surface is looked for every 2 s, an unplugged
   one let go of and picked up again with the last state Cubase sent (the UF8's foot switches ignored for 4 s after
   each connect: an empty jack reports "pressed" and started the transport).
-- Move the jobs that serve every surface into the Helper script (present in every setup): skipping tracks hidden in the
-  MixConsole (now in the UF1 script), the favourites and anything else the UF8 / UF1 borrow from the UC1 script.
+- ~~Move the jobs that serve every surface into the Helper script~~: not needed. With every surface's ports always
+  made, every script is loaded in every setup, so the UF1 script's track stepping and the UC1 script's favourites
+  serve the other surfaces whether or not the UF1 / UC1 is connected (the bridge no longer asks for the UF1 device
+  before the UF8 / UC1 step tracks through it).
 - Check each combination: UF8 alone, UF1 alone, UC1 alone, each pair, all three (fallbacks such as the UF1's BANK
-  without a UF8).
+  without a UF8). Done 9.11.2026: all work. Found on the way: single track steps stopped on folders (now stepped past
+  and remembered); the UF1's BANK without a UF8 now banks the UF8 script's strips and selects on them (see
+  [Banking and track stepping](banking.md)).
 - Later: two UF8s (16 strips).
 
 ## 3. The bridge as a background app

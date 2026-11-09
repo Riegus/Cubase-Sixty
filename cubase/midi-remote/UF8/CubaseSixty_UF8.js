@@ -690,6 +690,9 @@ function meterToMidi(value) {
 // ---------------------------------------------------------------------------
 
 var followRestart = function () {}, followStop = function () {}, driverActivations = 0
+// The UF1's BANK without a UF8 moves these strips and selects on them (SysEx 5D from the bridge): follow stays out
+// of it meanwhile, as the selection Cubase reports then is late and on the old bank (it banked back).
+var followQuietUntil = 0
 ;(function () {
 	var CHANNELS = 256
 	var allTitles = []
@@ -799,7 +802,7 @@ var followRestart = function () {}, followStop = function () {}, driverActivatio
 		return -1
 	}
 	function follow(activeDevice) {
-		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0) { followTries = 0; return }
+		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0 || nowMs() < followQuietUntil) { followTries = 0; return }
 		var offset = currentOffset()
 		if (offset < 0) { followTries = 0; return }
 		var delta = selectedIndex - offset
@@ -918,6 +921,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
 	if (m[4] >= 0x21 && m[4] <= 0x29) {
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
+		return
+	}
+	if (m[4] === 0x5D && m.length >= 7) {   // the UF1 banks these strips: no follow for <n> x 100 ms
+		followQuietUntil = Date.now() + m[5] * 100   // (nowMs is inside the follow block)
 		return
 	}
 	if (m[4] === 0x18 && m.length >= 8) {

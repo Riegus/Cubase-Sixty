@@ -516,14 +516,9 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (!ev.pressed) break;
             const bool right = ev.id == 0x23;
             if (uf8BankPress(right)) break;
-            // No UF8: step the selection eight tracks instead (spaced out; back-to-back pulses were merged).
-            std::thread([right] {
-                for (int i = 0; i < 8; ++i) {
-                    note(uint8_t(right ? 41 : 40), true);
-                    note(uint8_t(right ? 41 : 40), false);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(40));
-                }
-            }).detach();
+            // No UF8: the UF8 script banks anyway (its strips skip hidden tracks and folders) and the track on the
+            // selection's strip in the new bank is selected.
+            uf8BankSelect(right);
             break;
         }
         if (ev.id == 0x24 || ev.id == 0x26) {
@@ -1294,6 +1289,7 @@ void onSysex(const std::vector<unsigned char>& m)
         if (!t.empty()) { { std::lock_guard<std::mutex> lk(g_cellMx); g_trackName = t; } paintHeader(); }
         g_uf1RightSeen = false;   // another track: mono until it sends a right side
         if (t.empty()) return;
+        std::printf("UF1 track: %s\n", t.c_str());   // (bridge.log: which track Cubase reports, and when)
         if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
         screenText(::uf1::scr::kTrackName, t);
     } else if (auto c = parseColour(m)) {
@@ -1676,6 +1672,7 @@ void onMcuIn(std::vector<unsigned char>& m)
 bool uf1Connect(bool quiet);
 static long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
 static bool g_missingSaid = false;  // "not found" is said once, not every two seconds
+static bool g_portsOpen = false;    // the UF1 script's ports (it steps tracks for the UF8 and UC1 too)
 
 // The ports are made whether or not the UF1 is connected (Cubase sees ports only when it starts, and the script
 // loads only when its ports are there). The UF1 itself comes and goes: see uf1Poll.
@@ -1686,6 +1683,7 @@ bool uf1Start()
     g_missingSaid = !uf1Connect(false);
     g_nextTry = nowMs() + 2000;
     const bool ports = g_out.open(kPortTo) && g_in.open(kPortFrom, &onMidiIn);
+    g_portsOpen = ports;
     if (!ports) std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortTo, kPortFrom);
     g_mcuOpen = g_mcuOut.open(kMcuTo) && g_mcuIn.open(kMcuFrom, &onMcuIn);
     if (!g_mcuOpen) std::fprintf(stderr, "Mackie ports for scrubbing not available; SCRUB falls back to fast nudging.\n");
@@ -1743,10 +1741,11 @@ void uf1SetStripNumber(int n)
 
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 
-bool uf1StepTrack(int dir)
+// The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
+bool uf1StepTrack(int dir, int count)
 {
-    if (!g_open) return false;
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
+    if (!g_portsOpen) return false;
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), uint8_t(std::clamp(count, 1, 64)), 0xF7});
     return true;
 }
 
