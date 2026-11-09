@@ -1233,7 +1233,18 @@ int main(int argc, char** argv)
                    "\",\"uc1\":\"" + cs::uc1State() + "\",\"cubase\":\"" + cubase + "\"}";
         },
         [] { cs::uc1SendFavourites(); },
-        cs::logDir(argc > 0 ? argv[0] : nullptr).string());
+        cs::logDir(argc > 0 ? argv[0] : nullptr).string(),
+        [](const std::string& key) {
+            if (key != "track-names") return;
+            // The names again, abbreviated or cut as now set (the UC1 redraws its own all the time).
+            std::vector<std::vector<unsigned char>> names;
+            {
+                std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+                for (auto& kv : g_uf8Cache) if (kv.first >= 0x10000 + (0x01 << 8) && kv.first < 0x10000 + (0x02 << 8)) names.push_back(kv.second);
+            }
+            for (auto& n : names) onMidiIn(n);
+            cs::uf1RedrawName();
+        });
     cs::stopEventInit();
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));

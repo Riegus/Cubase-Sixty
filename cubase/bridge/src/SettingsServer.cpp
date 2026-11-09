@@ -49,6 +49,7 @@ int g_port = 0;
 std::string g_token;
 std::function<std::string()> g_status;
 std::function<void()> g_favouritesSaved;
+std::function<void(const std::string&)> g_changed;
 std::thread g_thread;
 std::string g_logsDir;
 
@@ -207,7 +208,9 @@ void handle(Sock c)
     if (method == "GET" && path == "/api/state") { reply(c, 200, "application/json", state()); return; }
     if (method == "POST" && path == "/api/set") {
         std::string why;
-        const bool ok = settings::set(formField(body, "key"), formField(body, "value"), &why);
+        const std::string key = formField(body, "key");
+        const bool ok = settings::set(key, formField(body, "value"), &why);
+        if (ok && g_changed) g_changed(key);
         reply(c, ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":" + json(why) + "}");
         return;
     }
@@ -239,8 +242,10 @@ void loop()
 
 } // namespace
 
-bool start(std::function<std::string()> status, std::function<void()> favouritesSaved, const std::string& logsDir)
+bool start(std::function<std::string()> status, std::function<void()> favouritesSaved, const std::string& logsDir,
+           std::function<void(const std::string&)> changed)
 {
+    g_changed = std::move(changed);
     netInit();
     g_logsDir = logsDir;
     g_status = std::move(status);

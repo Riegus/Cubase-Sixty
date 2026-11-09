@@ -18,6 +18,8 @@ void uf1Stop();
 void uf1Poll();
 // For the Settings page: "connected" or "not connected".
 const char* uf1State();
+// Draws the track name again (Settings: Long track names changed).
+void uf1RedrawName();
 // Defined in main.cpp: one bank step on the UF8 (the UF1's BANK keys use it). False if no UF8 is running.
 bool uf8BankPress(bool right);
 // Defined in main.cpp: BANK without a UF8: the UF8 script banks, and the track on the same strip is selected.

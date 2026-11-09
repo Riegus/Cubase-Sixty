@@ -1692,6 +1692,12 @@ bool uf1Start()
 }
 
 const char* uf1State() { return g_open ? "connected" : "not connected"; }
+void uf1RedrawName()
+{
+    std::vector<unsigned char> name;
+    { std::lock_guard<std::mutex> lk(g_cacheMx); auto it = g_cache.find(0x101); if (it != g_cache.end()) name = it->second; }
+    if (!name.empty() && !g_noProject) onMidiIn(name);
+}
 
 // From the main loop: a UF1 that stopped answering or was unplugged is let go of, and a missing one is looked
 // for every two seconds (plugged in while Cubase runs, or switched on later).

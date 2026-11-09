@@ -31,5 +31,7 @@ const std::vector<Def>& schema();
 // Sets one value (checked against its choices) and writes settings.txt again. False if the key or value is unknown,
 // with the reason in *why.
 bool set(const std::string& key, const std::string& value, std::string* why);
+// Counts the changes made with set() (code that keeps a setting at hand looks again when it changes).
+unsigned generation();
 
 } // namespace cs::settings

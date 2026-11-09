@@ -1,6 +1,7 @@
 #include "Settings.h"
 #include "ScriptLog.h"
 
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -125,6 +126,9 @@ std::string get(const std::string& key, const std::string& fallback)
 
 const std::vector<Def>& schema() { return defs(); }
 
+std::atomic<unsigned> g_generation{0};
+unsigned generation() { return g_generation; }
+
 bool set(const std::string& key, const std::string& value, std::string* why)
 {
     const std::string k = lower(trim(key)), v = trim(value);
@@ -151,6 +155,7 @@ bool set(const std::string& key, const std::string& value, std::string* why)
     std::printf("Settings: %s = %s\n", k.c_str(), v.c_str());
     g_stamp = {};   // read it again on the next look
     reloadIfChanged();
+    ++g_generation;
     return true;
 }
 
