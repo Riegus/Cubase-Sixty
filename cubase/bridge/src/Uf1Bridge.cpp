@@ -9,6 +9,7 @@
 #include "Uf1Bridge.h"
 #include "Names.h"
 #include "Brightness.h"
+#include "Sleep.h"
 #include "Uc1Bridge.h"
 #include "Settings.h"
 
@@ -341,6 +342,10 @@ void onUf1Event(const ::uf1::InputEvent& ev)
     using K = ::uf1::InputKind;
     if (g_trace && ev.kind != K::FaderPosition)
         std::printf("%lld [UF1 event] kind=%d id=0x%02X pressed=%d delta=%d\n", nowMs() % 100000, int(ev.kind), ev.id, int(ev.pressed), ev.delta);
+    // Sleep when idle: every hand counts as activity; the touch, turn or press that wakes the surfaces is dropped.
+    if (ev.kind == K::FaderPosition) sleep::activity(false);
+    else if (ev.kind == K::Button) { if (sleep::key(1, ev.id, ev.pressed)) return; }
+    else if (ev.kind == K::EncoderRotate || ev.pressed) { if (sleep::activity(true)) return; }
     switch (ev.kind) {
     case K::FaderTouch:
         g_touched = ev.pressed;
@@ -1711,9 +1716,22 @@ const char* uf1State() { return g_open ? "connected" : "not connected"; }
 void uf1ApplyBrightness()
 {
     if (!g_open) return;
-    // The LEDs share the UF8's opcode and scale (Brightness.h); the big screen has its own column.
-    g_dev.send(::uf1::buildLedBrightness(brightness::kTable[settings::brightnessLevel("led-brightness")].uf8_led));
-    g_dev.send(::uf1::buildLcdBrightness(brightness::kTable[settings::brightnessLevel("display-brightness")].uf1_lcd));
+    // The LEDs share the UF8's opcode and scale (Brightness.h); the big screen has its own column. Asleep: the
+    // panel master to 0 as well (it alone darkens the small channel display; Rea-Sixty's SurfaceSleep).
+    const bool dark = sleep::asleep();
+    g_dev.send(::uf1::buildMasterBrightness(dark ? 0x00 : 0xFF));
+    g_dev.send(::uf1::buildLedBrightness(dark ? 0 : brightness::kTable[settings::brightnessLevel("led-brightness")].uf8_led));
+    g_dev.send(::uf1::buildLcdBrightness(dark ? 0 : brightness::kTable[settings::brightnessLevel("display-brightness")].uf1_lcd));
+}
+// The transport runs (Cubase's Play or Record LED on the UF1, notes 94 / 95): keeps the surfaces awake.
+bool uf1TransportRunning()
+{
+    std::lock_guard<std::mutex> lk(g_cacheMx);
+    for (int n : {0x5E, 0x5F}) {
+        auto it = g_cache.find(n);
+        if (it != g_cache.end() && (it->second[0] & 0xF0) == 0x90 && it->second.size() >= 3 && it->second[2] > 0) return true;
+    }
+    return false;
 }
 void uf1RedrawName()
 {

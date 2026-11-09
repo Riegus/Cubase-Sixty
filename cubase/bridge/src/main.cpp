@@ -29,6 +29,7 @@
 #include "SettingsServer.h"
 #include "Names.h"
 #include "Brightness.h"
+#include "Sleep.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -244,6 +245,11 @@ void applyRoute()
 void handleFrame(const uf8frames::Frame& fr)
 {
     const uint8_t* d = fr.b;
+    // Sleep when idle: every hand counts as activity; the touch, turn or press that wakes the surfaces is dropped.
+    if (d[1] == 0x21) cs::sleep::activity(false);
+    else if (d[1] == 0x20) { if (d[4] != 0 && cs::sleep::activity(true)) return; }
+    else if (d[1] == 0x24) { if (cs::sleep::activity(true)) return; }
+    else if (d[1] == 0x22) { if (cs::sleep::key(0, d[3], d[5] == 0x01)) return; }
     switch (d[1]) {
     case 0x21: {   // fader position: FF 21 03 strip lsb msb ck
         const uint8_t s = d[3];
@@ -1121,8 +1127,9 @@ void cs::uf8BankSelect(bool right)
 void uf8ApplyBrightness()
 {
     if (!g_uf8Running) return;
-    g_dev.send(uf8::buildLedBrightness(brightness::kTable[cs::settings::brightnessLevel("led-brightness")].uf8_led));
-    g_dev.send(uf8::buildLcdBrightness(brightness::kTable[cs::settings::brightnessLevel("display-brightness")].uf8_lcd));
+    const bool dark = cs::sleep::asleep();   // Sleep when idle: all off
+    g_dev.send(uf8::buildLedBrightness(dark ? 0 : brightness::kTable[cs::settings::brightnessLevel("led-brightness")].uf8_led));
+    g_dev.send(uf8::buildLcdBrightness(dark ? 0 : brightness::kTable[cs::settings::brightnessLevel("display-brightness")].uf8_lcd));
 }
 
 static std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again
@@ -1279,6 +1286,12 @@ int main(int argc, char** argv)
         cs::uf1Poll();
         cs::uc1Poll();
         uf8Poll();
+        cs::sleep::tick(cs::uf1TransportRunning(), [](bool asleep) {
+            std::printf("Surfaces %s.\n", asleep ? "asleep (Sleep when idle)" : "awake");
+            uf8ApplyBrightness();
+            cs::uf1ApplyBrightness();
+            cs::uc1ApplyBrightness();
+        });
     }
     // Leaving: the surfaces blank (as with no project) before they are let go of, so they do not keep showing the
     // last tracks. (Ctrl+C and the tray app's Quit come here; a killed process cannot.)
