@@ -85,7 +85,8 @@ fs::path logsDirFor(const fs::path& exeDir)
 
 // ---------------------------------------------------------------------------------------------- the icon
 
-// A filled circle in the given colour, drawn at run time (no resource file).
+// A small mixing surface in the status colour, drawn at run time (no resource file): a rounded panel with three
+// fader slots and their caps at different heights. Drawn at 4x and averaged down, for smooth edges at any size.
 HICON makeIcon(COLORREF rgb)
 {
     const int size = GetSystemMetrics(SM_CXSMICON);
@@ -105,16 +106,43 @@ HICON makeIcon(COLORREF rgb)
     HBITMAP color = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO*>(&bi), DIB_RGB_COLORS, &bits, nullptr, 0);
     ReleaseDC(nullptr, dc);
     auto* px = static_cast<uint32_t*>(bits);
-    const double c = (size - 1) / 2.0, r = size / 2.0 - 0.5;
+
+    // The design on a 16-unit square (u = x / size * 16).
+    struct Rgba { double r, g, b, a; };
+    const Rgba panel{GetRValue(rgb) / 255.0, GetGValue(rgb) / 255.0, GetBValue(rgb) / 255.0, 1};
+    const Rgba rim{panel.r * 0.5, panel.g * 0.5, panel.b * 0.5, 1};
+    const Rgba slot{0.12, 0.12, 0.12, 1};
+    const Rgba cap{1, 1, 1, 1};
+    auto inRound = [](double x, double y, double x0, double y0, double x1, double y1, double rad) {
+        if (x < x0 || x > x1 || y < y0 || y > y1) return false;
+        const double cx = x < x0 + rad ? x0 + rad : x > x1 - rad ? x1 - rad : x;
+        const double cy = y < y0 + rad ? y0 + rad : y > y1 - rad ? y1 - rad : y;
+        return (x - cx) * (x - cx) + (y - cy) * (y - cy) <= rad * rad;
+    };
+    const double slotsX[3] = {4.5, 8.0, 11.5};
+    const double capsY[3] = {9.5, 5.0, 7.5};   // fader positions
+    auto sample = [&](double u, double v) -> Rgba {
+        Rgba c{0, 0, 0, 0};
+        if (inRound(u, v, 0.5, 1.0, 15.5, 15.0, 2.5)) c = rim;
+        if (inRound(u, v, 1.5, 2.0, 14.5, 14.0, 1.8)) c = panel;
+        for (int k = 0; k < 3; ++k) {
+            if (inRound(u, v, slotsX[k] - 0.6, 3.5, slotsX[k] + 0.6, 12.5, 0.6)) c = slot;
+            if (inRound(u, v, slotsX[k] - 1.6, capsY[k] - 1.1, slotsX[k] + 1.6, capsY[k] + 1.1, 0.5)) c = cap;
+        }
+        return c;
+    };
+    constexpr int ss = 4;
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x) {
-            const double d = std::sqrt((x - c) * (x - c) + (y - c) * (y - c));
-            double a = r + 0.5 - d;   // soft edge
-            a = a < 0 ? 0 : a > 1 ? 1 : a;
-            const bool ring = d > r - 1.5;   // a darker rim, so the dot shows on light and dark task bars
-            const double k = ring ? 0.55 : 1.0;
-            const uint32_t A = uint32_t(a * 255);
-            const uint32_t R = uint32_t(GetRValue(rgb) * k * a), G = uint32_t(GetGValue(rgb) * k * a), B = uint32_t(GetBValue(rgb) * k * a);
+            double r = 0, g = 0, b = 0, a = 0;
+            for (int sy = 0; sy < ss; ++sy)
+                for (int sx = 0; sx < ss; ++sx) {
+                    const Rgba c = sample((x + (sx + 0.5) / ss) * 16.0 / size, (y + (sy + 0.5) / ss) * 16.0 / size);
+                    r += c.r * c.a; g += c.g * c.a; b += c.b * c.a; a += c.a;
+                }
+            const double n = ss * ss;
+            const uint32_t A = uint32_t(a / n * 255 + 0.5);
+            const uint32_t R = uint32_t(r / n * 255 + 0.5), G = uint32_t(g / n * 255 + 0.5), B = uint32_t(b / n * 255 + 0.5);
             px[y * size + x] = (A << 24) | (R << 16) | (G << 8) | B;   // premultiplied
         }
     HBITMAP mask = CreateBitmap(size, size, 1, 1, nullptr);
