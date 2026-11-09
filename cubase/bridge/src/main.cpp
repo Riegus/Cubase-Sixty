@@ -1027,21 +1027,25 @@ bool cs::uf8BankPress(bool right)
 
 // The UF1's BANK keys without a UF8: the UF8 script (loaded whether or not the UF8 is connected) banks its strips,
 // which follow the MixConsole (hidden tracks and folders are not on strips), and the track on the same strip of
-// the new bank is selected (strip 1 if the selection was not on the bank). Nothing is selected when the bank did
-// not move (its first / last bank).
+// the new bank is selected (strip 1 if the selection was not on the bank).
 void cs::uf8BankSelect(bool right)
 {
     const int before = g_bankOffset;
     const int strip = g_selStrip > 0 ? g_selStrip - 1 : 0;
-    if (!(right && userBankRight(true))) {
+    const bool shifts = right && userBankRight(true);   // near the end: single-track shifts (60 ms apart)
+    if (!shifts) {
         note(right ? kNoteBankRight : kNoteBankLeft, true);
         note(right ? kNoteBankRight : kNoteBankLeft, false);
     }
-    std::thread([before, strip] {
-        // The script reports the new bank position (SysEx 12) when Cubase has moved it.
-        for (int i = 0; i < 20 && g_bankOffset == before; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(25));
-        if (g_bankOffset == before && before >= 0) return;   // did not move
-        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    std::thread([before, strip, shifts] {
+        if (shifts) {
+            // Wait for the script to report the new bank position (SysEx 12); nothing if it did not move.
+            for (int i = 0; i < 20 && g_bankOffset == before; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+            if (g_bankOffset == before) return;
+        }
+        // Cubase takes the notes in order: SEL right after the bank step lands on the new bank. (Notes sent back
+        // to back can be merged: 40 ms apart.) On the first / last bank it selects the selected track again.
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
         note(uint8_t(kNoteSel + strip), true);
         note(uint8_t(kNoteSel + strip), false);
     }).detach();
