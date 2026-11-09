@@ -612,7 +612,7 @@ function stepTrack(activeDevice, dir, n) {
 // one more step the same way (the other way if there is no track beyond the target). At most three corrections.
 function stepCheckLanding() {
 	var p = stepPending
-	if (!p || !stepMix || !plugAm || Date.now() - p.at > 2500) { stepPending = null; return }
+	if (!p || !stepMix || !plugAm || Date.now() - p.at > 4000) { stepPending = null; return }
 	var cur = -1
 	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
 	if (cur === p.to) { stepPending = null; return }   // arrived
@@ -622,16 +622,13 @@ function stepCheckLanding() {
 	if (atTo < 0 || p.fixes >= 3 || !STEP_PAST_FOLDERS) { stepPending = null; return }
 	var steps = 0, why = ''
 	if (atCur >= 0) {
-		// On a track: on the way (Cubase reports tracks it passes, late), or where a long step that crossed a
-		// folder ended, one short. Left as it is: making up steps from these reports went wrong.
+		// On a track (a long step that crossed a folder ends one short): left as it is.
+		stepPending = null
 		return
 	} else if (cur >= 0) {
 		stepPending = null   // a track with a channel the list does not hold (not a folder): left alone
 		return
 	} else {
-		// Cubase reports a folder more than once (the title, then again): one correction per folder reached.
-		if (p.extraFor === cur) return
-		p.extraFor = cur
 		var beyond = false
 		for (var b = atTo + p.dir; b >= 0 && b < list.length; b += p.dir) if (list[b].vis) { beyond = true; break }
 		steps = beyond ? 1 : -1
@@ -651,7 +648,9 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
-	if (stepPending) { try { stepCheckLanding() } catch (e) { out('[CubaseSixty UF1] track step: ' + e) } }
+	// Cubase reports the tracks a step passes too (folders among them), late: the landing is looked at once the
+	// reports have stopped for a moment (page.mOnIdle).
+	if (stepPending) stepPending.settleAt = Date.now() + 450
 	if (masterActive) return
 	sendName(activeDevice, title)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
@@ -1464,6 +1463,10 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 }
 var eqPollAt = 0
 page.mOnIdle = function (activeDevice, activeMapping) {
+	if (stepPending && stepPending.settleAt && Date.now() >= stepPending.settleAt) {
+		stepPending.settleAt = 0
+		try { stepCheckLanding() } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
+	}
 	plugAm = activeMapping
 	// Cubase's EQ is also read here, about seven times a second: its changes do not reliably arrive as parameter
 	// changes.
