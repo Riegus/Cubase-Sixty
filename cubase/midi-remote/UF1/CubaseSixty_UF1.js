@@ -587,11 +587,13 @@ function stepTrack(activeDevice, dir, n) {
 				}
 				if (!moved) return   // no visible track that way
 				count = Math.abs(k - at) + extra
+				if (n > 1) out('[CubaseSixty UF1] bank step: from ' + at + (cur === stepLast.id ? ' (the last target)' : '') + ' to ' + k + ' of ' + list.length + ', ' + count + ' step(s)')
 				stepLast = { id: list[k].id, at: now }
 				// A step is checked for a folder it stops on (one more step then). A single step learns it; one that
 				// already goes past a known folder is not checked (it passes the folder on the way).
 				stepPending = (n === 1 && extra) ? null : { from: cur, to: list[k].id, dir: dir, n: n, extra: extra, at: now, extraFor: null, learn: n === 1, fixes: 0 }
 			}
+			if (at < 0 && n > 1) out('[CubaseSixty UF1] bank step: from object ' + cur + ' ("' + selectedInfo.title + '"), not a channel: ' + count + ' step(s)')
 			if (at < 0 && cur >= 0 && !stepListed) {
 				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it. The channels:')
 				stepListed = true
