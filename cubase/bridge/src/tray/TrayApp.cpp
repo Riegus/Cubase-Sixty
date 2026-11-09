@@ -4,7 +4,8 @@
 //     again if it stops on its own (up to five times a minute; then it waits for "Restart bridge").
 //   - A tray icon: green = the bridge runs and Cubase has a project open, yellow = the bridge runs but Cubase is not
 //     there (yet) or shows the Hub, red = the bridge is not running. The menu shows each surface's and Cubase's
-//     state (read from cubase\logs\bridge.log), and has Restart bridge, Open logs folder, Start with Windows, Quit.
+//     state (read from cubase\logs\bridge.log), and has Settings (the bridge's Settings page in the browser; also a
+//     click on the icon), Restart bridge, Open logs folder, Start with Windows, Quit.
 //   - Start with Windows: the usual per-user Run entry (HKCU\Software\Microsoft\Windows\CurrentVersion\Run).
 //   - One instance only. Not a Windows service on purpose (see docs\release-plan.md, step 3).
 //
@@ -37,7 +38,7 @@ namespace {
 constexpr UINT kTrayMsg = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTimerMs = 500;
-enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit };
+enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings };
 const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t* kRunValue = L"Cubase-Sixty";
 
@@ -61,6 +62,7 @@ struct Status {
     std::string uf8 = "not found", uf1 = "not found", uc1 = "not found";
     std::string cubase = "not seen yet";
     bool projectOpen = false;
+    std::string settingsUrl;   // the bridge's Settings page ("Settings page: http://127.0.0.1:<port>/")
 } g_status;
 std::uintmax_t g_logPos = 0;
 fs::file_time_type g_logTime{};
@@ -271,6 +273,11 @@ void readLogLine(const std::string& line)
         else if (has((n + " not found").c_str())) *s.state = "not found";
         else if (has(("The " + n + " stopped answering or was unplugged").c_str())) *s.state = "unplugged";
     }
+    if (const size_t at = line.find("Settings page: http://"); at != std::string::npos) {
+        std::string url = line.substr(at + 15);
+        while (!url.empty() && (url.back() == '\r' || url.back() == ' ')) url.pop_back();
+        g_status.settingsUrl = url;
+    }
     if (has("Cubase connected")) { g_status.cubase = "connected"; g_status.projectOpen = true; }
     if (has("Cubase: project open")) { g_status.cubase = "project open"; g_status.projectOpen = true; }
     if (has("Cubase: no project")) { g_status.cubase = "no project (the Hub)"; g_status.projectOpen = false; }
@@ -337,6 +344,8 @@ void showMenu()
         info(g_gaveUp ? L"Bridge: stopped (it kept stopping)" : L"Bridge: not running");
     }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING | (g_bridgeRunning && !g_status.settingsUrl.empty() ? 0 : MF_GRAYED), kCmdSettings, L"Settings...");
+    SetMenuDefaultItem(m, kCmdSettings, FALSE);
     AppendMenuW(m, MF_STRING, kCmdRestart, g_bridgeRunning ? L"Restart bridge" : L"Start bridge");
     AppendMenuW(m, MF_STRING, kCmdLogs, L"Open logs folder");
     AppendMenuW(m, MF_STRING | (autostartOn() ? MF_CHECKED : 0), kCmdAutostart, L"Start with Windows");
@@ -360,7 +369,12 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     }
     switch (msg) {
     case kTrayMsg:
-        if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_LBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU) showMenu();
+        // A click opens the Settings page (the menu while there is none); the right button the menu.
+        // (Version 4 icons: a click comes as NIN_SELECT, the right button as WM_CONTEXTMENU; each once.)
+        if (LOWORD(lp) == NIN_SELECT || LOWORD(lp) == NIN_KEYSELECT) {
+            if (g_bridgeRunning && !g_status.settingsUrl.empty()) PostMessageW(h, WM_COMMAND, kCmdSettings, 0);
+            else showMenu();
+        } else if (LOWORD(lp) == WM_CONTEXTMENU) showMenu();
         return 0;
     case WM_TIMER:
         checkBridge();
@@ -377,6 +391,10 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             g_gaveUp = false;
             g_restarts.clear();
             restartBridge(false);
+            break;
+        case kCmdSettings:
+            if (!g_status.settingsUrl.empty())
+                ShellExecuteW(nullptr, L"open", widen(g_status.settingsUrl).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             break;
         case kCmdLogs:
             fs::create_directories(g_logsDir);

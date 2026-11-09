@@ -1,4 +1,5 @@
 #include "ScriptLog.h"
+#include "Settings.h"
 
 #include <chrono>
 #include <cstdio>
@@ -168,7 +169,12 @@ bool scriptLogSysex(const unsigned char* m, size_t len)
         else if (c < 0x800) { text.push_back(char(0xC0 | (c >> 6))); text.push_back(char(0x80 | (c & 0x3F))); }
         else { text.push_back(char(0xE0 | (c >> 12))); text.push_back(char(0x80 | ((c >> 6) & 0x3F))); text.push_back(char(0x80 | (c & 0x3F))); }
     }
-    scriptLogLine(source, text);
+    // The Settings page's "Script log" (script-log = on / off), looked at once a second at most.
+    thread_local auto checked = std::chrono::steady_clock::time_point{};   // (each MIDI thread its own)
+    thread_local bool on = true;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - checked > std::chrono::seconds(1)) { checked = now; on = settings::get("script-log", "on") != "off"; }
+    if (on) scriptLogLine(source, text);
     return true;
 }
 }

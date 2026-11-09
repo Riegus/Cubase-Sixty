@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include "Names.h"
 #include "Uc1Bridge.h"
 #include "Settings.h"
 
@@ -1290,7 +1291,7 @@ void onSysex(const std::vector<unsigned char>& m)
         g_uf1RightSeen = false;   // another track: mono until it sends a right side
         if (t.empty()) return;
         std::printf("UF1 track: %s\n", t.c_str());   // (bridge.log: which track Cubase reports, and when)
-        if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
+        t = fitName(t, 8);   // the UF1 name cell is 8 characters wide (abbreviated or cut: Settings)
         screenText(::uf1::scr::kTrackName, t);
     } else if (auto c = parseColour(m)) {
         if (c->strip != 0) return;
@@ -1688,6 +1689,14 @@ bool uf1Start()
     g_mcuOpen = g_mcuOut.open(kMcuTo) && g_mcuIn.open(kMcuFrom, &onMcuIn);
     if (!g_mcuOpen) std::fprintf(stderr, "Mackie ports for scrubbing not available; SCRUB falls back to fast nudging.\n");
     return ports;
+}
+
+const char* uf1State() { return g_open ? "connected" : "not connected"; }
+void uf1RedrawName()
+{
+    std::vector<unsigned char> name;
+    { std::lock_guard<std::mutex> lk(g_cacheMx); auto it = g_cache.find(0x101); if (it != g_cache.end()) name = it->second; }
+    if (!name.empty() && !g_noProject) onMidiIn(name);
 }
 
 // From the main loop: a UF1 that stopped answering or was unplugged is let go of, and a missing one is looked

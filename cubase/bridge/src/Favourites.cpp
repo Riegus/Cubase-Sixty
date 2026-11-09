@@ -65,7 +65,7 @@ void init(const char* argv0)
     if (f) { f << kDefault; std::printf("Favourites: wrote the default list to %s\n", g_path.string().c_str()); }
 }
 
-std::vector<std::vector<unsigned char>> messages()
+std::vector<std::string> list(int which)
 {
     std::vector<std::string> lists[2];
     std::ifstream f(g_path, std::ios::binary);
@@ -81,6 +81,12 @@ std::vector<std::vector<unsigned char>> messages()
         }
         if (domain >= 0 && lists[domain].size() < 8) lists[domain].push_back(line);
     }
+    return which == 0 || which == 1 ? lists[which] : std::vector<std::string>{};
+}
+
+std::vector<std::vector<unsigned char>> messages()
+{
+    const std::vector<std::string> lists[2] = {list(0), list(1)};
     std::vector<std::vector<unsigned char>> out;
     for (int d = 0; d < 2; ++d) {
         std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, 0x43, (unsigned char)d};
@@ -92,6 +98,44 @@ std::vector<std::vector<unsigned char>> messages()
         out.push_back(std::move(m));
     }
     return out;
+}
+
+const std::vector<std::string>& known(int domain)
+{
+    static const std::vector<std::string> strips = {"SSL Native Channel Strip 2", "SSL 4K B", "SSL 4K E", "SSL 4K G", "SSL 360 Link"};
+    static const std::vector<std::string> buses = {"SSL Native Bus Compressor 2", "SSL 360 Link Bus Compressor"};
+    return domain == 1 ? buses : strips;
+}
+
+bool write(const std::vector<std::string>& strips, const std::vector<std::string>& busComps, std::string* why)
+{
+    // The explanation at the top of the default file (up to its first heading), then the two lists.
+    std::string head(kDefault);
+    head = head.substr(0, head.find("[Channel Strip]"));
+    std::string t = head + "[Channel Strip]\n";
+    auto add = [&](const std::vector<std::string>& names) {
+        int n = 0;
+        for (const auto& raw : names) {
+            const std::string name = trim(raw);
+            if (name.empty() || name[0] == '#' || name[0] == '[' || n >= 8) continue;
+            t += name + "\n";
+            ++n;
+        }
+    };
+    add(strips);
+    t += "\n[Bus Comp]\n";
+    add(busComps);
+    const auto tmp = g_path.string() + ".new";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) { if (why) *why = "could not write " + tmp; return false; }
+        f << t;
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, g_path, ec);
+    if (ec) { if (why) *why = "could not replace " + g_path.string() + ": " + ec.message(); return false; }
+    std::printf("Favourites: saved (%s)\n", g_path.string().c_str());
+    return true;
 }
 
 } // namespace cs::favourites

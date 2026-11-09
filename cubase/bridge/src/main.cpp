@@ -26,6 +26,8 @@
 #include "RtMidi.h"
 #include "MidiPorts.h"
 #include "StopEvent.h"
+#include "SettingsServer.h"
+#include "Names.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -721,7 +723,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         if (!g_ownText && !g_cubaseFirstMs) g_cubaseFirstMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
         if (auto n = parseName(m)) {
             std::string t(n->text.begin(), n->text.end());
-            if (t.size() > uf8::kUf8ScribbleChars) t.resize(uf8::kUf8ScribbleChars);
+            t = cs::fitName(t, int(uf8::kUf8ScribbleChars));   // abbreviated or cut (Settings: Long track names)
             g_dev.send(uf8::buildStripTextUpper(uint8_t(n->strip), t));
             g_rightSeen[n->strip] = false;   // another track: mono until it sends a right side
             if (!t.empty() && g_stripEmpty[n->strip]) {
@@ -1223,6 +1225,27 @@ int main(int argc, char** argv)
         if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
     }
 
+    // The Settings page (the tray app's Settings opens it).
+    cs::settingsServer::start(
+        [] {
+            const char* cubase = !g_cubaseSpoke ? "waiting for Cubase" : g_noProject ? "no project (the Hub)" : "project open";
+            return std::string("{\"uf8\":\"") + (g_uf8Running ? "connected" : "not connected") + "\",\"uf1\":\"" + cs::uf1State() +
+                   "\",\"uc1\":\"" + cs::uc1State() + "\",\"cubase\":\"" + cubase + "\"}";
+        },
+        [] { cs::uc1SendFavourites(); },
+        cs::logDir(argc > 0 ? argv[0] : nullptr).string(),
+        [](const std::string& key) {
+            if (key != "track-names") return;
+            // The names again, abbreviated or cut as now set (the UC1 redraws its own all the time).
+            std::vector<std::vector<unsigned char>> names;
+            {
+                std::lock_guard<std::mutex> lk(g_uf8CacheMx);
+                for (auto& kv : g_uf8Cache) if (kv.first >= 0x10000 + (0x01 << 8) && kv.first < 0x10000 + (0x02 << 8)) names.push_back(kv.second);
+            }
+            for (auto& n : names) onMidiIn(n);
+            cs::uf1RedrawName();
+            cs::uc1RedrawNames();
+        });
     cs::stopEventInit();
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1239,6 +1262,7 @@ int main(int argc, char** argv)
         g_uf8Running = false;
         g_dev.close();
     }
+    cs::settingsServer::stop();
     cs::uf1Stop();
     cs::uc1Stop();
     return 0;

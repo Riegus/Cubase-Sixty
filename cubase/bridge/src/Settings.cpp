@@ -1,6 +1,7 @@
 #include "Settings.h"
 #include "ScriptLog.h"
 
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -16,22 +17,61 @@ std::mutex g_mx;
 std::map<std::string, std::string> g_values;
 std::filesystem::file_time_type g_stamp{};
 
-const char* const kDefault =
-    "# Cubase-Sixty settings. One \"key = value\" per line; '#' starts a comment. The bridge reads the file again\n"
-    "# when it changes, so an edit needs no restart.\n"
-    "\n"
-    "# Which tracks the UF1's arrows, and the UF1 / UF8 / UC1 CHANNEL encoders, step through:\n"
-    "#   mixconsole = the tracks shown in the MixConsole (hidden ones are stepped past; needs the UF1)\n"
-    "#   project    = the tracks shown in the Project window (Cubase's Navigate Up / Down; the Project window\n"
-    "#                should have the focus)\n"
-    "#   all        = every track, hidden ones included (Cubase's Select Track: Prev / Next)\n"
-    "track-stepping = mixconsole\n"
-    "\n"
-    "# What the UC1's secondary encoder (right of the screen) turns at start (hold its push and turn to change it):\n"
-    "#   bus-comp = the Bus Comp section through the project's bus comps\n"
-    "#   strips   = the track's channel strips (as the magnifier key)\n"
-    "#   cs-fav / bc-fav = the channel strip / bus comp favourites (favourites.txt)\n"
-    "uc1-encoder2 = bus-comp\n";
+// The settings, in the order the Settings page and settings.txt show them. Add new ones here (the page and the file
+// follow); docs/settings-wishlist.md lists what is still fixed in code.
+const std::vector<Def>& defs()
+{
+    static const std::vector<Def> d = {
+        {"track-stepping", "Behaviour", "Track stepping",
+         "Which tracks the UF1's arrows and the UF1 / UF8 / UC1 CHANNEL encoders step through.",
+         {{"mixconsole", "The tracks the MixConsole shows (hidden ones are stepped past)"},
+          {"project", "The tracks the Project window shows (Cubase's Navigate Up / Down; the Project window should have the focus)"},
+          {"all", "Every track, hidden ones included (Cubase's Select Track: Prev / Next)"}},
+         "mixconsole", true},
+        {"uc1-encoder2", "Behaviour", "UC1 secondary encoder at start",
+         "What the UC1's secondary encoder (right of the screen) turns when Cubase starts. Hold its push and turn to change it while working.",
+         {{"bus-comp", "The Bus Comp section through the project's bus comps"},
+          {"strips", "The track's channel strips (as the magnifier key)"},
+          {"cs-fav", "The channel strip favourites"},
+          {"bc-fav", "The bus comp favourites"}},
+         "bus-comp", false},
+        {"track-names", "Display", "Long track names",
+         "A track name longer than a display has room for (UF8 strips and the UF1: 8 characters, the UC1: 12).",
+         {{"abbreviate", "Abbreviated (\"Background Vocals\" becomes \"BckgrVcl\")"},
+          {"cut", "Cut off at the end (\"Backgrou\")"}},
+         "abbreviate", true},
+        {"script-log", "Logging", "Script log",
+         "The MIDI Remote scripts' lines in cubase\\logs\\scripts.log (what the scripts see and do; useful when something goes wrong).",
+         {{"on", "On"}, {"off", "Off"}},
+         "on", true},
+    };
+    return d;
+}
+
+std::string defaultFileText(const std::map<std::string, std::string>& values)
+{
+    std::string t =
+        "# Cubase-Sixty settings. One \"key = value\" per line; '#' starts a comment. The bridge reads the file again\n"
+        "# when it changes, so an edit needs no restart. The Settings page (tray icon > Settings) writes this file too.\n";
+    std::string section;
+    for (const Def& d : defs()) {
+        if (d.section != section) { section = d.section; t += "\n# ---- " + section + "\n"; }
+        t += "\n# " + d.label + ": " + d.help + "\n";
+        for (const Choice& c : d.choices) t += "#   " + c.value + " = " + c.label + (c.value == d.def ? " (default)" : "") + "\n";
+        auto it = values.find(d.key);
+        t += d.key + " = " + (it != values.end() && !it->second.empty() ? it->second : d.def) + "\n";
+    }
+    // Keys the file has that the list does not know (kept, at the end).
+    bool header = false;
+    for (auto& kv : values) {
+        bool known = false;
+        for (const Def& d : defs()) if (d.key == kv.first) known = true;
+        if (known) continue;
+        if (!header) { t += "\n# ---- Other\n"; header = true; }
+        t += kv.first + " = " + kv.second + "\n";
+    }
+    return t;
+}
 
 std::string trim(const std::string& s)
 {
@@ -70,7 +110,7 @@ void init(const char* argv0)
     std::error_code ec;
     if (!std::filesystem::exists(g_path, ec)) {
         std::ofstream f(g_path, std::ios::binary);
-        if (f) { f << kDefault; std::printf("Settings: wrote the defaults to %s\n", g_path.string().c_str()); }
+        if (f) { f << defaultFileText({}); std::printf("Settings: wrote the defaults to %s\n", g_path.string().c_str()); }
     }
     std::lock_guard<std::mutex> lk(g_mx);
     reloadIfChanged();
@@ -82,6 +122,41 @@ std::string get(const std::string& key, const std::string& fallback)
     reloadIfChanged();
     auto it = g_values.find(lower(key));
     return it == g_values.end() || it->second.empty() ? fallback : it->second;
+}
+
+const std::vector<Def>& schema() { return defs(); }
+
+std::atomic<unsigned> g_generation{0};
+unsigned generation() { return g_generation; }
+
+bool set(const std::string& key, const std::string& value, std::string* why)
+{
+    const std::string k = lower(trim(key)), v = trim(value);
+    const Def* def = nullptr;
+    for (const Def& d : defs()) if (d.key == k) def = &d;
+    if (!def) { if (why) *why = "unknown setting " + k; return false; }
+    bool ok = def->choices.empty();
+    for (const Choice& c : def->choices) if (c.value == v) ok = true;
+    if (!ok) { if (why) *why = "\"" + v + "\" is not one of " + k + "'s choices"; return false; }
+    std::lock_guard<std::mutex> lk(g_mx);
+    reloadIfChanged();
+    auto values = g_values;
+    values[k] = v;
+    // Written to a new file first, then put in place: a reader never sees half a file.
+    const auto tmp = g_path.string() + ".new";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        if (!f) { if (why) *why = "could not write " + tmp; return false; }
+        f << defaultFileText(values);
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, g_path, ec);
+    if (ec) { if (why) *why = "could not replace " + g_path.string() + ": " + ec.message(); return false; }
+    std::printf("Settings: %s = %s\n", k.c_str(), v.c_str());
+    g_stamp = {};   // read it again on the next look
+    reloadIfChanged();
+    ++g_generation;
+    return true;
 }
 
 Stepping trackStepping()

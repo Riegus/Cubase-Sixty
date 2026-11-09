@@ -63,6 +63,10 @@ add_executable(cubase_sixty_bridge
     src/Uc1Bridge.cpp
     src/ScriptLog.cpp
     src/StopEvent.cpp
+    src/SettingsServer.cpp
+    src/Names.cpp
+    src/Names.h
+    src/SettingsServer.h
     src/StopEvent.h
     src/NetInit.cpp
     src/SslCoreGuard.cpp
@@ -79,8 +83,23 @@ add_executable(cubase_sixty_bridge
     ${EXT_SRC}/LogPath.cpp
     ${EXT_SRC}/SslCoreImpersonator.cpp
     ${EXT_SRC}/SslMeterProtocol.cpp
-    ${EXT_SRC}/Uf1EqCurve.cpp)
-target_include_directories(cubase_sixty_bridge PRIVATE src ${EXT_SRC})
+    ${EXT_SRC}/Uf1EqCurve.cpp
+    ${EXT_SRC}/TrackName.cpp)
+# The Settings page (src/settings-page.html) goes into the bridge as C++ string pieces (MSVC limits one literal to
+# 16 KB): build/gen/SettingsPage.inc, made again whenever the page changes.
+set(CS_PAGE "${CMAKE_CURRENT_SOURCE_DIR}/src/settings-page.html")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CS_PAGE}")
+file(READ "${CS_PAGE}" _cs_page)
+string(LENGTH "${_cs_page}" _cs_len)
+set(_cs_inc "")
+set(_cs_pos 0)
+while(_cs_pos LESS _cs_len)
+    string(SUBSTRING "${_cs_page}" ${_cs_pos} 8000 _cs_piece)
+    string(APPEND _cs_inc "R\"CS6(${_cs_piece})CS6\",\n")
+    math(EXPR _cs_pos "${_cs_pos} + 8000")
+endwhile()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gen/SettingsPage.inc" "${_cs_inc}")
+target_include_directories(cubase_sixty_bridge PRIVATE src ${EXT_SRC} "${CMAKE_CURRENT_BINARY_DIR}/gen")
 target_link_libraries(cubase_sixty_bridge PRIVATE cs_libusb rtmidi)
 if(WIN32)
     target_link_libraries(cubase_sixty_bridge PRIVATE ws2_32)   # the SSL 360 Core stand-in (sockets)

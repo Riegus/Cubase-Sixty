@@ -15,5 +15,11 @@ namespace cs::favourites {
 void init(const char* argv0);
 // The two SysEx messages, from the file as it is now.
 std::vector<std::vector<unsigned char>> messages();
+// The two lists as the file has them now (0 = channel strips, 1 = bus comps; up to eight each).
+std::vector<std::string> list(int domain);
+// Writes both lists (empty names are left out, eight at most each), keeping the file's explanation at the top.
+bool write(const std::vector<std::string>& strips, const std::vector<std::string>& busComps, std::string* why);
+// The plug-ins the UC1 knows (their settings are carried across a swap), for the Settings page's suggestions.
+const std::vector<std::string>& known(int domain);
 
 } // namespace cs::favourites
