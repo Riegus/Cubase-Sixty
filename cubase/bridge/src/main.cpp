@@ -1030,24 +1030,30 @@ bool cs::uf8BankPress(bool right)
 // the new bank is selected (strip 1 if the selection was not on the bank).
 void cs::uf8BankSelect(bool right)
 {
-    const int before = g_bankOffset;
-    const int strip = g_selStrip > 0 ? g_selStrip - 1 : 0;
-    const bool shifts = right && userBankRight(true);   // near the end: single-track shifts (60 ms apart)
-    if (!shifts) {
-        note(right ? kNoteBankRight : kNoteBankLeft, true);
-        note(right ? kNoteBankRight : kNoteBankLeft, false);
-    }
-    std::thread([before, strip, shifts] {
-        if (shifts) {
-            // Wait for the script to report the new bank position (SysEx 12); nothing if it did not move.
-            for (int i = 0; i < 20 && g_bankOffset == before; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(25));
-            if (g_bankOffset == before) return;
+    // One press after the other (quick presses queue up): each waits until the script reports its bank's new
+    // position (SysEx 12, sent when Cubase has put the new tracks on the strips) and then presses SEL. SEL sent
+    // before that (a fixed 40 ms) landed on the old bank: the selection did not move and presses seemed lost.
+    static std::mutex order;
+    static int lastStrip = 0;                        // the strip the last press selected
+    static std::chrono::steady_clock::time_point lastAt;
+    std::thread([right] {
+        std::lock_guard<std::mutex> lk(order);
+        const int before = g_bankOffset;
+        // Right after a press Cubase's SEL LEDs are in flux (the old selection leaves the strips before the new one
+        // is reported): within 3 s the strip of the last press counts.
+        const bool recent = std::chrono::steady_clock::now() - lastAt < std::chrono::seconds(3);
+        const int strip = recent ? lastStrip : g_selStrip > 0 ? g_selStrip - 1 : 0;
+        if (!(right && userBankRight(true))) {
+            note(right ? kNoteBankRight : kNoteBankLeft, true);
+            note(right ? kNoteBankRight : kNoteBankLeft, false);
         }
-        // Cubase takes the notes in order: SEL right after the bank step lands on the new bank. (Notes sent back
-        // to back can be merged: 40 ms apart.) On the first / last bank it selects the selected track again.
-        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        for (int i = 0; i < 40 && g_bankOffset == before; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        if (g_bankOffset == before) return;   // the first / last bank: nothing moved
         note(uint8_t(kNoteSel + strip), true);
         note(uint8_t(kNoteSel + strip), false);
+        lastStrip = strip;
+        lastAt = std::chrono::steady_clock::now();
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));   // notes back to back can merge
     }).detach();
 }
 
