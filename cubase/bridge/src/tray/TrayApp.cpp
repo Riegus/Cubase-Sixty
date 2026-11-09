@@ -51,6 +51,10 @@ bool g_gaveUp = false;
 fs::path g_exeDir, g_bridgeExe, g_logsDir;
 std::wstring g_bridgeArgs;
 bool g_loopMidi = false;
+// After a restart: Cubase connects to the new ports by itself (seen once, 9.11.2026). Not trusted blindly: if it
+// was connected before and has not spoken again within 20 s, the app says to restart Cubase.
+std::chrono::steady_clock::time_point g_expectCubaseBy{};
+bool g_expectCubase = false;
 
 // What bridge.log says.
 struct Status {
@@ -192,11 +196,15 @@ void stopBridge()
 
 void restartBridge(bool automatic)
 {
+    const bool cubaseWasThere = g_status.cubase != "not seen yet";
     stopBridge();
     Sleep(3000);   // let Windows release the USB devices and the ports (dev-restart.ps1 found the same)
-    if (startBridge() && automatic)
+    if (!startBridge()) return;
+    if (automatic)
         notify(L"The bridge stopped and was started again",
-               L"Cubase connects to it again after a few seconds. bridge.previous.log (Open logs folder) says why it stopped.");
+               L"Cubase should connect to it again after a few seconds. bridge.previous.log (Open logs folder) says why it stopped.");
+    g_expectCubase = cubaseWasThere && !g_loopMidi;
+    g_expectCubaseBy = std::chrono::steady_clock::now() + std::chrono::seconds(20);
 }
 
 // The bridge ended without being asked to: start it again, unless that has happened five times in a minute.
@@ -329,6 +337,11 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_TIMER:
         checkBridge();
         if (g_bridgeRunning) readLog();
+        if (g_expectCubase && g_status.cubase != "not seen yet") g_expectCubase = false;   // it came back
+        if (g_expectCubase && g_bridgeRunning && std::chrono::steady_clock::now() > g_expectCubaseBy) {
+            g_expectCubase = false;
+            notify(L"Cubase has not connected to the bridge again", L"Restart Cubase so it finds the bridge's MIDI ports.");
+        }
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
