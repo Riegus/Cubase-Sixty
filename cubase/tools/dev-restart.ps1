@@ -14,6 +14,11 @@
 #   -NoScriptLog          Start the bridge with --no-script-log (the scripts' lines are not written to cubase\logs\scripts.log).
 #   -Force                If Cubase does not close within 60 seconds, kill it. Unsaved changes are LOST.
 #   -NoStartCubase        Do everything except start Cubase.
+#   -BridgeOnly           Leave Cubase running: stop the bridge, (with -Build) rebuild it, start it again on ports
+#                         made in loopMIDI (--loopmidi). Needs the ten Cubase-Sixty ports created once in loopMIDI
+#                         and Cubase started while they existed (see cubase\docs\development.md).
+#   -ScriptsOnly          Only install the MIDI Remote scripts; then reload them in Cubase (MIDI Remote: Reload
+#                         Scripts). Cubase and the bridge keep running.
 
 param(
     [string]$Project = $env:CUBASE_SIXTY_PROJECT,
@@ -22,7 +27,9 @@ param(
     [switch]$Trace,
     [switch]$NoScriptLog,
     [switch]$Force,
-    [switch]$NoStartCubase
+    [switch]$NoStartCubase,
+    [switch]$BridgeOnly,
+    [switch]$ScriptsOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,12 +43,18 @@ $repo   = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)          # ...\C
 $bridgeDir = Join-Path $repo 'cubase\bridge'
 $bridgeExe = Join-Path $bridgeDir 'build\Release\cubase_sixty_bridge.exe'
 
+if ($ScriptsOnly) {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $repo 'cubase\midi-remote\tools\install-scripts.ps1')
+    Write-Host 'Scripts installed. In Cubase: MIDI Remote (lower zone) > Reload Scripts.'
+    return
+}
+
 # --- 1. Close Cubase (politely: Cubase asks about unsaved changes itself) ---------------------------------
 function Get-CubaseProcesses {
     Get-Process | Where-Object { $_.ProcessName -like 'Cubase*' -and $_.ProcessName -notlike '*Sixty*' }
 }
 $cubase = Get-CubaseProcesses
-if ($cubase) {
+if ($cubase -and -not $BridgeOnly) {
     Write-Host 'Closing Cubase... (answer any "save changes?" dialog in Cubase)'
     # Quit with Ctrl+Q straight away. (Closing the main window first closed the project and left Cubase
     # showing the Hub before it quit.)
@@ -102,12 +115,19 @@ if ($Build) {
 if (-not (Test-Path $bridgeExe)) { throw "Bridge not found: $bridgeExe (build it first, or use -Build)." }
 
 # --- 4. Install the MIDI Remote scripts ----------------------------------------------------------------
-& powershell -ExecutionPolicy Bypass -File (Join-Path $repo 'cubase\midi-remote\tools\install-scripts.ps1')
+if (-not $BridgeOnly) { & powershell -ExecutionPolicy Bypass -File (Join-Path $repo 'cubase\midi-remote\tools\install-scripts.ps1') }
 
 # --- 5. Start the bridge in its own window --------------------------------------------------------------
 $bridgeArgs = @()
 if ($Trace) { $bridgeArgs += '--trace' }
 if ($NoScriptLog) { $bridgeArgs += '--no-script-log' }
+# With the ten Cubase-Sixty ports made in loopMIDI (for -BridgeOnly) the bridge always uses those ports, so Cubase
+# sees the same ports whichever way the bridge was started.
+# (cubase\tools\use-loopmidi.txt, not committed, says the ports have been made there.)
+$useLoopMidi = Test-Path (Join-Path $PSScriptRoot 'use-loopmidi.txt')
+if ($BridgeOnly -and -not $useLoopMidi) { throw '-BridgeOnly needs the ports made in loopMIDI and cubase\tools\use-loopmidi.txt (see cubase\docs\development.md).' }
+if ($useLoopMidi -and -not (Get-Process -Name 'loopMIDI' -ErrorAction SilentlyContinue)) { throw 'cubase\tools\use-loopmidi.txt is there but loopMIDI is not running: start loopMIDI first.' }
+if ($useLoopMidi) { $bridgeArgs += '--loopmidi' }
 # Start it in its own window. Now and then it exits straight away when started right after the previous one
 # (a surface or a port not released yet), so give it up to three starts before giving up.
 $bridgeUp = $false
@@ -128,6 +148,7 @@ if (-not $bridgeUp) {
 
 # --- 6. Start Cubase ------------------------------------------------------------------------------------
 if ($NoStartCubase) { Write-Host 'Done (Cubase not started).'; return }
+if ($BridgeOnly) { Write-Host 'Done (bridge restarted on the loopMIDI ports; Cubase left running).'; return }
 
 if (-not $CubaseExe) {
     $CubaseExe = Get-ChildItem -Path "$env:ProgramFiles\Steinberg" -Recurse -Filter 'Cubase*.exe' -ErrorAction SilentlyContinue |

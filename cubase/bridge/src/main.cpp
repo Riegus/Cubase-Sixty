@@ -1048,15 +1048,27 @@ void cs::uf8BankSelect(bool right)
         // The script's follow selection stays out of it for 2.5 s (SysEx 5D): Cubase reports the selection late,
         // still on the old bank, and follow banked straight back.
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5D, 25, 0xF7});
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));   // messages back to back can be lost
+        const auto t0 = std::chrono::steady_clock::now();
         const int names = g_stripNameSeq;
-        if (!(right && userBankRight(true))) {
+        const bool shifts = right && userBankRight(true);
+        if (!shifts) {
             note(right ? kNoteBankRight : kNoteBankLeft, true);
             note(right ? kNoteBankRight : kNoteBankLeft, false);
         }
         // The strips have moved when the script reports a new position (SysEx 12) or Cubase sends strip 1's name.
         int i = 0;
         for (; i < 40 && g_bankOffset == before && g_stripNameSeq == names; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
-        if (i == 40) return;   // nothing moved (the first / last bank)
+        const long long waited = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        // One line per press in bridge.log (without --trace): what was sent and what came back.
+        if (i == 40) {   // nothing moved (the first / last bank)
+            std::printf("UF1 BANK %s (no UF8): %s from bank position %d; nothing moved in %lld ms, no SEL\n",
+                        right ? "right" : "left", shifts ? "single shifts" : "bank key", before, waited);
+            return;
+        }
+        std::printf("UF1 BANK %s (no UF8): %s from bank position %d; moved after %lld ms (%s), SEL strip %d\n",
+                    right ? "right" : "left", shifts ? "single shifts" : "bank key", before, waited,
+                    g_bankOffset != before ? ("position " + std::to_string(g_bankOffset.load())).c_str() : "strip 1 name", strip + 1);
         std::this_thread::sleep_for(std::chrono::milliseconds(30));   // the rest of the strips' names
         note(uint8_t(kNoteSel + strip), true);
         note(uint8_t(kNoteSel + strip), false);

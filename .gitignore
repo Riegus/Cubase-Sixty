@@ -96,3 +96,6 @@ cubase/logs/
 cubase/favourites.txt
 
 cubase/settings.txt
+
+# Cubase-Sixty: local dev switch (dev-restart.ps1 uses the loopMIDI ports)
+cubase/tools/use-loopmidi.txt
