@@ -16,6 +16,7 @@ std::filesystem::path g_path;
 std::mutex g_mx;
 std::map<std::string, std::string> g_values;
 std::filesystem::file_time_type g_stamp{};
+bool g_quietReload = false;
 
 // The settings, in the order the Settings page and settings.txt show them. Add new ones here (the page and the file
 // follow); docs/settings-wishlist.md lists what is still fixed in code.
@@ -148,8 +149,9 @@ void reloadIfChanged()
         if (eq == std::string::npos) continue;
         g_values[lower(trim(line.substr(0, eq)))] = trim(line.substr(eq + 1));
     }
-    std::printf("Settings: read %s (track-stepping = %s)\n", g_path.string().c_str(),
-                g_values.count("track-stepping") ? g_values["track-stepping"].c_str() : "mixconsole");
+    // (Not after the page's own change: set() has said what changed.)
+    if (!g_quietReload) std::printf("Settings: read %s\n", g_path.string().c_str());
+    g_quietReload = false;
 }
 
 } // namespace
@@ -210,6 +212,7 @@ bool set(const std::string& key, const std::string& value, std::string* why)
     if (ec) { if (why) *why = "could not replace " + g_path.string() + ": " + ec.message(); return false; }
     std::printf("Settings: %s = %s\n", k.c_str(), v.c_str());
     g_stamp = {};   // read it again on the next look
+    g_quietReload = true;
     reloadIfChanged();
     ++g_generation;
     return true;

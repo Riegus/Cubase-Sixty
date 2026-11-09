@@ -54,11 +54,15 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   writing `settings.txt` and `favourites.txt`; changes apply without a restart.
 - Everything on the [settings wishlist](settings-wishlist.md): logging, the UC1 options, favourites (slots, sets, copy
   / own settings), track stepping, the secondary encoder's job, key assignments.
-- Built (wip/settings, to be tested): the page itself (served by the bridge on 127.0.0.1 from port 23660, token and
-  Host checked; Devices / Behaviour / Favourites / Logging / About, saved on change), opened by a click on the tray
-  icon or its Settings item; settings.txt written from one list of settings (Settings.cpp, defs()); the favourites
-  editor (eight per domain, pushed to the UC1 script on save); the script log switch. Next: the wishlist's settings,
-  one by one.
+- Done so far (9.11.2026): the page itself (served by the bridge on 127.0.0.1 from port 23660, token and Host
+  checked; saved on change, a change redraws what shows it), opened by a click on the tray icon or its Settings item;
+  settings.txt written from one list of settings (Settings.cpp, defs()). On it: Devices (status, key / LED and
+  display brightness, sleep when idle), Behaviour (track stepping, touch selects the track, the UF1's view at start,
+  the UC1 secondary encoder at start, the UC1 knob step), UC1 keys (magnifier, 360, encoder push), Display (long
+  track names, the UC1's 7-segment zeros), Favourites (eight per domain), Logging (script log), About.
+- Left (the [settings wishlist](settings-wishlist.md)): the UC1 options for Cubase's own channel strip (modules,
+  DYN IN's compressor, bell keys, F.ATT, the Bus Comp section's start), ROUTING order 10, favourite sets / copy
+  settings, the Rea-Sixty candidates (soft-key bank at start, Identify, Sleep now, a second UF8, metering).
 
 ## 5. Installer and documentation
 
