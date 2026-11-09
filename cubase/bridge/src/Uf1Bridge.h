@@ -33,5 +33,5 @@ void uf1SendToScript(const std::vector<unsigned char>& msg);
 // One track back / forward (dir -1 / +1) past the tracks hidden in the MixConsole (track-stepping = mixconsole): the
 // UF1 script steps and steps again while the new track is hidden (SysEx 5C), whether or not the UF1 is connected.
 // False if its ports could not be made.
-bool uf1StepTrack(int dir, int count = 1);
+bool uf1StepTrack(int dir);
 }

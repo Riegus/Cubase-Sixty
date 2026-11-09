@@ -158,7 +158,6 @@ std::atomic<bool> g_cubaseSpoke{false};
 // of a bank step; on the last full bank it does nothing. Unknown count or position: a normal bank step.
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
 std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
-std::atomic<int> g_stripNameSeq{0};   // counts strip 1's names from Cubase (the strips moved)
 void note(uint8_t n, bool on);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
@@ -690,7 +689,6 @@ void onMidiIn(std::vector<unsigned char>& msg)
         if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
         return;
     }
-    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x01 && m[5] == 0) ++g_stripNameSeq;   // (uf8BankSelect)
     // Trace: when each strip's name arrives (timing of bank changes).
     if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
         std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
@@ -1051,7 +1049,6 @@ void cs::uf8BankSelect(bool right)
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5D, 40, 0xF7});   // 4 s
         std::this_thread::sleep_for(std::chrono::milliseconds(40));   // messages back to back can be lost
         const auto t0 = std::chrono::steady_clock::now();
-        const int names = g_stripNameSeq;
         // Already at the end that way: nothing will move, so no wait (the queue was held 2.6 s by such a press).
         // The press selects the first / last track instead.
         const int total = g_bankTotal;
@@ -1076,7 +1073,6 @@ void cs::uf8BankSelect(bool right)
         // The strips have moved when the script reports a new, known position (SysEx 12). While the names change it
         // reports -1 (they match nowhere), and strip 1's name comes first: SEL on either landed on the old bank
         // (bridge.log, 9.11.2026: four presses in ten). Moved took 60-530 ms.
-        (void)names;
         int i = 0;
         auto moved = [&] { const int o = g_bankOffset; return o >= 0 && o != before; };
         // Up to 2.5 s: Cubase sometimes took more than 1.1 s, and a SEL left out then left the selection behind the
