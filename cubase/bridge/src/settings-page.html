@@ -37,6 +37,9 @@
   label.choice:hover { background: var(--bg); }
   label.choice input { margin-top: 3px; accent-color: var(--accent); }
   .def { color: var(--muted); font-size: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .row label.choice { border: 1px solid var(--line); padding: 6px 12px; align-items: center; }
+  .row label.choice input { margin-top: 0; }
   .dev { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; align-items: center; }
   .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
   .pill.ok { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
@@ -77,9 +80,9 @@
 "use strict";
 const TOKEN = "__TOKEN__";
 const sections = [
-  { id: "devices", title: "Devices", lead: "The surfaces the bridge has found, and Cubase." },
+  { id: "devices", title: "Devices", lead: "The surfaces the bridge has found, Cubase, and how bright the surfaces are." },
   { id: "behaviour", title: "Behaviour", lead: "How the surfaces step through tracks and what they start on." },
-  { id: "display", title: "Display", lead: "How names fit on the surfaces' displays." },
+  { id: "display", title: "Display", lead: "What the surfaces' displays show." },
   { id: "favourites", title: "Favourites", lead: "The channel strips and bus comps the CS Fav / BC Fav modes step through (UF8 CHANNEL encoder, UC1 secondary encoder)." },
   { id: "logging", title: "Logging", lead: "What is written to the log files." },
   { id: "about", title: "About", lead: "" },
@@ -126,6 +129,9 @@ function settingCard(d) {
   const card = el("div", { class: "card" },
     el("h2", {}, d.label, d.live ? null : el("span", { class: "when" }, "takes effect when Cubase starts again")),
     el("p", { class: "help" }, d.help));
+  // Short choices (brightness steps, on / off) side by side; longer ones one per line.
+  const box = el("div", { class: d.choices.every(c => c.label.length <= 10) ? "row" : "" });
+  card.append(box);
   for (const c of d.choices) {
     const id = d.key + "-" + c.value;
     const input = el("input", { type: "radio", name: d.key, id, value: c.value });
@@ -134,7 +140,7 @@ function settingCard(d) {
       try { await post("/api/set", { key: d.key, value: c.value }); d.value = c.value; toast("Saved"); }
       catch (e) { toast("Not saved: " + e.message, true); load(); }
     });
-    card.append(el("label", { class: "choice", for: id }, input,
+    box.append(el("label", { class: "choice", for: id }, input,
       el("span", {}, c.label, c.value === d.def ? el("span", { class: "def" }, "  (default)") : null)));
   }
   return card;
@@ -164,14 +170,20 @@ function favouriteColumn(title, key, names, known) {
   return col;
 }
 
+function fillStatus(card) {
+  const st = state.status || {};
+  card.innerHTML = "";
+  for (const [name, v] of [["UF8", st.uf8], ["UF1", st.uf1], ["UC1", st.uc1], ["Cubase", st.cubase]])
+    card.append(el("strong", {}, name), el("div", {}, pill(v || "unknown")));
+}
+
 function sectionBody(id) {
   const s = el("div");
   if (id === "devices") {
-    const st = state.status || {};
-    const card = el("div", { class: "card dev" });
-    for (const [name, v] of [["UF8", st.uf8], ["UF1", st.uf1], ["UC1", st.uc1], ["Cubase", st.cubase]])
-      card.append(el("strong", {}, name), el("div", {}, pill(v || "unknown")));
+    const card = el("div", { class: "card dev", id: "status" });
+    fillStatus(card);
     s.append(card, el("p", { class: "help" }, "Surfaces can be plugged in and out while everything runs; the bridge looks for a missing one every two seconds."));
+    for (const d of state.settings.filter(d => d.section === "Devices")) s.append(settingCard(d));
   } else if (id === "favourites") {
     const f = state.favourites;
     const strips = favouriteColumn("Channel strips (CS Fav)", "strips", f.strips, f.knownStrips);
@@ -212,7 +224,14 @@ window.addEventListener("hashchange", () => { current = (location.hash || "#devi
 // The Devices status follows along while the page is open.
 setInterval(async () => {
   if (current !== "devices") return;
-  try { const r = await fetch("/api/state?token=" + TOKEN); if (r.ok) { state = await r.json(); render(); } } catch {}
+  // Only the status card is redrawn (the settings below it keep their focus).
+  try {
+    const r = await fetch("/api/state?token=" + TOKEN);
+    if (!r.ok) return;
+    state.status = (await r.json()).status;
+    const card = document.getElementById("status");
+    if (card) fillStatus(card);
+  } catch {}
 }, 2000);
 load();
 </script>

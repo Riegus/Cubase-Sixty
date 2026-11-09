@@ -18,6 +18,10 @@ const char* uc1State();
 void uc1SendFavourites();
 // Draws the names again (Settings: Long track names changed).
 void uc1RedrawNames();
+// Settings changed: brightness (led- / display-brightness), the 7-segment display, the knob step.
+void uc1ApplyBrightness();
+void uc1RedrawSevenSeg();
+void uc1SendKnobStep();
 // One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL
 // encoder: on to the UC1 script (SysEx 44), which shows and swaps them.
 void uc1FavouriteStep(int domain, int dir);

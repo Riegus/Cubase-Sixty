@@ -40,6 +40,22 @@ const std::vector<Def>& defs()
          {{"abbreviate", "Abbreviated (\"Background Vocals\" becomes \"BckgrVcl\")"},
           {"cut", "Cut off at the end (\"Backgrou\")"}},
          "abbreviate", true},
+        {"led-brightness", "Devices", "Key and LED brightness",
+         "How bright the lit keys and LEDs are, on all three surfaces (Rea-Sixty's and SSL 360's five steps).",
+         {{"dark", "Dark"}, {"dim", "Dim"}, {"half", "Half"}, {"bright", "Bright"}, {"full", "Full"}},
+         "bright", true},
+        {"display-brightness", "Devices", "Display brightness",
+         "How bright the displays are: the UF8 strips, the UF1's big screen, the UC1's screen and its status LEDs.",
+         {{"dark", "Dark"}, {"dim", "Dim"}, {"half", "Half"}, {"bright", "Bright"}, {"full", "Full"}},
+         "bright", true},
+        {"uc1-7seg", "Display", "UC1 track number",
+         "The 7-segment display on the UC1 (the selected track's number in the MixConsole).",
+         {{"blank", "Leading zeros blank (\"  7\")"}, {"zeros", "With leading zeros (\"007\", as Rea-Sixty)"}},
+         "blank", true},
+        {"uc1-knob-step", "Behaviour", "UC1 knob steps",
+         "How far one click of a UC1 knob moves a value (FINE makes it a quarter of that).",
+         {{"fine", "Fine: 1/128 of the range"}, {"normal", "Normal: 1/64 of the range"}, {"coarse", "Coarse: 1/32 of the range"}},
+         "normal", true},
         {"script-log", "Logging", "Script log",
          "The MIDI Remote scripts' lines in cubase\\logs\\scripts.log (what the scripts see and do; useful when something goes wrong).",
          {{"on", "On"}, {"off", "Off"}},
@@ -128,6 +144,12 @@ const std::vector<Def>& schema() { return defs(); }
 
 std::atomic<unsigned> g_generation{0};
 unsigned generation() { return g_generation; }
+
+int brightnessLevel(const std::string& key)
+{
+    const std::string v = lower(get(key, "bright"));
+    return v == "dark" ? 0 : v == "dim" ? 1 : v == "half" ? 2 : v == "full" ? 4 : 3;
+}
 
 bool set(const std::string& key, const std::string& value, std::string* why)
 {

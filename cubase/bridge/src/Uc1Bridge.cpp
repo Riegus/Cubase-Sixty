@@ -38,6 +38,7 @@
 
 #include "Uc1Bridge.h"
 #include "Names.h"
+#include "Brightness.h"
 
 #include <algorithm>
 #include <climits>
@@ -133,6 +134,13 @@ void sendMidi(std::vector<unsigned char> m)
     std::lock_guard<std::mutex> lk(g_outMx);
     try { g_out.send(m); } catch (const RtMidiError& e) { std::fprintf(stderr, "uc1 midi out: %s\n", e.getMessage().c_str()); }
 }
+// The knob step (Settings: UC1 knob steps) to the script: SysEx 4E <0 fine 1/128, 1 normal 1/64, 2 coarse 1/32>.
+void sysex(std::initializer_list<unsigned char> body);
+void sendKnobStep()
+{
+    const std::string v = settings::get("uc1-knob-step", "normal");
+    sysex({0x4E, uint8_t(v == "fine" ? 0 : v == "coarse" ? 2 : 1)});
+}
 void sysex(std::initializer_list<unsigned char> body)
 {
     std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36};
@@ -226,7 +234,9 @@ void paintSevenSeg()
     const uint8_t bases[3] = {0x10, 0x08, 0x00};
     for (int d = 0; d < 3; ++d) {
         const int place = d == 0 ? 1 : d == 1 ? 10 : 100;
-        const bool blank = v < 0 || (d > 0 && v < place);
+        // Leading zeros blank, or shown (Settings: UC1 track number = zeros, as Rea-Sixty).
+        const bool zeros = settings::get("uc1-7seg", "blank") == "zeros";
+        const bool blank = v < 0 || (!zeros && d > 0 && v < place);
         const uint8_t segs = blank ? 0 : kDigit[(v / place) % 10];
         for (int seg = 0; seg < 7; ++seg) {
             auto f = ::uc1::buildLedWrite(0x01, uint8_t(bases[d] + seg), (segs >> seg) & 1);
@@ -637,6 +647,7 @@ void onSysex(const std::vector<unsigned char>& m)
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
     case 0x42: {   // the script asks for the favourites (cubase\favourites.txt) and the secondary encoder's job
         for (auto& f : favourites::messages()) sendMidi(std::move(f));
+        sendKnobStep();
         const std::string job = settings::get("uc1-encoder2", "bus-comp");
         const uint8_t mode = job == "strips" ? 1 : job == "cs-fav" ? 2 : job == "bc-fav" ? 3 : 0;
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x4C, mode, 0xF7});
@@ -1128,9 +1139,7 @@ bool openDevice(bool quiet)
     g_dev.setKnobHandler(onKnob);
     g_dev.setButtonHandler(onButton);
     g_open = true;
-    send(::uc1::buildLedBrightness(::uc1::brightness::kBright));
-    send(::uc1::buildLcdBrightness(::uc1::brightness::kLcdBright));
-    send(::uc1::buildStatusBrightness(::uc1::brightness::kStatusBright));
+    uc1ApplyBrightness();
     // Rea-Sixty's start-up layout: plain MAIN, nothing in the readouts until a plug-in is found.
     send(::uc1::buildCentralMode(::uc1::CentralMode::Main, 0x00));
     send(::uc1::buildDisplayInvalidate(::uc1::zone::kChannelStripReadout));
@@ -1235,6 +1244,17 @@ bool uc1Connect(bool quiet)
 }
 
 const char* uc1State() { return g_open ? "connected" : "not connected"; }
+void uc1ApplyBrightness()
+{
+    if (!g_open) return;
+    const auto& led = brightness::kTable[settings::brightnessLevel("led-brightness")];
+    const auto& lcd = brightness::kTable[settings::brightnessLevel("display-brightness")];
+    send(::uc1::buildLedBrightness(led.uc1_led));
+    send(::uc1::buildLcdBrightness(lcd.uc1_lcd));
+    send(::uc1::buildStatusBrightness(lcd.uc1_status));
+}
+void uc1RedrawSevenSeg() { if (g_open) paintSevenSeg(); }
+void uc1SendKnobStep() { sendKnobStep(); }
 void uc1RedrawNames() { if (g_open && !menuOn()) paintCentre(); }
 void uc1SendFavourites() { for (auto& f : favourites::messages()) sendMidi(std::move(f)); }
 
