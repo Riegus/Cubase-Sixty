@@ -268,6 +268,14 @@ void handleFrame(const uf8frames::Frame& fr)
             g_dev.sendPriority(uf8fader::limp(s));
         }
         note(uint8_t(kNoteTouch + s), down);
+        // Settings: touching a fader selects its track (a SEL press, 40 ms after the touch note: notes back to back
+        // can merge).
+        if (down && cs::settings::get("touch-selects", "off") == "on")
+            std::thread([s] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+                note(uint8_t(kNoteSel + s), true);
+                note(uint8_t(kNoteSel + s), false);
+            }).detach();
         break;
     }
     case 0x22: {   // button: FF 22 03 id 00 state ck

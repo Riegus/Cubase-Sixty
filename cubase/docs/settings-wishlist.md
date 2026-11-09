@@ -7,7 +7,8 @@ The Settings page that will hold them is step 4 of the [release plan](release-pl
 The Settings page (tray icon: click, or Settings in its menu) shows what is settable now; it writes
 `cubase\settings.txt` and `cubase\favourites.txt`, which can still be edited by hand. On it so far: track stepping,
 the UC1 secondary encoder's job at start, key / LED and display brightness (five steps, all surfaces), the UC1's
-7-segment leading zeros, the UC1 knob step, long track names (abbreviated, the default, or cut; Rea-Sixty's "Smart
+7-segment leading zeros, the UC1 knob step, touching a UF8 fader selects its track, the UF1's view at start, long
+track names (abbreviated, the default, or cut; Rea-Sixty's "Smart
 abbreviate"), the script log, and the favourites (eight per domain). A new setting is one
 entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
 
@@ -44,9 +45,8 @@ Pot, Parameter Groups, About) has these that would make sense in Cubase-Sixty (l
 
 - **Devices**: sleep the surfaces when idle (after N minutes); Identify (flash
   a surface); a second UF8.
-- **Behaviour**: touching a fader selects its channel; the selection mode back to NORM at start; the UC1 shows the
-  main output as track 0; plug-in cycling wraps around; the UF1 starts in a fixed view (DAW / SENDS / PLUGIN / METER);
-  the UF8 / UF1 start on a fixed soft-key bank; announce the soft-key bank on the time display; the UF1 follows the
+- **Behaviour**: the UC1 shows the main output as track 0; plug-in cycling wraps around; the UF8 / UF1 start on a
+  fixed soft-key bank (the UF8's selection mode is always NORM at start already); announce the soft-key bank on the time display; the UF1 follows the
   UF8's SSL Strip Mode; the UF1's PLUG-IN key opens the plug-in window.
 - **Metering**: where the gain reduction comes from; the UF1 soft-key LEDs as bus comp gain reduction.
 - **Favourites**: named sets, a base bank per project, copy / own settings per domain, which strip sections a swap
