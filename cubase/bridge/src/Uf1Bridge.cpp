@@ -158,6 +158,28 @@ void sendVpotPage_(int view)
     note(n, false);
 }
 void sendVpotPage() { sendVpotPage_(g_view); }
+// Settings: UF1 view at start.
+int startView()
+{
+    const std::string v = settings::get("uf1-start-view", "daw");
+    return v == "sends" ? kViewSends : v == "plugin" ? kViewPlugin : v == "meter" ? kViewMeter : kViewDaw;
+}
+// Shows a view (MODE + a display soft key, or the start view).
+void showView(int view)
+{
+    g_presetsOpen = false;   // picking a view closes the preset browser
+    // The V-pot page goes out on every pick, also of the view already shown: after the scripts are reloaded,
+    // Cubase starts on the sends while the bridge still shows the view it had.
+    sendVpotPage_(view);
+    if (view != g_view) {
+        g_view = view;
+        paintSendCells(true);
+        paintHeader(false);
+    }
+    // (Always in bridge.log: which view, and whether it changed.)
+    std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
+    paintSoftKeys();
+}
 
 // Shuttle: speed index -7..7 (0 = stopped). Negative = reverse. Notes 65..71 = reverse 8x .. 1/8x,
 // 72..78 = forward 1/8x .. 8x (Cubase's "Shuttle Play" commands); stop = the STOP key's note.
@@ -467,20 +489,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             // PLUGIN with an SSL plug-in, without MODE: the plug-in's switches on this page.
             if (ev.pressed && !g_modeHeld && plugActive()) { plugEvent(2, uint8_t(ev.id - 0x19), 0); break; }
             if (!ev.pressed || !g_modeHeld) break;
-            {
-                const int view = ev.id - 0x19;
-                g_presetsOpen = false;   // picking a view closes the preset browser
-                // The V-pot page goes out on every pick, also of the view already shown: after the scripts are
-                // reloaded, Cubase starts on the sends while the bridge still shows the view it had.
-                sendVpotPage_(view);
-                if (view != g_view) {
-                    g_view = view;
-                    paintSendCells(true);
-                    paintHeader();
-                    if (g_trace) std::printf("UF1 view: %s\n", view == kViewPlugin ? "PLUGIN" : view == kViewDaw ? "DAW" : view == kViewMeter ? "METER" : "SENDS");
-                }
-                paintSoftKeys();
-            }
+            showView(ev.id - 0x19);
             break;
         }
         // 5-8: the V-pots switch between sends 1-4 (note 53) and 5-8 (note 54). LED on = 5-8.
@@ -1274,7 +1283,12 @@ void uf1ProjectOpen()
 
 void onSysex(const std::vector<unsigned char>& m)
 {
-    if (!isOurSysex(m)) return;
+    // Two of the script's messages have no data byte (54: the script started; 0A: a new track, show its pan), one
+    // byte shorter than isOurSysex takes: they never got through (found 9.11.2026: the V-pot page, the start view
+    // and the pan line on a track change were never done).
+    const bool shortOk = m.size() == 6 && m[0] == 0xF0 && m[1] == 0x7D && m[2] == 0x52 && m[3] == 0x36 && m[5] == 0xF7 &&
+                         (m[4] == 0x54 || m[4] == 0x0A);
+    if (!shortOk && !isOurSysex(m)) return;
     if (scriptLogSysex(m.data(), m.size())) return;
     if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
         if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
@@ -1386,12 +1400,13 @@ void onSysex(const std::vector<unsigned char>& m)
         if (!g_stripFader && g_volPos >= 0 && !g_touched) motorTo(uint16_t(g_volPos.load()));
     } else if (m[4] == 0x5B && m.size() >= 8) {
         if (g_stripFader && !g_touched) motorTo(uint16_t((m[5] << 7) | m[6]));
+    } else if (m[4] == 0x54) {
+        // The script (re)started: the view to start in (Settings: UF1 view at start), and its V-pot page.
+        std::printf("UF1 script started: view at start = %s\n", settings::get("uf1-start-view", "daw").c_str());
+        showView(startView());
     } else if (m[4] == 0x58 && m.size() >= 7) {
         g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
         if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
-    } else if (m[4] == 0x54) {
-        // The script (re)started: it begins on the sends, so tell it the V-pot page of the view shown.
-        sendVpotPage();
     } else if (m[4] == 0x50 && m.size() >= 11) {
         // PLUGIN view: the SSL plug-in on the selected track (present, page, pages, EQ in, ordinal, model).
         const bool present = m[5] != 0;
