@@ -539,8 +539,7 @@ var stepLast = { id: -1, at: 0 }
 var stepPending = null              // the last step: { from, to, dir, at }
 var stepExtra = {}                  // "<from id>:<dir>" -> extra steps
 var stepExtraKey = ''               // the channel list the memory belongs to
-var stepLoggedKey = ''
-var STEP_PAST_FOLDERS = false
+var STEP_PAST_FOLDERS = true
 var stepListed = false   // (the channel list is logged once, when the selected track is not in it)
 // Every track's channel in the MixConsole, in MixConsole order: the VST Mixer's children, except the inputs and
 // outputs. (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
@@ -573,10 +572,6 @@ function stepTrack(activeDevice, dir) {
 			var at = -1
 			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
 			var key = list.map(function (c) { return c.id }).join(',')
-			if (key !== stepLoggedKey) {   // (diagnosis: the list the steps are counted from, once per change)
-				stepLoggedKey = key
-				out('[CubaseSixty UF1] track step: the channels: ' + list.map(function (c) { var t = ''; try { t = stepMix.getObjectTitle(plugAm, c.id) } catch (e) {} return c.idx + ' "' + t + '" #' + c.id + (c.vis ? '' : ' (hidden)') }).join(', '))
-			}
 			if (key !== stepExtraKey) { stepExtra = {}; stepExtraKey = key }
 			if (at >= 0) {
 				var k = at + dir
@@ -584,8 +579,8 @@ function stepTrack(activeDevice, dir) {
 				if (k < 0 || k >= list.length) return   // no visible track that way
 				count = Math.abs(k - at) + (STEP_PAST_FOLDERS ? (stepExtra[cur + ':' + dir] || 0) : 0)
 				stepLast = { id: list[k].id, at: now }
-				stepPending = { from: cur, to: list[k].id, dir: dir, at: now }
-				out('[CubaseSixty UF1] track step: from #' + cur + ' (' + at + ') ' + (dir > 0 ? 'forward' : 'back') + ' to #' + list[k].id + ' (' + k + '): ' + count + ' step(s)')
+				// A step that already goes past a known folder passes through it on the way: no checking then.
+				stepPending = (STEP_PAST_FOLDERS && stepExtra[cur + ':' + dir]) ? null : { from: cur, to: list[k].id, dir: dir, at: now, extraFor: null }
 			}
 			if (at < 0 && !stepListed) {
 				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it')
@@ -602,12 +597,13 @@ function stepCheckLanding() {
 	if (!p || !stepMix || !plugAm || Date.now() - p.at > 2500) { stepPending = null; return }
 	var cur = -1
 	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
-	out('[CubaseSixty UF1] track step: landed on #' + cur + ' "' + selectedInfo.title + '"')
 	if (cur === p.to) { stepPending = null; return }   // arrived
 	var list = stepChannels()
 	for (var i = 0; i < list.length; ++i) if (list[i].id === cur) return   // on the way (a track Cubase reports first)
-	stepPending = null
-	if (!STEP_PAST_FOLDERS) return   // (off while the MixConsole's order is looked into)
+	// Cubase reports a folder more than once (the title, then again): one extra step per folder reached.
+	if (p.extraFor === cur) return
+	p.extraFor = cur
+	if (!STEP_PAST_FOLDERS) { stepPending = null; return }
 	var k = p.from + ':' + p.dir
 	stepExtra[k] = (stepExtra[k] || 0) + 1
 	out('[CubaseSixty UF1] track step: landed on a track without a channel ("' + selectedInfo.title + '"); one more step')
