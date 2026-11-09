@@ -1244,6 +1244,7 @@ int main(int argc, char** argv)
             }
             for (auto& n : names) onMidiIn(n);
             cs::uf1RedrawName();
+            cs::uc1RedrawNames();
         });
     cs::stopEventInit();
     while (g_run) {

@@ -1235,6 +1235,7 @@ bool uc1Connect(bool quiet)
 }
 
 const char* uc1State() { return g_open ? "connected" : "not connected"; }
+void uc1RedrawNames() { if (g_open && !menuOn()) paintCentre(); }
 void uc1SendFavourites() { for (auto& f : favourites::messages()) sendMidi(std::move(f)); }
 
 // From the main loop: a UC1 that stopped answering or was unplugged is let go of, and a missing one is looked
