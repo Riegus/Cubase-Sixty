@@ -1091,8 +1091,6 @@ function stripTags(index) {
 	st.panTag = find(STRIP_PAN_NAMES)
 	return true
 }
-function stripFaderTag(index) { return stripTags(index) ? skStrip[index].faderTag : -1 }
-function stripPanTag(index) { return stripTags(index) ? skStrip[index].panTag : -1 }
 // What each control is on in strip mode: without FLIP the fader on the plug-in's fader and the V-pot on its pan;
 // with FLIP the other way round (the plug-in stays in control). st.fTag / st.vTag: the parameter the fader / V-pot
 // moves (-1 = the track's own, as without strip mode). The send views take both back.
