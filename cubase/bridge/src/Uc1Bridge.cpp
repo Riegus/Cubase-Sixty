@@ -137,6 +137,20 @@ void sendMidi(std::vector<unsigned char> m)
 }
 // The knob step (Settings: UC1 knob steps) to the script: SysEx 4E <0 fine 1/128, 1 normal 1/64, 2 coarse 1/32>.
 void sysex(std::initializer_list<unsigned char> body);
+// The keys' jobs (Settings: UC1 keys) to the script: SysEx 4F <0 magnifier / 1 360 / 2 push> <job>, jobs in the
+// script's KEY_JOBS order.
+void sendKeyJobs()
+{
+    static const char* kJobs[] = {"next-strip", "prev-strip", "window", "channel-settings", "mixconsole", "bypass", "nothing"};
+    static const char* kKeys[] = {"uc1-key-magnifier", "uc1-key-360", "uc1-key-push"};
+    static const char* kDefaults[] = {"next-strip", "window", "window"};
+    for (uint8_t k = 0; k < 3; ++k) {
+        const std::string v = settings::get(kKeys[k], kDefaults[k]);
+        uint8_t j = 2;
+        for (uint8_t i = 0; i < 7; ++i) if (v == kJobs[i]) j = i;
+        sysex({0x4F, k, j});
+    }
+}
 void sendKnobStep()
 {
     const std::string v = settings::get("uc1-knob-step", "normal");
@@ -646,9 +660,17 @@ void onSysex(const std::vector<unsigned char>& m)
         }
         break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
+    case 0x47:   // a command bound to a CC (the MixConsole key job): the CC up, then down 40 ms later
+        if (m.size() >= 7) {
+            const uint8_t cc = m[5] & 0x7F;
+            sendMidi({0xB0, cc, 127});
+            std::thread([cc] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); sendMidi({0xB0, cc, 0}); }).detach();
+        }
+        break;
     case 0x42: {   // the script asks for the favourites (cubase\favourites.txt) and the secondary encoder's job
         for (auto& f : favourites::messages()) sendMidi(std::move(f));
         sendKnobStep();
+        sendKeyJobs();
         const std::string job = settings::get("uc1-encoder2", "bus-comp");
         const uint8_t mode = job == "strips" ? 1 : job == "cs-fav" ? 2 : job == "bc-fav" ? 3 : 0;
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x4C, mode, 0xF7});
@@ -684,7 +706,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42 && m[4] != 0x4A && m[4] != 0x4B) g_cache[0x100 + m[4]] = m;
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42 && m[4] != 0x4A && m[4] != 0x4B && m[4] != 0x47) g_cache[0x100 + m[4]] = m;   // (not the requests)
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
@@ -1259,6 +1281,7 @@ void uc1ApplyBrightness()
 }
 void uc1RedrawSevenSeg() { if (g_open) paintSevenSeg(); }
 void uc1SendKnobStep() { sendKnobStep(); }
+void uc1SendKeyJobs() { sendKeyJobs(); }
 void uc1RedrawNames() { if (g_open && !menuOn()) paintCentre(); }
 void uc1SendFavourites() { for (auto& f : favourites::messages()) sendMidi(std::move(f)); }
 

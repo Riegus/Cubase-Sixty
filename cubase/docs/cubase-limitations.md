@@ -60,4 +60,9 @@ is collected in [Banking and track stepping](banking.md).
   driver being deactivated and activated. On activation Cubase sends only what changed, so the bridge keeps what
   each surface showed and puts back the rest.
 - **Key command names.** The Key Commands file lists only part of Cubase's commands, so a command's exact name
-  ("To Marker 1", "To Left Locator") can only be confirmed by trying it.
+  ("To Marker 1", "To Left Locator") can only be confirmed by trying it. Where it is listed, its name there is the one
+  to use, and it can be an old one: the MixConsole is Devices > Mixer (Cubase 15, `%APPDATA%\Steinberg\Cubase 15_64\Key
+  Commands.xml`); Studio > MixConsole did nothing.
+- **Window commands need Cubase in front.** A command that opens a window (the MixConsole: Devices > Mixer) did
+  nothing while another program had the focus (the browser with the Settings page); with Cubase's window active it
+  works. Value bindings (a plug-in's or Channel Settings' window switch) do not have this catch.

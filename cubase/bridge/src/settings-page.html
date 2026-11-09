@@ -82,6 +82,7 @@ const TOKEN = "__TOKEN__";
 const sections = [
   { id: "devices", title: "Devices", lead: "The surfaces the bridge has found, Cubase, and how bright the surfaces are." },
   { id: "behaviour", title: "Behaviour", lead: "How the surfaces step through tracks and what they start on." },
+  { id: "uc1keys", title: "UC1 keys", lead: "What the UC1's magnifier, 360 and secondary encoder push keys do." },
   { id: "display", title: "Display", lead: "What the surfaces' displays show." },
   { id: "favourites", title: "Favourites", lead: "The channel strips and bus comps the CS Fav / BC Fav modes step through (UF8 CHANNEL encoder, UC1 secondary encoder)." },
   { id: "logging", title: "Logging", lead: "What is written to the log files." },
@@ -217,7 +218,9 @@ function render() {
   const main = document.getElementById("main");
   main.innerHTML = "";
   const sec = sections.find(x => x.id === current) || sections[0];
-  main.append(el("h1", {}, sec.title), sec.lead ? el("p", { class: "lead" }, sec.lead) : null, sectionBody(sec.id));
+  main.append(el("h1", {}, sec.title));
+  if (sec.lead) main.append(el("p", { class: "lead" }, sec.lead));   // (append(null) would show "null")
+  main.append(sectionBody(sec.id));
 }
 
 window.addEventListener("hashchange", () => { current = (location.hash || "#devices").slice(1); render(); });

@@ -7,7 +7,8 @@ The Settings page that will hold them is step 4 of the [release plan](release-pl
 The Settings page (tray icon: click, or Settings in its menu) shows what is settable now; it writes
 `cubase\settings.txt` and `cubase\favourites.txt`, which can still be edited by hand. On it so far: track stepping,
 the UC1 secondary encoder's job at start, key / LED and display brightness (five steps, all surfaces), sleep when idle, the UC1's
-7-segment leading zeros, the UC1 knob step, touching a UF8 fader selects its track, the UF1's view at start, long
+7-segment leading zeros, the UC1 knob step, touching a UF8 fader selects its track, the UF1's view at start, the UC1's magnifier / 360 / secondary encoder push
+keys (next / previous strip, the strip's window, Channel Settings, the MixConsole, bypass, nothing), long
 track names (abbreviated, the default, or cut; Rea-Sixty's "Smart
 abbreviate"), the script log, and the favourites (eight per domain). A new setting is one
 entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
@@ -30,8 +31,6 @@ entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
   else the first in the project. Could be: always the selected track's; remembered per project.
 - **F.ATT on Cubase's strip.** Now: switches the section's Release knob between release and attack, the choice kept
   across tracks. Could be: fastest attack / back (like an SSL fast-attack switch).
-- **Key assignments.** Now: magnifier = next channel strip on the track, 360° = open / close the strip's window.
-  Rea-Sixty lets the user bind these keys (and the Bus Comp encoder push) to other actions.
 - **ROUTING order 10 on the UC1.** Now: picture 10 (numbers run 1-10, the picture is slightly off). Could be: picture 8
   (right path, renumbered to 8); order 10 left out.
 - **Favourites.** Now: listed by hand in `cubase\favourites.txt` (eight channel strips, eight bus comps). Rea-Sixty
