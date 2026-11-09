@@ -96,6 +96,9 @@ The selection has to move by a bank. Tried, in order:
      the strips, the UF8 script reports bank position -1** (the names match nowhere halfway), and **strip 1's name
      arrives first**: SEL on either (60-80 ms after the press) landed on the old bank. A real new position came
      after 200-530 ms. Now SEL waits for a known (>= 0), different position, up to ~1 s.
+   - Confirmed (9.11.2026, 18 presses): every press landed on the next bank, strip 5 kept. The strips moved
+     150-840 ms after the bank key; Cubase reported the new track ~0.7-1 s after that. A left press on the first
+     bank does nothing (nothing to move).
 
 **Lesson: wait for a known new position (>= 0), not for "something changed".**
 
