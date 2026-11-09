@@ -341,6 +341,7 @@ void UC1Device::close()
 
     libusb_exit(ctx_);
     ctx_ = nullptr;
+    { std::lock_guard<std::mutex> lk(pending_->mu); pending_->q.takeAll(); }   // frames for the old session
 
     // Clear stale-handle telemetry so a follow-up open() starts fresh.
     consecutiveErrors_.store(0);
@@ -350,6 +351,7 @@ void UC1Device::close()
 
 void UC1Device::send(std::vector<uint8_t> frame)
 {
+    if (!handle_) return;   // no device (not connected yet, or unplugged): nothing to queue for
     {
         std::lock_guard<std::mutex> lk(pending_->mu);
         pending_->q.push(std::move(frame));

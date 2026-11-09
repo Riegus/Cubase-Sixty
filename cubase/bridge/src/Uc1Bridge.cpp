@@ -1108,10 +1108,10 @@ void grLoop()
     }
 }
 
-bool openDevice()
+bool openDevice(bool quiet)
 {
     if (!g_dev.open()) {
-        std::fprintf(stderr, "UC1: could not open the device: %s\n", g_dev.lastError().c_str());
+        if (!quiet) std::fprintf(stderr, "UC1 not found (%s); it is picked up when it is connected.\n", g_dev.lastError().c_str());
         return false;
     }
     g_dev.setKnobHandler(onKnob);
@@ -1131,18 +1131,31 @@ bool openDevice()
 
 } // namespace
 
+bool uc1Connect(bool quiet);
+static std::chrono::steady_clock::time_point g_nextTry;   // uc1Poll: when to look for the UC1 again
+static bool g_missingSaid = false;                          // "not found" is said once, not every two seconds
+
+// The ports are made whether or not the UC1 is connected (Cubase sees ports only when it starts, and the script
+// loads only when its ports are there). The UC1 itself comes and goes: see uc1Poll.
 bool uc1Start()
 {
-    if (!openDevice()) return false;
-    if (!g_out.open(kPortTo) || !g_in.open(kPortFrom, &onMidiIn)) {
-        std::fprintf(stderr, "UC1: could not open the MIDI ports \"%s\" / \"%s\"; skipping the UC1.\n", kPortTo, kPortFrom);
-        g_dev.close();
-        g_open = false;
-        return false;
-    }
-    std::printf("UC1 open (serial %s).\n", g_dev.serial().c_str());
-    // The SSL 360 Core stand-in, for the gain-reduction meters (SSL 360 must not be running).
     if (!netInit()) std::fprintf(stderr, "Windows sockets could not be started.\n");
+    g_missingSaid = !uc1Connect(false);
+    g_nextTry = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const bool ports = g_out.open(kPortTo) && g_in.open(kPortFrom, &onMidiIn);
+    if (!ports) std::fprintf(stderr, "UC1: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortTo, kPortFrom);
+    if (!g_grThread.joinable()) { g_grRun = true; g_grThread = std::thread(grLoop); }
+    return ports;
+}
+
+// The SSL 360 Core stand-in, for the gain-reduction meters (SSL 360 must not be running). Started when a UC1 is
+// first connected.
+void startSslCore()
+{
+    static bool tried = false;
+    if (tried) return;
+    tried = true;
+    if (sslcore::isRunning()) return;   // the UF1 started it already (its meter)
     // With --trace: Rea-Sixty's own trace of the SSL plug-in traffic (reaper_sslcore.log) and its object dump
     // (reasixty_ssl_objects.log: every object a plug-in declares and every value it writes), both in cubase\logs.
 #ifdef _WIN32
@@ -1153,8 +1166,6 @@ bool uc1Start()
         if (g_trace) sslcore::setObjectDump(true);
     }
     else std::fprintf(stderr, "SSL 360 Core stand-in could not start (is SSL 360 running?); no gain reduction.\n");
-    if (!g_grThread.joinable()) { g_grRun = true; g_grThread = std::thread(grLoop); }
-    return true;
 }
 
 void uc1Stop()
@@ -1177,22 +1188,37 @@ void uc1FavouriteStep(int domain, int dir)
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x44, uint8_t(domain ? 1 : 0), uint8_t(dir > 0 ? 1 : 0), 0xF7});
 }
 
-bool uc1NeedsReopen() { return g_open && g_dev.needsReopen(); }
-
-std::string uc1LastError() { return g_dev.lastError(); }
-
-bool uc1Reopen()
+// Opens the UC1 and draws the last state Cubase sent (the cache is kept while the UC1 is away). Used at start,
+// when it is plugged in, and after it stopped answering. The MIDI ports stay as they are.
+bool uc1Connect(bool quiet)
 {
-    g_dev.close();
-    g_open = false;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     { std::lock_guard<std::mutex> lk(g_ringMx); g_ringShown.clear(); }
-    if (!openDevice()) return false;
+    if (!openDevice(quiet)) return false;
+    std::printf("UC1 connected (serial %s).\n", g_dev.serial().c_str());
+    startSslCore();
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_stateMx); cache = g_cache; }
-    for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
-    std::printf("UC1 reopened.\n");
+    for (auto& kv : cache) { if (kv.first == 0x17C) continue; auto msg = kv.second; onMidiIn(msg); }
     return true;
+}
+
+// From the main loop: a UC1 that stopped answering or was unplugged is let go of, and a missing one is looked
+// for every two seconds.
+void uc1Poll()
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (g_open) {
+        if (!g_dev.needsReopen()) return;
+        std::fprintf(stderr, "The UC1 stopped answering or was unplugged (%s); looking for it again.\n", g_dev.lastError().c_str());
+        g_open = false;
+        g_dev.close();
+        g_missingSaid = true;
+        g_nextTry = now + std::chrono::seconds(1);
+        return;
+    }
+    if (now < g_nextTry) return;
+    g_nextTry = now + std::chrono::seconds(2);
+    g_missingSaid = !uc1Connect(g_missingSaid);
 }
 
 } // namespace cs

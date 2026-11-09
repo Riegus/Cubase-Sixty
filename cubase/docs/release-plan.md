@@ -19,6 +19,9 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 
 - Always create every surface's MIDI ports, so all scripts load whatever is connected (Cubase only sees ports at start).
 - Hot-plug: a surface connected or disconnected while Cubase runs comes and goes without a restart.
+- Done (9.11.2026): the bridge makes all ports at start; a missing surface is looked for every 2 s, an unplugged
+  one let go of and picked up again with the last state Cubase sent (the UF8's foot switches ignored for 4 s after
+  each connect: an empty jack reports "pressed" and started the transport).
 - Move the jobs that serve every surface into the Helper script (present in every setup): skipping tracks hidden in the
   MixConsole (now in the UF1 script), the favourites and anything else the UF8 / UF1 borrow from the UC1 script.
 - Check each combination: UF8 alone, UF1 alone, UC1 alone, each pair, all three (fallbacks such as the UF1's BANK

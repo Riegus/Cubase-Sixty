@@ -3,15 +3,15 @@
 // UC1 side of the bridge: owns the UC1 USB device and its own pair of MIDI ports
 // ("Cubase-Sixty UC1 to Cubase" / "... from Cubase"). See Uc1Bridge.cpp.
 namespace cs {
-// Returns true if the UC1 and both ports were opened. Prints the reason if not.
+// Makes the UC1's ports (always, connected or not) and opens the UC1 if it is there. False if the ports could
+// not be made.
 bool uc1Start();
 // Print every UC1 event and every MIDI message to the console (run the bridge with --trace).
 void uc1SetTrace(bool on);
 void uc1Stop();
-bool uc1NeedsReopen();
-std::string uc1LastError();
-// Close and open the UC1 again (keeps the MIDI ports, replays the last state).
-bool uc1Reopen();
+// From the main loop: lets go of a UC1 that stopped answering or was unplugged, and picks up one that is
+// connected (tried every two seconds; the last state Cubase sent is drawn on it).
+void uc1Poll();
 // One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL
 // encoder: on to the UC1 script (SysEx 44), which shows and swaps them.
 void uc1FavouriteStep(int domain, int dir);

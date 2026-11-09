@@ -355,6 +355,7 @@ void UF8Device::close()
 
     libusb_exit(ctx_);
     ctx_ = nullptr;
+    { std::lock_guard<std::mutex> lk(pending_->mu); pending_->q.clear(); }   // frames for the old session
 
     // Clear stale-handle telemetry so a follow-up open() starts fresh.
     consecutiveErrors_.store(0);
@@ -364,6 +365,7 @@ void UF8Device::close()
 
 void UF8Device::send(std::vector<uint8_t> frame)
 {
+    if (!handle_) return;   // no device (not connected yet, or unplugged): nothing to queue for
     {
         std::lock_guard<std::mutex> lk(pending_->mu);
         pending_->q.push_back(std::move(frame));
@@ -373,6 +375,7 @@ void UF8Device::send(std::vector<uint8_t> frame)
 
 void UF8Device::sendPriority(std::vector<uint8_t> frame)
 {
+    if (!handle_) return;   // no device (not connected yet, or unplugged): nothing to queue for
     {
         std::lock_guard<std::mutex> lk(pending_->mu);
         pending_->q.push_front(std::move(frame));

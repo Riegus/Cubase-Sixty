@@ -1585,7 +1585,8 @@ void restoreChannelView()
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
     for (auto& kv : cache)   // the script's texts (not its log lines)
-        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C && kv.first != 0x104 && kv.first != 0x105) { auto msg = kv.second; onMidiIn(msg); }
+        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C && kv.first != 0x104 && kv.first != 0x105
+            && kv.first != 0x154 && kv.first != 0x159) { auto msg = kv.second; onMidiIn(msg); }
     { std::lock_guard<std::mutex> lk(g_lineMx); g_tempUntil = 0; showHomeLocked(); }
     showStripNumber();
     paintSoftKeys();
@@ -1612,18 +1613,11 @@ void uf1LampTest()
     std::printf("UF1 lamp test done.\n");
 }
 
-// Opens the UF1 (three tries) and draws the start-up screen. Used at start and after a reopen.
-bool uf1OpenDevice()
+// Opens the UF1 and draws the start-up screen. One try: uf1Poll tries again every two seconds.
+bool uf1OpenDevice(bool quiet)
 {
-    // The device sometimes is not ready right after the previous bridge let go of it: try three times.
-    bool opened = g_dev.open();
-    for (int attempt = 2; !opened && attempt <= 3; ++attempt) {
-        std::fprintf(stderr, "UF1: could not open the device (%s); trying again (%d of 3)...\n", g_dev.lastError().c_str(), attempt);
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        opened = g_dev.open();
-    }
-    if (!opened) {
-        std::fprintf(stderr, "UF1: could not open the device (%s); skipping the UF1.\n", g_dev.lastError().c_str());
+    if (!g_dev.open()) {
+        if (!quiet) std::fprintf(stderr, "UF1 not found (%s); it is picked up when it is connected.\n", g_dev.lastError().c_str());
         return false;
     }
     g_dev.setInputHandler(onUf1Event);
@@ -1679,21 +1673,42 @@ void onMcuIn(std::vector<unsigned char>& m)
     }
 }
 
+bool uf1Connect(bool quiet);
+static long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
+static bool g_missingSaid = false;  // "not found" is said once, not every two seconds
+
+// The ports are made whether or not the UF1 is connected (Cubase sees ports only when it starts, and the script
+// loads only when its ports are there). The UF1 itself comes and goes: see uf1Poll.
 bool uf1Start()
 {
-    if (!uf1OpenDevice()) return false;
-    // Ports last, so Cubase's first burst of state (sent when it sees the ports appear) finds the screen ready.
-    if (!g_out.open(kPortTo) || !g_in.open(kPortFrom, &onMidiIn)) {
-        std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\"; skipping the UF1.\n", kPortTo, kPortFrom);
-        g_dev.close();
-        g_open = false;
-        return false;
-    }
-    std::printf("UF1 open (serial %s).\n", g_dev.serial().c_str());
+    // The device first, so Cubase's first burst of state (sent when it sees the ports appear) finds the screen
+    // ready; the burst is cached either way and drawn when the UF1 is connected.
+    g_missingSaid = !uf1Connect(false);
+    g_nextTry = nowMs() + 2000;
+    const bool ports = g_out.open(kPortTo) && g_in.open(kPortFrom, &onMidiIn);
+    if (!ports) std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortTo, kPortFrom);
     g_mcuOpen = g_mcuOut.open(kMcuTo) && g_mcuIn.open(kMcuFrom, &onMcuIn);
     if (!g_mcuOpen) std::fprintf(stderr, "Mackie ports for scrubbing not available; SCRUB falls back to fast nudging.\n");
-    std::thread(revertLoop).detach();
-    return true;
+    return ports;
+}
+
+// From the main loop: a UF1 that stopped answering or was unplugged is let go of, and a missing one is looked
+// for every two seconds (plugged in while Cubase runs, or switched on later).
+void uf1Poll()
+{
+    if (g_open) {
+        if (!g_dev.needsReopen()) return;
+        std::fprintf(stderr, "The UF1 stopped answering or was unplugged (%s); looking for it again.\n", g_dev.lastError().c_str());
+        g_open = false;
+        g_dev.close();
+        g_missingSaid = true;
+        g_nextTry = nowMs() + 1000;
+        return;
+    }
+    if (nowMs() < g_nextTry) return;
+    g_nextTry = nowMs() + 2000;
+    if (uf1Connect(g_missingSaid)) g_missingSaid = false;
+    else g_missingSaid = true;
 }
 
 void uf1Stop()
@@ -1735,23 +1750,17 @@ bool uf1StepTrack(int dir)
     return true;
 }
 
-bool uf1NeedsReopen() { return g_open && g_dev.needsReopen(); }
-
-std::string uf1LastError() { return g_dev.lastError(); }
-
-// The UF1 stopped answering (e.g. it missed the wake right after the previous bridge let go of it): close
-// it, open it again, and replay the last state Cubase sent. The MIDI ports stay as they are.
-bool uf1Reopen()
+// Opens the UF1 and draws the last state Cubase sent (the cache is kept while the UF1 is away). Used at start,
+// when it is plugged in, and after it stopped answering (e.g. it missed the wake right after the previous bridge
+// let go of it). The MIDI ports stay as they are.
+bool uf1Connect(bool quiet)
 {
-    g_dev.close();
-    g_open = false;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     {
         std::lock_guard<std::mutex> lk(g_ledMx);
         g_ledEnabled.clear();   // the LED enables have to be sent again
     }
     g_tcShown.clear();
-    if (!uf1OpenDevice()) return false;
+    if (!uf1OpenDevice(quiet)) return false;
     std::thread(revertLoop).detach();
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
@@ -1764,7 +1773,7 @@ bool uf1Reopen()
     paintSoftKeys();
     paintSendCells(true);
     startIdleCycle();
-    std::printf("UF1 reopened.\n");
+    std::printf("UF1 connected (serial %s).\n", g_dev.serial().c_str());
     return true;
 }
 
