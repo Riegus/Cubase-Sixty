@@ -65,6 +65,8 @@ add_executable(cubase_sixty_bridge
     src/StopEvent.cpp
     src/SettingsServer.cpp
     src/Names.cpp
+    src/Sleep.cpp
+    src/Sleep.h
     src/Names.h
     src/SettingsServer.h
     src/StopEvent.h

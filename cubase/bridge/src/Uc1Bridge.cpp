@@ -39,6 +39,7 @@
 #include "Uc1Bridge.h"
 #include "Names.h"
 #include "Brightness.h"
+#include "Sleep.h"
 
 #include <algorithm>
 #include <climits>
@@ -982,6 +983,7 @@ bool presetsKnob(uint8_t id, int delta)
 void onKnob(const ::uc1::KnobEvent& ev)
 {
     if (g_trace) std::printf("[UC1] knob 0x%02X %+d\n", ev.id, ev.delta);
+    if (sleep::activity(true, "UC1 knob")) return;   // Sleep when idle: the turn that wakes the surfaces does nothing else
     if (presetsKnob(ev.id, ev.delta)) return;
     if (ev.id == ::uc1::knob::kChannelEncoder) {
         const int steps = g_channelAcc.step(ev.delta);
@@ -1006,6 +1008,7 @@ void onKnob(const ::uc1::KnobEvent& ev)
 void onButton(const ::uc1::ButtonEvent& ev)
 {
     if (g_trace) std::printf("[UC1] button 0x%02X %s\n", ev.id, ev.pressed ? "pressed" : "released");
+    if (sleep::key(2, ev.id, ev.pressed, "UC1 key")) return;   // Sleep when idle: the press that wakes, and its release
     namespace B = ::uc1::button;
     if (presetsButton(ev.id, ev.pressed)) return;
     if (ev.id == B::kPolarity || ev.id == B::kSoloClear || ev.id == B::kSolo || ev.id == B::kCut) {
@@ -1249,9 +1252,10 @@ void uc1ApplyBrightness()
     if (!g_open) return;
     const auto& led = brightness::kTable[settings::brightnessLevel("led-brightness")];
     const auto& lcd = brightness::kTable[settings::brightnessLevel("display-brightness")];
-    send(::uc1::buildLedBrightness(led.uc1_led));
-    send(::uc1::buildLcdBrightness(lcd.uc1_lcd));
-    send(::uc1::buildStatusBrightness(lcd.uc1_status));
+    const bool dark = sleep::asleep();   // Sleep when idle: all off
+    send(::uc1::buildLedBrightness(dark ? 0 : led.uc1_led));
+    send(::uc1::buildLcdBrightness(dark ? 0 : lcd.uc1_lcd));
+    send(::uc1::buildStatusBrightness(dark ? 0 : lcd.uc1_status));
 }
 void uc1RedrawSevenSeg() { if (g_open) paintSevenSeg(); }
 void uc1SendKnobStep() { sendKnobStep(); }
