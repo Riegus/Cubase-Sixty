@@ -1585,7 +1585,8 @@ void restoreChannelView()
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_cacheMx); cache = g_cache; }
     for (auto& kv : cache)   // the script's texts (not its log lines)
-        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C && kv.first != 0x104 && kv.first != 0x105) { auto msg = kv.second; onMidiIn(msg); }
+        if (kv.first >= 0x100 && kv.first != 0x17E && kv.first != 0x17C && kv.first != 0x104 && kv.first != 0x105
+            && kv.first != 0x154 && kv.first != 0x159) { auto msg = kv.second; onMidiIn(msg); }
     { std::lock_guard<std::mutex> lk(g_lineMx); g_tempUntil = 0; showHomeLocked(); }
     showStripNumber();
     paintSoftKeys();
