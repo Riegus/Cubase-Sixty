@@ -610,7 +610,20 @@ function stepCheckLanding() {
 	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
 	if (cur === p.to) { stepPending = null; return }   // arrived
 	var list = stepChannels()
-	for (var i = 0; i < list.length; ++i) if (list[i].id === cur) return   // on the way (a track Cubase reports first)
+	// Short of the target on a track (a folder on the way took one of the steps): the missing steps, once.
+	var atCur = -1, atTo = -1
+	for (var i = 0; i < list.length; ++i) { if (list[i].id === cur) atCur = i; if (list[i].id === p.to) atTo = i }
+	if (atCur >= 0) {
+		var missing = (atTo - atCur) * p.dir
+		if (!p.fixed && atTo >= 0 && missing > 0) {
+			p.fixed = true
+			p.at = Date.now()
+			out('[CubaseSixty UF1] track step: ' + missing + ' short ("' + selectedInfo.title + '", a folder on the way); ' + missing + ' more')
+			var act = p.dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
+			for (var c = 0; c < missing; ++c) act.trigger(plugAm)
+		}
+		return
+	}
 	if (cur >= 0) { stepPending = null; return }   // a track with a channel the list does not hold (not a folder)
 	// Cubase reports a folder more than once (the title, then again): one extra step per folder reached.
 	if (p.extraFor === cur) return
