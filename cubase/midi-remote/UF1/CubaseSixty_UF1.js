@@ -532,6 +532,13 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 var stepMix = null
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
+// Folder tracks (and other tracks without a channel) are not among the MixConsole's channels, but the next /
+// previous track action stops on them. When a step lands on one, the script steps once more the same way, and
+// remembers it (from that track, that way: one more) so the next step there goes past at once. The memory is
+// dropped when the MixConsole's channels change.
+var stepPending = null              // the last step: { from, to, dir, at }
+var stepExtra = {}                  // "<from id>:<dir>" -> extra steps
+var stepExtraKey = ''               // the channel list the memory belongs to
 var stepListed = false   // (the channel list is logged once, when the selected track is not in it)
 // Every track's channel in the MixConsole, in MixConsole order: the VST Mixer's children, except the inputs and
 // outputs. (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
@@ -563,12 +570,15 @@ function stepTrack(activeDevice, dir) {
 			var cur = now - stepLast.at < 600 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
 			var at = -1
 			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
+			var key = list.map(function (c) { return c.id }).join(',')
+			if (key !== stepExtraKey) { stepExtra = {}; stepExtraKey = key }
 			if (at >= 0) {
 				var k = at + dir
 				while (k >= 0 && k < list.length && !list[k].vis) k += dir
 				if (k < 0 || k >= list.length) return   // no visible track that way
-				count = Math.abs(k - at)
+				count = Math.abs(k - at) + (stepExtra[cur + ':' + dir] || 0)
 				stepLast = { id: list[k].id, at: now }
+				stepPending = { from: cur, to: list[k].id, dir: dir, at: now }
 			}
 			if (at < 0 && !stepListed) {
 				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it')
@@ -579,12 +589,29 @@ function stepTrack(activeDevice, dir) {
 	}
 	for (var c = 0; c < count; ++c) action.trigger(plugAm)
 }
+// After a step: did it land on a track without a channel (a folder)? Then one more step the same way, remembered.
+function stepCheckLanding() {
+	var p = stepPending
+	if (!p || !stepMix || !plugAm || Date.now() - p.at > 2500) { stepPending = null; return }
+	var cur = -1
+	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
+	if (cur === p.to) { stepPending = null; return }   // arrived
+	var list = stepChannels()
+	for (var i = 0; i < list.length; ++i) if (list[i].id === cur) return   // on the way (a track Cubase reports first)
+	var k = p.from + ':' + p.dir
+	stepExtra[k] = (stepExtra[k] || 0) + 1
+	out('[CubaseSixty UF1] track step: landed on a track without a channel ("' + selectedInfo.title + '"); one more step')
+	p.at = Date.now()
+	var action = p.dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
+	action.trigger(plugAm)
+}
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
+	if (stepPending) { try { stepCheckLanding() } catch (e) { out('[CubaseSixty UF1] track step: ' + e) } }
 	if (masterActive) return
 	sendName(activeDevice, title)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
