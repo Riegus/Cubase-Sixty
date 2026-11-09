@@ -983,7 +983,7 @@ bool presetsKnob(uint8_t id, int delta)
 void onKnob(const ::uc1::KnobEvent& ev)
 {
     if (g_trace) std::printf("[UC1] knob 0x%02X %+d\n", ev.id, ev.delta);
-    if (sleep::activity(true)) return;   // Sleep when idle: the turn that wakes the surfaces does nothing else
+    if (sleep::activity(true, "UC1 knob")) return;   // Sleep when idle: the turn that wakes the surfaces does nothing else
     if (presetsKnob(ev.id, ev.delta)) return;
     if (ev.id == ::uc1::knob::kChannelEncoder) {
         const int steps = g_channelAcc.step(ev.delta);
@@ -1008,7 +1008,7 @@ void onKnob(const ::uc1::KnobEvent& ev)
 void onButton(const ::uc1::ButtonEvent& ev)
 {
     if (g_trace) std::printf("[UC1] button 0x%02X %s\n", ev.id, ev.pressed ? "pressed" : "released");
-    if (sleep::key(2, ev.id, ev.pressed)) return;   // Sleep when idle: the press that wakes, and its release
+    if (sleep::key(2, ev.id, ev.pressed, "UC1 key")) return;   // Sleep when idle: the press that wakes, and its release
     namespace B = ::uc1::button;
     if (presetsButton(ev.id, ev.pressed)) return;
     if (ev.id == B::kPolarity || ev.id == B::kSoloClear || ev.id == B::kSolo || ev.id == B::kCut) {

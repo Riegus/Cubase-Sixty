@@ -343,9 +343,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
     if (g_trace && ev.kind != K::FaderPosition)
         std::printf("%lld [UF1 event] kind=%d id=0x%02X pressed=%d delta=%d\n", nowMs() % 100000, int(ev.kind), ev.id, int(ev.pressed), ev.delta);
     // Sleep when idle: every hand counts as activity; the touch, turn or press that wakes the surfaces is dropped.
-    if (ev.kind == K::FaderPosition) sleep::activity(false);
-    else if (ev.kind == K::Button) { if (sleep::key(1, ev.id, ev.pressed)) return; }
-    else if (ev.kind == K::EncoderRotate || ev.pressed) { if (sleep::activity(true)) return; }
+    // (The fader's position counts only while it is touched: the UF1 reports positions by itself too; a V-pot's
+    // capacitive touch does not count, only a turn.)
+    if (ev.kind == K::FaderPosition) { if (g_touched) sleep::activity(false, "UF1 fader"); }
+    else if (ev.kind == K::Button) { if (sleep::key(1, ev.id, ev.pressed, "UF1 key")) return; }
+    else if (ev.kind == K::EncoderRotate) { if (sleep::activity(true, "UF1 encoder")) return; }
+    else if (ev.kind == K::FaderTouch && ev.pressed) { if (sleep::activity(true, "UF1 fader touch")) return; }
     switch (ev.kind) {
     case K::FaderTouch:
         g_touched = ev.pressed;

@@ -246,10 +246,11 @@ void handleFrame(const uf8frames::Frame& fr)
 {
     const uint8_t* d = fr.b;
     // Sleep when idle: every hand counts as activity; the touch, turn or press that wakes the surfaces is dropped.
-    if (d[1] == 0x21) cs::sleep::activity(false);
-    else if (d[1] == 0x20) { if (d[4] != 0 && cs::sleep::activity(true)) return; }
-    else if (d[1] == 0x24) { if (cs::sleep::activity(true)) return; }
-    else if (d[1] == 0x22) { if (cs::sleep::key(0, d[3], d[5] == 0x01)) return; }
+    // (A fader's position counts only while it is touched: the UF8 reports positions by itself too.)
+    if (d[1] == 0x21) { if (d[3] < kStrips && g_touched[d[3]]) cs::sleep::activity(false, "UF8 fader"); }
+    else if (d[1] == 0x20) { if (d[4] != 0 && cs::sleep::activity(true, "UF8 fader touch")) return; }
+    else if (d[1] == 0x24) { if (cs::sleep::activity(true, "UF8 V-pot / encoder")) return; }
+    else if (d[1] == 0x22) { if (cs::sleep::key(0, d[3], d[5] == 0x01, "UF8 key")) return; }
     switch (d[1]) {
     case 0x21: {   // fader position: FF 21 03 strip lsb msb ck
         const uint8_t s = d[3];

@@ -12,10 +12,11 @@ namespace cs::sleep {
 
 // Each surface's input handler calls this for every user event. arrives: the event can wake (a touch, a turn, a
 // press; a fader position report only counts as activity). True: this event woke the surfaces, drop it.
-bool activity(bool arrives);
+// what: for bridge.log ("UF8 key"...), which input kept the surfaces awake last.
+bool activity(bool arrives, const char* what);
 // For keys: true when this press or release is to be dropped (the press that woke, and its release).
 // surface: 0 UF8, 1 UF1, 2 UC1.
-bool key(int surface, uint8_t id, bool pressed);
+bool key(int surface, uint8_t id, bool pressed, const char* what);
 // From the main loop: the countdown (busy = the transport runs). push(asleep) darkens or lights the surfaces.
 void tick(bool busy, const std::function<void(bool)>& push);
 bool asleep();

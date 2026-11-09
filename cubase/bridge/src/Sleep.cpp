@@ -3,7 +3,9 @@
 #include "Settings.h"
 #include "SurfaceSleep.h"   // Rea-Sixty's clock and frames (extension/src)
 
+#include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 
@@ -12,6 +14,7 @@ namespace {
 
 surfsleep::Clock g_clock;
 surfsleep::WakeSwallow g_swallow[3];
+std::atomic<const char*> g_last{"start"};   // the input that counted last (for the log)
 
 int64_t nowMs()
 {
@@ -20,12 +23,12 @@ int64_t nowMs()
 
 } // namespace
 
-bool activity(bool arrives) { return g_clock.wake(nowMs(), arrives); }
+bool activity(bool arrives, const char* what) { g_last = what; return g_clock.wake(nowMs(), arrives); }
 
-bool key(int surface, uint8_t id, bool pressed)
+bool key(int surface, uint8_t id, bool pressed, const char* what)
 {
-    const bool woke = pressed && activity(true);
-    if (!pressed) activity(false);
+    const bool woke = pressed && activity(true, what);
+    if (!pressed) activity(false, what);
     return g_swallow[surface < 0 || surface > 2 ? 0 : surface].button(id, pressed, woke);
 }
 
@@ -45,6 +48,14 @@ void tick(bool busy, const std::function<void(bool)>& push)
         if (minutes <= 0 && g_clock.asleep.load()) g_clock.set(false, now, push);   // switched off while dark
     }
     g_clock.tick(now, busy, push);
+    // Once a minute while it is on and awake: how long idle, and what counted last (bridge.log).
+    static int64_t reportAt = 0;
+    if (g_clock.enabled.load() && !g_clock.asleep.load() && now >= reportAt) {
+        reportAt = now + 60000;
+        const int64_t last = g_clock.lastInputMs.load();
+        std::printf("Sleep when idle: idle %lld s of %d min%s (last activity: %s)\n", last ? (long long)((now - last) / 1000) : 0LL,
+                    g_clock.minutes.load(), busy ? ", transport running" : "", g_last.load());
+    }
 }
 
 bool asleep() { return g_clock.asleep.load(); }
