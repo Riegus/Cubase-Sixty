@@ -6,8 +6,7 @@
 #include <atomic>
 #include <chrono>
 
-// TrackName.cpp's mode switch (Rea-Sixty keeps it in its main.cpp); fitName passes the mode itself.
-std::atomic<int> g_trackNameMode{TNM_SmartAbbrev};
+// (TrackName.cpp defines its own mode switch, g_trackNameMode; fitName passes the mode with each call.)
 
 namespace cs {
 
