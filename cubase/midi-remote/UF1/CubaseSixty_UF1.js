@@ -593,7 +593,7 @@ function stepTrack(activeDevice, dir, n) {
 				stepLast = { id: list[k].id, at: now }
 				// A step is checked for a folder it stops on (one more step then). A single step learns it; one that
 				// already goes past a known folder is not checked (it passes the folder on the way).
-				stepPending = (n === 1 && extra) ? null : { from: cur, to: list[k].id, dir: dir, n: n, extra: extra, at: now, extraFor: null, learn: n === 1 }
+				stepPending = (n === 1 && extra) ? null : { from: cur, to: list[k].id, dir: dir, n: n, extra: extra, at: now, extraFor: null, learn: n === 1, fixes: 0 }
 			}
 			if (at < 0 && cur >= 0 && !stepListed) {
 				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it. The channels:')
@@ -605,7 +605,10 @@ function stepTrack(activeDevice, dir, n) {
 	}
 	for (var c = 0; c < count; ++c) action.trigger(plugAm)
 }
-// After a step: did it land on a track without a channel (a folder)? Then one more step the same way, remembered.
+// After a step: did it land where it was meant to? Cubase's next / previous track action also stops on folders (and
+// other tracks without a channel, such as the ruler and marker tracks at the top), which the channel list does not
+// hold. On a track short of or past the target: the steps missing (or back), and the step remembered. On a folder:
+// one more step the same way (the other way if there is no track beyond the target). At most three corrections.
 function stepCheckLanding() {
 	var p = stepPending
 	if (!p || !stepMix || !plugAm || Date.now() - p.at > 2500) { stepPending = null; return }
@@ -613,33 +616,36 @@ function stepCheckLanding() {
 	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
 	if (cur === p.to) { stepPending = null; return }   // arrived
 	var list = stepChannels()
-	// Short of the target on a track (a folder on the way took one of the steps): the missing steps, once.
 	var atCur = -1, atTo = -1
 	for (var i = 0; i < list.length; ++i) { if (list[i].id === cur) atCur = i; if (list[i].id === p.to) atTo = i }
+	if (atTo < 0 || p.fixes >= 3 || !STEP_PAST_FOLDERS) { stepPending = null; return }
+	var steps = 0, why = ''
 	if (atCur >= 0) {
-		var missing = (atTo - atCur) * p.dir
-		if (!p.fixed && atTo >= 0 && missing > 0) {
-			p.fixed = true
-			p.at = Date.now()
-			out('[CubaseSixty UF1] track step: ' + missing + ' short ("' + selectedInfo.title + '", a folder on the way); ' + missing + ' more')
-			if (p.n > 1) stepExtra[p.from + ':' + p.dir + ':' + p.n] = p.extra + missing   // next time at once
-			var act = p.dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
-			for (var c = 0; c < missing; ++c) act.trigger(plugAm)
-		}
+		p.extraFor = null
+		steps = (atTo - atCur) * p.dir   // > 0: short, < 0: past it
+		why = steps > 0 ? steps + ' short' : -steps + ' past'
+		if (!steps) return
+	} else if (cur >= 0) {
+		stepPending = null   // a track with a channel the list does not hold (not a folder): left alone
 		return
+	} else {
+		// Cubase reports a folder more than once (the title, then again): one correction per folder reached.
+		if (p.extraFor === cur) return
+		p.extraFor = cur
+		var beyond = false
+		for (var b = atTo + p.dir; b >= 0 && b < list.length; b += p.dir) if (list[b].vis) { beyond = true; break }
+		steps = beyond ? 1 : -1
+		why = 'on a track without a channel'
 	}
-	if (cur >= 0) { stepPending = null; return }   // a track with a channel the list does not hold (not a folder)
-	// Cubase reports a folder more than once (the title, then again): one extra step per folder reached.
-	if (p.extraFor === cur) return
-	p.extraFor = cur
-	if (!STEP_PAST_FOLDERS) { stepPending = null; return }
-	var k = p.from + ':' + p.dir
-	if (p.learn) stepExtra[k] = (stepExtra[k] || 0) + 1
-	else if (p.n > 1) { p.extra += 1; stepExtra[p.from + ':' + p.dir + ':' + p.n] = p.extra }
-	out('[CubaseSixty UF1] track step: landed on a track without a channel ("' + selectedInfo.title + '"); one more step')
+	p.fixes = (p.fixes || 0) + 1
 	p.at = Date.now()
-	var action = p.dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
-	action.trigger(plugAm)
+	p.extra += steps
+	if (p.learn) stepExtra[p.from + ':' + p.dir] = Math.max(0, p.extra)
+	else stepExtra[p.from + ':' + p.dir + ':' + p.n] = p.extra
+	out('[CubaseSixty UF1] track step: ' + why + ' ("' + selectedInfo.title + '"); ' + Math.abs(steps) + (steps > 0 ? ' more' : ' back'))
+	var fwd = (steps > 0) === (p.dir > 0)
+	var act = fwd ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
+	for (var c = 0; c < Math.abs(steps); ++c) act.trigger(plugAm)
 }
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
