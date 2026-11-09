@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.13.0-dev'
+var SCRIPT_VERSION = '0.14.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -714,6 +714,7 @@ function enc2Push(activeDevice, pressed) {
 	if (pressed) { enc2.held = true; enc2.turned = false; return }
 	enc2.held = false
 	if (enc2.turned) { log('secondary encoder: ' + ENC2_MODES[enc2.mode].name); return }
+	if (keyJob[2] !== 'window') { runKeyJob(activeDevice, keyJob[2]); return }   // Settings: UC1 keys
 	var key = ENC2_MODES[enc2.mode].key
 	if (key === 'strips' || key === 'cs-fav') { toggleWindow(activeDevice); return }
 	// The bus comp's window: only for one on the selected track (the window switches are the selected track's).
@@ -830,7 +831,10 @@ function followUf1(activeDevice, kind, ord) {
 // so they are bound to CCs the bridge sends back (SysEx 3A): CC 50 + slot for the inserts, CC 70 for Channel
 // Settings.
 var CC_INSERT_EDIT = 50, CC_CHANNEL_EDIT = 70
-var insertEditOpen = [], channelEditOpen = 0
+// The key jobs (Settings: UC1 keys) also bypass the strip's insert (CC 80 + slot) and open / close the MixConsole (a
+// command bound to CC 99, pulsed by the bridge: SysEx 47).
+var CC_INSERT_BYPASS = 80, CC_MIXCONSOLE = 99
+var insertEditOpen = [], channelEditOpen = 0, insertBypassed = []
 try {
 	var bindCc = function (x, y, cc, hostValue, onChange) {
 		var k = surface.makeKnob(x, y, 1, 1)
@@ -842,10 +846,35 @@ try {
 		;(function (slot) {
 			var viewer = selected.mInsertAndStripEffects.makeInsertEffectViewer('UC1 insert ' + (slot + 1)).accessSlotAtIndex(slot)
 			bindCc(slot, 4, CC_INSERT_EDIT + slot, viewer.mEdit, function (v) { insertEditOpen[slot] = v })
+			bindCc(slot, 6, CC_INSERT_BYPASS + slot, viewer.mBypass, function (v) { insertBypassed[slot] = v })
 		})(slot)
 	}
 	bindCc(0, 5, CC_CHANNEL_EDIT, track.mEditorOpen, function (v) { channelEditOpen = v })
 } catch (e) { log('window switches could not be bound: ' + e) }
+try {
+	var mixKey = surface.makeButton(16, 4, 1, 1)
+	mixKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, CC_MIXCONSOLE)
+	page.makeCommandBinding(mixKey.mSurfaceValue, 'Studio', 'MixConsole')   // Cubase 12+: Studio > MixConsole
+} catch (e) { log('MixConsole command could not be bound: ' + e) }
+
+// What the magnifier, 360 and secondary encoder push keys do (Settings: UC1 keys; the bridge sends SysEx 4F <key 0
+// magnifier / 1 360 / 2 push> <job>). Jobs, in the bridge's order:
+var KEY_JOBS = ['next-strip', 'prev-strip', 'window', 'channel-settings', 'mixconsole', 'bypass', 'nothing']
+var keyJob = ['next-strip', 'window', 'window']
+function runKeyJob(activeDevice, job) {
+	if (job === 'next-strip') nextStrip(activeDevice, 1)
+	else if (job === 'prev-strip') nextStrip(activeDevice, -1)
+	else if (job === 'window') toggleWindow(activeDevice)
+	else if (job === 'channel-settings') sysex(activeDevice, [0x3A, CC_CHANNEL_EDIT, channelEditOpen >= 0.5 ? 0 : 127])
+	else if (job === 'mixconsole') sysex(activeDevice, [0x47, CC_MIXCONSOLE])
+	else if (job === 'bypass') {
+		var t = state.cs
+		if (!t || t.insertIndex === undefined || t.insertIndex < 0) { readout(activeDevice, ZONE_CS, 'Bypass', 'not an insert'); return }
+		var on = insertBypassed[t.insertIndex] >= 0.5
+		sysex(activeDevice, [0x3A, CC_INSERT_BYPASS + t.insertIndex, on ? 0 : 127])
+		readout(activeDevice, ZONE_CS, t.short || t.name || 'Strip', on ? 'active' : 'bypassed')
+	}
+}
 function toggleWindow(activeDevice) {
 	var t = state.cs
 	if (!t) return
@@ -1424,8 +1453,8 @@ function onButton(activeDevice, id) {
 		paintLeds(activeDevice)
 		return
 	}
-	if (id === B.Magnifier) { nextStrip(activeDevice); return }
-	if (id === B.Knob360) { toggleWindow(activeDevice); return }
+	if (id === B.Magnifier) { runKeyJob(activeDevice, keyJob[0]); return }
+	if (id === B.Knob360) { runKeyJob(activeDevice, keyJob[1]); return }
 	if (id === B.Fine) { state.fine = !state.fine; setLed(activeDevice, B.Fine, state.fine ? 1 : 0); return }
 	if (id === B.ChannelIn) { if (state.cs) toggleParam(state.cs, state.cs.bypass); paintLeds(activeDevice); return }
 	if (id === B.BusCompIn) { var bc = busComp(); if (bc) toggleParam(bc, bc.bypass); paintLeds(activeDevice); return }
@@ -1589,6 +1618,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (cmd === 0x45 && am) { followUf1(activeDevice, message[5], message[6]); return }
 	// The start setting, once: the bridge sends it with every favourites reply (the favourite cycle asks again
 	// after a pause), which must not undo a job picked with the push.
+	if (cmd === 0x4F && message.length >= 8) {   // Settings: UC1 keys
+		if (message[5] <= 2 && KEY_JOBS[message[6]]) { keyJob[message[5]] = KEY_JOBS[message[6]]; log('key ' + ['magnifier', '360', 'encoder push'][message[5]] + ': ' + keyJob[message[5]]) }
+		return
+	}
 	if (cmd === 0x4E) { knobDiv = [128, 64, 32][message[5]] || 64; log('knob step: 1/' + knobDiv); return }   // Settings: UC1 knob steps
 	if (cmd === 0x4C) { if (!enc2.started) { enc2.started = true; enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder at start: ' + ENC2_MODES[enc2.mode].name) } return }
 	if (cmd === 0x4D && am) { try { extEvent(activeDevice, message[5], message[6] - 64) } catch (e) { log('EXT FUNCS: ' + e) } return }
