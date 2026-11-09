@@ -158,6 +158,7 @@ std::atomic<bool> g_cubaseSpoke{false};
 // of a bank step; on the last full bank it does nothing. Unknown count or position: a normal bank step.
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
 std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
+std::atomic<int> g_stripNameSeq{0};   // counts strip 1's names from Cubase (the strips moved)
 void note(uint8_t n, bool on);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
@@ -689,6 +690,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         if (g_trace8) std::printf("UF8 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
         return;
     }
+    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x01 && m[5] == 0) ++g_stripNameSeq;   // (uf8BankSelect)
     // Trace: when each strip's name arrives (timing of bank changes).
     if (g_trace8 && m.size() >= 7 && m[0] == 0xF0 && m[4] == 0x01)
         std::printf("%lld UF8 name strip %d: %s\n", traceMs(), int(m[5]) + 1, std::string(m.begin() + 6, m.end() - 1).c_str());
@@ -1043,12 +1045,19 @@ void cs::uf8BankSelect(bool right)
         // is reported): within 3 s the strip of the last press counts.
         const bool recent = std::chrono::steady_clock::now() - lastAt < std::chrono::seconds(3);
         const int strip = recent ? lastStrip : g_selStrip > 0 ? g_selStrip - 1 : 0;
+        // The script's follow selection stays out of it for 2.5 s (SysEx 5D): Cubase reports the selection late,
+        // still on the old bank, and follow banked straight back.
+        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5D, 25, 0xF7});
+        const int names = g_stripNameSeq;
         if (!(right && userBankRight(true))) {
             note(right ? kNoteBankRight : kNoteBankLeft, true);
             note(right ? kNoteBankRight : kNoteBankLeft, false);
         }
-        for (int i = 0; i < 40 && g_bankOffset == before; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
-        if (g_bankOffset == before) return;   // the first / last bank: nothing moved
+        // The strips have moved when the script reports a new position (SysEx 12) or Cubase sends strip 1's name.
+        int i = 0;
+        for (; i < 40 && g_bankOffset == before && g_stripNameSeq == names; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        if (i == 40) return;   // nothing moved (the first / last bank)
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));   // the rest of the strips' names
         note(uint8_t(kNoteSel + strip), true);
         note(uint8_t(kNoteSel + strip), false);
         lastStrip = strip;

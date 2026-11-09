@@ -85,7 +85,15 @@ The selection has to move by a bank. Tried, in order:
      next press took strip 1 because the old selection had left the strips.
    - Current: each press waits for the script's new bank position (SysEx 12, up to 0.6 s), then SEL; presses queue
      (one at a time); the strip of the last press is kept for 3 s (Cubase's SEL LEDs are in flux meanwhile). At the
-     first / last bank nothing moves and nothing is selected. To be confirmed.
+     first / last bank nothing moves and nothing is selected. Still slow, missed presses, wrong tracks, lost
+     selection. Found (reading the code): **the UF8 script's follow selection fought it.** Follow looks 0.3 s after
+     each selection report; the report of the SEL comes 0.7-0.9 s late, by then for the previous bank, so follow saw
+     the selected track off the strips and banked back.
+   - Now: the bridge tells the UF8 script to keep follow quiet for 2.5 s per press (SysEx 5D), and takes the
+     strips as moved when either the script's position (SysEx 12) or a new strip-1 name arrives. To be confirmed.
+
+**Lesson: anything that moves the UF8 script's strips or the selection must keep follow selection out of it, or
+follow pulls the strips back to where the late selection report says.**
 
 ## Rules of thumb
 
