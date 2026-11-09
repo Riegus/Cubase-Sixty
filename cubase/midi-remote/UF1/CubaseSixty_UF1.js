@@ -586,11 +586,14 @@ function stepTrack(activeDevice, dir, n) {
 					++moved
 				}
 				if (!moved) return   // no visible track that way
+				// A longer step from here learned before (the folders it crosses): that instead of the single steps'.
+				var longKey = cur + ':' + dir + ':' + n
+				if (n > 1 && STEP_PAST_FOLDERS && stepExtra[longKey] !== undefined) extra = stepExtra[longKey]
 				count = Math.abs(k - at) + extra
 				stepLast = { id: list[k].id, at: now }
 				// A step is checked for a folder it stops on (one more step then). A single step learns it; one that
 				// already goes past a known folder is not checked (it passes the folder on the way).
-				stepPending = (n === 1 && extra) ? null : { from: cur, to: list[k].id, dir: dir, at: now, extraFor: null, learn: n === 1 }
+				stepPending = (n === 1 && extra) ? null : { from: cur, to: list[k].id, dir: dir, n: n, extra: extra, at: now, extraFor: null, learn: n === 1 }
 			}
 			if (at < 0 && cur >= 0 && !stepListed) {
 				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it. The channels:')
@@ -619,6 +622,7 @@ function stepCheckLanding() {
 			p.fixed = true
 			p.at = Date.now()
 			out('[CubaseSixty UF1] track step: ' + missing + ' short ("' + selectedInfo.title + '", a folder on the way); ' + missing + ' more')
+			if (p.n > 1) stepExtra[p.from + ':' + p.dir + ':' + p.n] = p.extra + missing   // next time at once
 			var act = p.dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
 			for (var c = 0; c < missing; ++c) act.trigger(plugAm)
 		}
@@ -631,6 +635,7 @@ function stepCheckLanding() {
 	if (!STEP_PAST_FOLDERS) { stepPending = null; return }
 	var k = p.from + ':' + p.dir
 	if (p.learn) stepExtra[k] = (stepExtra[k] || 0) + 1
+	else if (p.n > 1) { p.extra += 1; stepExtra[p.from + ':' + p.dir + ':' + p.n] = p.extra }
 	out('[CubaseSixty UF1] track step: landed on a track without a channel ("' + selectedInfo.title + '"); one more step')
 	p.at = Date.now()
 	var action = p.dir > 0 ? page.mHostAccess.mTrackSelection.mAction.mNextTrack : page.mHostAccess.mTrackSelection.mAction.mPrevTrack
