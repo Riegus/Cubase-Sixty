@@ -273,25 +273,6 @@ function attachSendFeedback(surfaceValue, number) {
 	}
 }
 
-// Value line + readout bar for one control. Cubase re-sends every bound value whenever one changes, so
-// only a value that really changed may take over the display (otherwise the line jumps to the last one).
-// barStyle: 0x01 pointer (pan), 0x02 fill from the left (levels).
-function attachFeedback(surfaceValue, prefix, barStyle, home) {
-	var lastText = null
-	var lastPos = null
-	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
-		var text = (typeof prefix === 'function' ? prefix() : prefix) + value + (units ? units : (barStyle === 0x02 && /^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
-		if (text === lastText) return
-		lastText = text
-		sendValueLine(activeDevice, text, home)
-	}
-	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-		if (value === lastPos) return
-		lastPos = value
-		sendBar(activeDevice, value, barStyle, home)
-	}
-}
-
 // Pan is the value line's home view (sends show for a few seconds); the fader's level goes to the dB field.
 // Under FLIP the two controls swap, so the pan text and bar come from the fader and the level from the knob.
 var flipActive = false
