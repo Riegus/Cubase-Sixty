@@ -1674,7 +1674,7 @@ static long long g_nextTry = 0;     // uf1Poll: when to look for the UF1 again
 static bool g_missingSaid = false;  // "not found" is said once, not every two seconds
 static bool g_portsOpen = false;    // the UF1 script's ports (it steps tracks for the UF8 and UC1 too)
 
-// The ports are made whether or not the UF1 is connected (Cubase sees ports only when it starts, and the script
+// The ports are made whether or not the UF1 is connected (the script
 // loads only when its ports are there). The UF1 itself comes and goes: see uf1Poll.
 bool uf1Start()
 {

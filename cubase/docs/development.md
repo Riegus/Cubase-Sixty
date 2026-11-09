@@ -8,16 +8,17 @@ changes need much less.
 | Changed | Run | Then |
 |---|---|---|
 | Only a MIDI Remote script | `.\dev-restart.ps1 -ScriptsOnly` | In Cubase: MIDI Remote (lower zone) > Reload Scripts. Cubase and the bridge keep running. |
-| Only the bridge | `.\dev-restart.ps1 -BridgeOnly -Build` | Nothing: Cubase keeps running (needs the loopMIDI setup below). |
+| Only the bridge | `.\dev-restart.ps1 -BridgeOnly -Build` | Nothing: Cubase keeps running and connects to the new bridge after a few seconds. |
 | Both | both of the above | |
 | First time, or the ports changed | `.\dev-restart.ps1 -Build` | The full round. |
 
 `-Tray` starts the bridge through the tray app (no console) instead. `-Trace` works with all of them (`cubase\logs\bridge.log`); the scripts' lines are in `cubase\logs\scripts.log`.
 
-## The loopMIDI setup (once)
+## The loopMIDI setup (optional)
 
-Cubase sees MIDI ports only when it starts. The bridge normally creates its ports itself, so they go away when the
-bridge stops and Cubase has to be restarted with it. Ports made in the loopMIDI app stay while the bridge restarts:
+Not needed: Cubase connects its scripts to the bridge's new ports by itself a little while after the bridge
+restarts (seen 9.11.2026; it was assumed before that Cubase sees ports only when it starts). If that ever proves
+unreliable, ports made in the loopMIDI app stay while the bridge restarts:
 
 1. In loopMIDI, add these ten ports (exact names):
    `Cubase-Sixty UF8 to Cubase`, `Cubase-Sixty UF8 from Cubase`, `Cubase-Sixty Helper to Cubase`,

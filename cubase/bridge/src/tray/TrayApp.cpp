@@ -8,8 +8,8 @@
 //   - Start with Windows: the usual per-user Run entry (HKCU\Software\Microsoft\Windows\CurrentVersion\Run).
 //   - One instance only. Not a Windows service on purpose (see docs\release-plan.md, step 3).
 //
-// When the bridge is started again, its MIDI ports are made anew, and Cubase sees ports only when it starts: the
-// app says so in a notification (restart Cubase), unless the ports come from loopMIDI (--loopmidi).
+// When the bridge is started again, its MIDI ports are made anew; Cubase connects the scripts to them again by
+// itself after a little while (seen 9.11.2026), so Cubase does not need a restart.
 
 #ifndef UNICODE
 #define UNICODE
@@ -194,9 +194,9 @@ void restartBridge(bool automatic)
 {
     stopBridge();
     Sleep(3000);   // let Windows release the USB devices and the ports (dev-restart.ps1 found the same)
-    if (startBridge() && !g_loopMidi)
-        notify(automatic ? L"The bridge stopped and was started again" : L"The bridge was restarted",
-               L"Restart Cubase so it finds the bridge's MIDI ports again.");
+    if (startBridge() && automatic)
+        notify(L"The bridge stopped and was started again",
+               L"Cubase connects to it again after a few seconds. bridge.previous.log (Open logs folder) says why it stopped.");
 }
 
 // The bridge ended without being asked to: start it again, unless that has happened five times in a minute.

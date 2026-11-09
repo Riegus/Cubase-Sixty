@@ -1135,7 +1135,7 @@ bool uc1Connect(bool quiet);
 static std::chrono::steady_clock::time_point g_nextTry;   // uc1Poll: when to look for the UC1 again
 static bool g_missingSaid = false;                          // "not found" is said once, not every two seconds
 
-// The ports are made whether or not the UC1 is connected (Cubase sees ports only when it starts, and the script
+// The ports are made whether or not the UC1 is connected (the script
 // loads only when its ports are there). The UC1 itself comes and goes: see uc1Poll.
 bool uc1Start()
 {

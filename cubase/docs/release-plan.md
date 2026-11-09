@@ -17,7 +17,7 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 
 ## 2. Different setups of the surfaces (done 9.11.2026)
 
-- Always create every surface's MIDI ports, so all scripts load whatever is connected (Cubase only sees ports at start).
+- Always create every surface's MIDI ports, so all scripts load whatever is connected (a script loads only when its ports are there).
 - Hot-plug: a surface connected or disconnected while Cubase runs comes and goes without a restart.
 - Done (9.11.2026): the bridge makes all ports at start; a missing surface is looked for every 2 s, an unplugged
   one let go of and picked up again with the last state Cubase sent (the UF8's foot switches ignored for 4 s after
@@ -42,8 +42,10 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - Built (wip/tray, to be tested): `CubaseSixty.exe` runs the bridge without a console, restarts it if it stops (five
   times a minute at most), tray icon green / yellow / red with each surface's and Cubase's state from bridge.log,
   Restart bridge, Open logs folder, Start with Windows, Quit. Status lines in bridge.log without --trace ("Cubase
-  connected", "Cubase: project open / no project"). Open: a restarted bridge needs Cubase restarted (its ports are
-  new), unless loopMIDI ports are used; the installer (step 5) sets Start with Windows.
+  connected", "Cubase: project open / no project"). A restarted bridge makes new ports, and Cubase
+  connects to them again by itself after a little while (seen 9.11.2026; it had been assumed Cubase needed a
+  restart). Quit / Restart ask the bridge to stop, so it blanks the surfaces first. The installer (step 5) sets
+  Start with Windows.
 
 ## 4. Settings
 
