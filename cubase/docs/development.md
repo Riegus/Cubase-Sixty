@@ -36,4 +36,4 @@ To go back: delete `use-loopmidi.txt` and the ports in loopMIDI, then a full res
 ## Logs without tracing
 
 Some things log one line per action in `bridge.log` even without `--trace`, so a test round needs no restart to
-see them: the UF1's BANK without a UF8 (what was sent, how long until the strips moved, which strip was selected).
+see them: the UF1's BANK without a UF8 (each click, what was sent, how long until the strips moved, which strip was selected) and every track Cubase reports as selected on the UF1 (all lines timestamped). The UF8 script logs its follow decisions in `scripts.log`.

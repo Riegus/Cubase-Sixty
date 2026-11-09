@@ -1038,6 +1038,7 @@ void cs::uf8BankSelect(bool right)
     static std::mutex order;
     static int lastStrip = 0;                        // the strip the last press selected
     static std::chrono::steady_clock::time_point lastAt;
+    std::printf("UF1 BANK %s pressed (no UF8)\n", right ? "right" : "left");   // the click, before it queues
     std::thread([right] {
         std::lock_guard<std::mutex> lk(order);
         const int before = g_bankOffset;

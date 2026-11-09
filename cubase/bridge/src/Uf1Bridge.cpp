@@ -1289,6 +1289,7 @@ void onSysex(const std::vector<unsigned char>& m)
         if (!t.empty()) { { std::lock_guard<std::mutex> lk(g_cellMx); g_trackName = t; } paintHeader(); }
         g_uf1RightSeen = false;   // another track: mono until it sends a right side
         if (t.empty()) return;
+        std::printf("UF1 track: %s\n", t.c_str());   // (bridge.log: which track Cubase reports, and when)
         if (t.size() > 8) t.resize(8);   // the UF1 name cell is 8 characters wide
         screenText(::uf1::scr::kTrackName, t);
     } else if (auto c = parseColour(m)) {
