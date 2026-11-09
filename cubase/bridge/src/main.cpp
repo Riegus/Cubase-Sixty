@@ -25,6 +25,7 @@
 
 #include "RtMidi.h"
 #include "MidiPorts.h"
+#include "StopEvent.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -1207,13 +1208,22 @@ int main(int argc, char** argv)
         if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
     }
 
+    cs::stopEventInit();
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        if (cs::stopRequested()) { std::printf("Stop asked for (tray app): blanking the surfaces.\n"); break; }
         cs::uf1Poll();
         cs::uc1Poll();
         uf8Poll();
     }
-    if (g_uf8Running) { g_uf8Running = false; g_dev.close(); }
+    // Leaving: the surfaces blank (as with no project) before they are let go of, so they do not keep showing the
+    // last tracks. (Ctrl+C and the tray app's Quit come here; a killed process cannot.)
+    if (g_uf8Running) {
+        uf8NoProject();
+        std::this_thread::sleep_for(std::chrono::milliseconds(400));   // let the frames go out
+        g_uf8Running = false;
+        g_dev.close();
+    }
     cs::uf1Stop();
     cs::uc1Stop();
     return 0;

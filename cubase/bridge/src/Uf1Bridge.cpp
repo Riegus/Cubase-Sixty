@@ -1204,7 +1204,7 @@ void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated, Cubase shows the Hub): "No Proj." as the track (the name cell is 8 wide), no colour, level or
 // value line, meters and fader down, the LEDs Cubase drives off. The next project paints it all again.
 std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
-void uf1NoProject()
+void uf1NoProject(const char* label = "No Proj.")
 {
     const bool first = !g_noProject;
     if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBefore = g_cache; }
@@ -1214,7 +1214,7 @@ void uf1NoProject()
         for (auto& kv : g_cache) if (kv.first < 0x100) notes.push_back(kv.first);
     }
     std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
-    for (char c : std::string("No Proj.")) name.push_back(uint8_t(c));
+    for (char c : std::string(label)) name.push_back(uint8_t(c));
     name.push_back(0xF7);
     std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
     std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
@@ -1711,7 +1711,11 @@ void uf1Poll()
 
 void uf1Stop()
 {
-    if (g_open) { g_dev.close(); g_open = false; }
+    if (!g_open) return;
+    uf1NoProject("Off");   // blank, as with no project, before letting go
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    g_dev.close();
+    g_open = false;
 }
 
 void uf1SetTrace(bool on) { g_trace = on; }

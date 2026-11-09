@@ -497,7 +497,7 @@ void onMidiIn(std::vector<unsigned char>& msg);
 // the 7-segment blank, the knob rings and the LEDs the script drives off, any menu screen closed.
 std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
 bool g_noProject = false;
-void uc1NoProject()
+void uc1NoProject(const char* label = "No Project")
 {
     const bool first = !g_noProject;
     g_noProject = true;
@@ -509,7 +509,7 @@ void uc1NoProject()
     }
     { std::lock_guard<std::mutex> lk(g_presetMx); setPresetsMode(false); setRoutingMode(false); setExtMode(false); }
     std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x30};
-    for (char c : std::string("No Project")) { name.push_back(0); name.push_back(0); name.push_back(uint8_t(c)); }
+    for (char c : std::string(label)) { name.push_back(0); name.push_back(0); name.push_back(uint8_t(c)); }
     name.push_back(0xF7);
     std::vector<std::vector<unsigned char>> msgs{
         name,
@@ -1173,7 +1173,11 @@ void uc1Stop()
     g_grRun = false;
     if (g_grThread.joinable()) g_grThread.join();
     sslcore::stop();
-    if (g_open) { g_dev.close(); g_open = false; }
+    if (!g_open) return;
+    uc1NoProject("Cubase-Sixty off");   // blank, as with no project, before letting go
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    g_dev.close();
+    g_open = false;
 }
 
 void uc1SetTrace(bool on) { g_trace = on; }

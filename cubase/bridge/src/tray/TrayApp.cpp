@@ -178,9 +178,13 @@ bool startBridge()
 void stopBridge()
 {
     if (!g_bridgeRunning) return;
-    // The bridge has no window to ask politely; it lets go of the devices and ports when its process ends.
-    TerminateProcess(g_bridge.hProcess, 0);
-    WaitForSingleObject(g_bridge.hProcess, 5000);
+    // Ask politely (the named event the bridge watches, StopEvent.h): it blanks the surfaces and closes them. Ended
+    // the hard way only if it has not gone within 5 s.
+    if (HANDLE ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"Local\\CubaseSixtyBridgeStop")) { SetEvent(ev); CloseHandle(ev); }
+    if (WaitForSingleObject(g_bridge.hProcess, 5000) != WAIT_OBJECT_0) {
+        TerminateProcess(g_bridge.hProcess, 0);
+        WaitForSingleObject(g_bridge.hProcess, 5000);
+    }
     CloseHandle(g_bridge.hProcess);
     g_bridge = {};
     g_bridgeRunning = false;

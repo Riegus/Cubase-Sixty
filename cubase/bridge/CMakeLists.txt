@@ -62,6 +62,8 @@ add_executable(cubase_sixty_bridge
     src/Uf1Meter.h
     src/Uc1Bridge.cpp
     src/ScriptLog.cpp
+    src/StopEvent.cpp
+    src/StopEvent.h
     src/NetInit.cpp
     src/SslCoreGuard.cpp
     src/ScriptLog.h
