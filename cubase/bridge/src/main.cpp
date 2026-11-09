@@ -1053,10 +1053,19 @@ void cs::uf8BankSelect(bool right)
         const auto t0 = std::chrono::steady_clock::now();
         const int names = g_stripNameSeq;
         // Already at the end that way: nothing will move, so no wait (the queue was held 2.6 s by such a press).
+        // The press selects the first / last track instead.
         const int total = g_bankTotal;
         if (before >= 0 && g_selStrip != 0 && ((!right && before == 0) || (right && total >= 0 && before + 8 >= total))) {
-            std::printf("UF1 BANK %s (no UF8): already at the %s (bank position %d)\n", right ? "right" : "left",
-                        right ? "last bank" : "first bank", before);
+            const int end = right ? std::min(total - before, 8) - 1 : 0;   // the last track's strip / strip 1
+            std::printf("UF1 BANK %s (no UF8): already at the %s (bank position %d): SEL strip %d\n", right ? "right" : "left",
+                        right ? "last bank" : "first bank", before, end + 1);
+            if (end >= 0 && end + 1 != g_selStrip) {
+                note(uint8_t(kNoteSel + end), true);
+                note(uint8_t(kNoteSel + end), false);
+                lastStrip = end;
+                lastAt = std::chrono::steady_clock::now();
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            }
             return;
         }
         const bool shifts = right && userBankRight(true);
