@@ -99,6 +99,11 @@ The selection has to move by a bank. Tried, in order:
    - Confirmed (9.11.2026, 18 presses): every press landed on the next bank, strip 5 kept. The strips moved
      150-840 ms after the bank key; Cubase reported the new track ~0.7-1 s after that. A left press on the first
      bank does nothing (nothing to move).
+   - Not quite (same day, next round): **Cubase sometimes moved the strips more than 1.1 s after the bank key**
+     (twice in 20 presses). The bridge had given up, so no SEL: the selection stayed behind on the old bank, and at
+     the end the strips were on the last bank with the selection on the one before, so BANK right did nothing.
+     Now it waits up to 2.5 s (follow kept quiet for 4 s), and a press that moves nothing while the selection is
+     not on the strips selects on the strips where they are (catches up).
 
 **Lesson: wait for a known new position (>= 0), not for "something changed".**
 
