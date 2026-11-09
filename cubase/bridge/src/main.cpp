@@ -114,7 +114,7 @@ std::atomic<int> g_skDomain{0};
 std::atomic<bool> g_nav{false};
 std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's own keys stay dark
 std::atomic<std::chrono::steady_clock::time_point> g_uf8ConnectedAt{};   // the foot switches are ignored just after it
-std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = channel strip (Q1), 1 = bus comp (Q2)
+std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle markers (Q1)
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
 const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
@@ -339,12 +339,12 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
-        if (d[3] == 0x73) {   // NAV: a tap = encoder on Markers on / off; held 0.4 s = Nav Mode on / off
+        if (d[3] == 0x73) {   // NAV: a tap = encoder on Markers on / off; held 1 s = Nav Mode on / off
             static std::atomic<int> gen{0};
             if (pressed) {
                 const int g = ++gen;
                 std::thread([g] {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                     if (g != gen) return;
                     gen = -1;   // the release does nothing more
                     g_nav = !g_nav;
