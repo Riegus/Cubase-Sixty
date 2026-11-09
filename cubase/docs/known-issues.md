@@ -4,6 +4,10 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF1
 
+- **V-pots and some encoders no longer feel smooth** (noticed 9.11.2026). They were smooth on 6.11.2026 (a03b82a,
+  SENDS view); the send lag noted since as a Cubase issue is probably the same regression. To find by halving the
+  commits since a03b82a. Suspect: the UF1 script reading Cubase's channel EQ (40 parameters) seven times a second on
+  every track and view since cf8f7a2 (7.11.2026).
 - **Send levels lag** (UF8 send views, UF1 send V-pots). Moving a send with a fader or V-pot follows a little behind;
   volume and pan do not. The same on the UF1, so it is how Cubase handles send levels from MIDI Remote scripts, not
   the views. To look into: whether Direct Access on the send parameters is quicker.
