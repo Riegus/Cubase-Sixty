@@ -1052,6 +1052,13 @@ void cs::uf8BankSelect(bool right)
         std::this_thread::sleep_for(std::chrono::milliseconds(40));   // messages back to back can be lost
         const auto t0 = std::chrono::steady_clock::now();
         const int names = g_stripNameSeq;
+        // Already at the end that way: nothing will move, so no wait (the queue was held 2.6 s by such a press).
+        const int total = g_bankTotal;
+        if (before >= 0 && g_selStrip != 0 && ((!right && before == 0) || (right && total >= 0 && before + 8 >= total))) {
+            std::printf("UF1 BANK %s (no UF8): already at the %s (bank position %d)\n", right ? "right" : "left",
+                        right ? "last bank" : "first bank", before);
+            return;
+        }
         const bool shifts = right && userBankRight(true);
         if (!shifts) {
             note(right ? kNoteBankRight : kNoteBankLeft, true);

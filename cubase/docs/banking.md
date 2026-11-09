@@ -104,6 +104,9 @@ The selection has to move by a bank. Tried, in order:
      the end the strips were on the last bank with the selection on the one before, so BANK right did nothing.
      Now it waits up to 2.5 s (follow kept quiet for 4 s), and a press that moves nothing while the selection is
      not on the strips selects on the strips where they are (catches up).
+   - Confirmed (9.11.2026): every press landed. Strips moved 140-925 ms after the key. **Cubase's last bank is
+     aligned to the end** (offset 49 of 57: eight full strips), not to the eight-grid. A press at either end now
+     returns at once instead of holding the queue for the 2.5 s wait.
 
 **Lesson: wait for a known new position (>= 0), not for "something changed".**
 
