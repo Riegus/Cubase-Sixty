@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.12.0-dev'
+var SCRIPT_VERSION = '0.13.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -252,6 +252,8 @@ function indexKnobs(t) {
 	t.knobByKey = {}
 	for (var k in t.knobs) t.knobByKey[t.knobs[k].obj + ':' + t.knobs[k].tag] = Number(k)
 }
+// One knob click moves a value by 1 / knobDiv of its range (Settings: UC1 knob steps; the bridge sends it, SysEx 4E).
+var knobDiv = 64
 var state = {
 	cs: null,          // the channel strip plug-in on the selected track
 	bcSelected: null,  // the bus comp on the selected track (used when the MixConsole cannot be searched)
@@ -259,7 +261,7 @@ var state = {
 	bcAnchor: null,    // object id of the bus comp the Bus Comp section is on (null = not chosen yet)
 	rescanAt: 0,       // when to look at the selected track's plug-ins again (0 = not pending)
 	mixScanAt: 0,      // when to search the MixConsole for bus comps again (0 = not pending)
-	fine: false,
+	fine: false,   // FINE: a quarter of the knob step
 	csList: [],        // the selected track's channel strips (SSL ones in insert order, then Cubase's own)
 	csChoice: {},      // per track (base object id): the key of the strip picked with the magnifier key
 	csBase: -1,
@@ -801,7 +803,7 @@ function extEvent(activeDevice, op, steps) {
 	var item = list[((ext.idx % list.length) + list.length) % list.length], tag = extTag(item)
 	if (tag < 0) return
 	var acc = state.cs.da, cur = acc.getParameterProcessValue(am, state.cs.obj, tag)
-	var v = item.sw ? (steps > 0 ? 1 : 0) : Math.max(0, Math.min(1, cur + steps / 64 * (state.fine ? 0.25 : 1)))
+	var v = item.sw ? (steps > 0 ? 1 : 0) : Math.max(0, Math.min(1, cur + steps / knobDiv * (state.fine ? 0.25 : 1)))
 	acc.setParameterProcessValue(am, state.cs.obj, tag, v)
 	extDraw(activeDevice)
 }
@@ -1365,7 +1367,7 @@ function onKnob(activeDevice, id, clicks) {
 	if (target.emptySlots && switchOnModuleFor(activeDevice, target, id, clicks)) return
 	if (!rf) return
 	var acc = target.da
-	var step = clicks / 64 * (state.fine ? 0.25 : 1)
+	var step = clicks / knobDiv * (state.fine ? 0.25 : 1)
 	if (rf.invert) step = -step
 	// A parameter with a few steps (a ratio) snaps each small change back to where it was, so while the knob is
 	// being turned (clicks less than 1 s apart) the turn is added up here, not read back from the parameter.
@@ -1587,6 +1589,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (cmd === 0x45 && am) { followUf1(activeDevice, message[5], message[6]); return }
 	// The start setting, once: the bridge sends it with every favourites reply (the favourite cycle asks again
 	// after a pause), which must not undo a job picked with the push.
+	if (cmd === 0x4E) { knobDiv = [128, 64, 32][message[5]] || 64; log('knob step: 1/' + knobDiv); return }   // Settings: UC1 knob steps
 	if (cmd === 0x4C) { if (!enc2.started) { enc2.started = true; enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder at start: ' + ENC2_MODES[enc2.mode].name) } return }
 	if (cmd === 0x4D && am) { try { extEvent(activeDevice, message[5], message[6] - 64) } catch (e) { log('EXT FUNCS: ' + e) } return }
 	if (cmd === 0x44 && am) { try { favStep(activeDevice, message[5] === 0 ? 'cs' : 'bc', message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) } return }

@@ -8,6 +8,7 @@
 
 #include "Uf1Bridge.h"
 #include "Names.h"
+#include "Brightness.h"
 #include "Uc1Bridge.h"
 #include "Settings.h"
 
@@ -1649,7 +1650,7 @@ bool uf1OpenDevice(bool quiet)
         g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&fillStyle, 1)));
         g_barStyleShown = fillStyle;
         g_dev.send(::uf1::buildMasterBrightness(0xff));
-        g_dev.send(::uf1::buildLedBrightness(0x20));
+        uf1ApplyBrightness();
     }
     return true;
 }
@@ -1692,6 +1693,13 @@ bool uf1Start()
 }
 
 const char* uf1State() { return g_open ? "connected" : "not connected"; }
+void uf1ApplyBrightness()
+{
+    if (!g_open) return;
+    // The LEDs share the UF8's opcode and scale (Brightness.h); the big screen has its own column.
+    g_dev.send(::uf1::buildLedBrightness(brightness::kTable[settings::brightnessLevel("led-brightness")].uf8_led));
+    g_dev.send(::uf1::buildLcdBrightness(brightness::kTable[settings::brightnessLevel("display-brightness")].uf1_lcd));
+}
 void uf1RedrawName()
 {
     std::vector<unsigned char> name;

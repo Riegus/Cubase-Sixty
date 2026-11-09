@@ -6,7 +6,8 @@ The Settings page that will hold them is step 4 of the [release plan](release-pl
 
 The Settings page (tray icon: click, or Settings in its menu) shows what is settable now; it writes
 `cubase\settings.txt` and `cubase\favourites.txt`, which can still be edited by hand. On it so far: track stepping,
-the UC1 secondary encoder's job at start, long track names (abbreviated, the default, or cut; Rea-Sixty's "Smart
+the UC1 secondary encoder's job at start, key / LED and display brightness (five steps, all surfaces), the UC1's
+7-segment leading zeros, the UC1 knob step, long track names (abbreviated, the default, or cut; Rea-Sixty's "Smart
 abbreviate"), the script log, and the favourites (eight per domain). A new setting is one
 entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
 
@@ -32,8 +33,6 @@ entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
   Rea-Sixty lets the user bind these keys (and the Bus Comp encoder push) to other actions.
 - **ROUTING order 10 on the UC1.** Now: picture 10 (numbers run 1-10, the picture is slightly off). Could be: picture 8
   (right path, renumbered to 8); order 10 left out.
-- **Knob step size.** Now: 1/64 of the range per click, Fine = a quarter of that.
-- **7-segment.** Now: the MixConsole number, leading zeros blank. Rea-Sixty shows leading zeros ("007").
 - **Favourites.** Now: listed by hand in `cubase\favourites.txt` (eight channel strips, eight bus comps). Rea-Sixty
   picks them in its Settings window (eight slots per domain, a dropdown of mapped plug-ins), with named sets, a
   per-project base bank, copy / own settings per domain and which channel strip sections a swap carries.
@@ -43,7 +42,7 @@ entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
 Rea-Sixty's Settings (Devices, Appearance, Behaviour, Bindings, Modes, FX Learn, Favourites, Selection Sets, Sticky
 Pot, Parameter Groups, About) has these that would make sense in Cubase-Sixty (looked at 9.11.2026):
 
-- **Devices**: LED and display brightness per surface; sleep the surfaces when idle (after N minutes); Identify (flash
+- **Devices**: sleep the surfaces when idle (after N minutes); Identify (flash
   a surface); a second UF8.
 - **Behaviour**: touching a fader selects its channel; the selection mode back to NORM at start; the UC1 shows the
   main output as track 0; plug-in cycling wraps around; the UF1 starts in a fixed view (DAW / SENDS / PLUGIN / METER);

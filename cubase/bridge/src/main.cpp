@@ -28,6 +28,7 @@
 #include "StopEvent.h"
 #include "SettingsServer.h"
 #include "Names.h"
+#include "Brightness.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -1108,6 +1109,14 @@ void cs::uf8BankSelect(bool right)
     }).detach();
 }
 
+// Settings: led- / display-brightness (Brightness.h's five steps).
+void uf8ApplyBrightness()
+{
+    if (!g_uf8Running) return;
+    g_dev.send(uf8::buildLedBrightness(brightness::kTable[cs::settings::brightnessLevel("led-brightness")].uf8_led));
+    g_dev.send(uf8::buildLcdBrightness(brightness::kTable[cs::settings::brightnessLevel("display-brightness")].uf8_lcd));
+}
+
 static std::chrono::steady_clock::time_point g_uf8NextTry;   // uf8Poll: when to look for the UF8 again
 static bool g_uf8MissingSaid = false;                          // "not found" is said once, not every two seconds
 
@@ -1126,6 +1135,7 @@ bool uf8Connect(bool quiet)
     { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
     g_meterShown = {};
     g_uf8Running = true;
+    uf8ApplyBrightness();
     replayUf8Cache();
     if (!g_cubaseSpoke) {
         // Nothing from Cubase yet (the bridge has just started; Cubase connects to new ports after a while).
@@ -1235,6 +1245,14 @@ int main(int argc, char** argv)
         [] { cs::uc1SendFavourites(); },
         cs::logDir(argc > 0 ? argv[0] : nullptr).string(),
         [](const std::string& key) {
+            if (key == "led-brightness" || key == "display-brightness") {
+                uf8ApplyBrightness();
+                cs::uf1ApplyBrightness();
+                cs::uc1ApplyBrightness();
+                return;
+            }
+            if (key == "uc1-7seg") { cs::uc1RedrawSevenSeg(); return; }
+            if (key == "uc1-knob-step") { cs::uc1SendKnobStep(); return; }
             if (key != "track-names") return;
             // The names again, abbreviated or cut as now set (the UC1 redraws its own all the time).
             std::vector<std::vector<unsigned char>> names;
