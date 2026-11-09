@@ -218,7 +218,9 @@ function render() {
   const main = document.getElementById("main");
   main.innerHTML = "";
   const sec = sections.find(x => x.id === current) || sections[0];
-  main.append(el("h1", {}, sec.title), sec.lead ? el("p", { class: "lead" }, sec.lead) : null, sectionBody(sec.id));
+  main.append(el("h1", {}, sec.title));
+  if (sec.lead) main.append(el("p", { class: "lead" }, sec.lead));   // (append(null) would show "null")
+  main.append(sectionBody(sec.id));
 }
 
 window.addEventListener("hashchange", () => { current = (location.hash || "#devices").slice(1); render(); });
