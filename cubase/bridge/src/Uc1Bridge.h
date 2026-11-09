@@ -12,6 +12,10 @@ void uc1Stop();
 // From the main loop: lets go of a UC1 that stopped answering or was unplugged, and picks up one that is
 // connected (tried every two seconds; the last state Cubase sent is drawn on it).
 void uc1Poll();
+// For the Settings page: "connected" or "not connected".
+const char* uc1State();
+// The favourites changed (Settings page): on to the UC1 script again (SysEx 43).
+void uc1SendFavourites();
 // One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL
 // encoder: on to the UC1 script (SysEx 44), which shows and swaps them.
 void uc1FavouriteStep(int domain, int dir);

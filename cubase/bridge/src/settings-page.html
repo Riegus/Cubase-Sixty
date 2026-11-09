@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubase-Sixty Settings</title>
+<style>
+  :root {
+    --bg: #f4f4f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6;
+    --accent: #2f7d4f; --accent-ink: #ffffff; --warn: #b26a00; --bad: #b3261e; --rail: #ebebe6; --focus: #2f7d4f55;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92; --line: #33332f;
+      --accent: #5cc285; --accent-ink: #0d1f14; --warn: #f0b429; --bad: #ff6b5e; --rail: #1a1a18; --focus: #5cc28566;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  .app { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+  nav { background: var(--rail); border-right: 1px solid var(--line); padding: 20px 12px; }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; font-weight: 600; letter-spacing: .2px; }
+  .brand svg { flex: none; }
+  nav a { display: block; padding: 8px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+  nav a:hover { background: var(--line); }
+  nav a.on { background: var(--accent); color: var(--accent-ink); }
+  main { padding: 28px 36px 60px; max-width: 860px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  section { display: none; }
+  section.on { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin: 0 0 4px; }
+  .help { color: var(--muted); margin: 0 0 12px; font-size: 14px; }
+  .when { font-size: 12px; color: var(--warn); margin-left: 6px; }
+  label.choice { display: flex; gap: 10px; align-items: flex-start; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+  label.choice:hover { background: var(--bg); }
+  label.choice input { margin-top: 3px; accent-color: var(--accent); }
+  .def { color: var(--muted); font-size: 12px; }
+  .dev { display: grid; grid-template-columns: 90px 1fr; gap: 6px 12px; align-items: center; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 13px; border: 1px solid var(--line); }
+  .pill.ok { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .favs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .slot { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .slot span { width: 18px; color: var(--muted); font-size: 13px; text-align: right; }
+  .slot input { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+  .slot button { padding: 4px 8px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  input:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+  code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 13px; }
+  #toast { position: fixed; right: 20px; bottom: 20px; background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.on { opacity: .95; }
+  #toast.bad { background: var(--bad); color: #fff; }
+  .gone { padding: 40px; text-align: center; color: var(--muted); }
+  @media (max-width: 700px) { .app { grid-template-columns: 1fr; } nav { border-right: 0; border-bottom: 1px solid var(--line); } main { padding: 20px 16px; } .favs { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav>
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="var(--accent)"/><g fill="#1e1e1e"><rect x="3.9" y="3.5" width="1.2" height="9" rx=".6"/><rect x="7.4" y="3.5" width="1.2" height="9" rx=".6"/><rect x="10.9" y="3.5" width="1.2" height="9" rx=".6"/></g><g fill="#fff"><rect x="2.9" y="8.4" width="3.2" height="2.2" rx=".5"/><rect x="6.4" y="3.9" width="3.2" height="2.2" rx=".5"/><rect x="9.9" y="6.4" width="3.2" height="2.2" rx=".5"/></g></svg>
+      Cubase-Sixty
+    </div>
+    <div id="rail"></div>
+  </nav>
+  <main id="main">
+    <div class="gone">Loading…</div>
+  </main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+"use strict";
+const TOKEN = "__TOKEN__";
+const sections = [
+  { id: "devices", title: "Devices", lead: "The surfaces the bridge has found, and Cubase." },
+  { id: "behaviour", title: "Behaviour", lead: "How the surfaces step through tracks and what they start on." },
+  { id: "favourites", title: "Favourites", lead: "The channel strips and bus comps the CS Fav / BC Fav modes step through (UF8 CHANNEL encoder, UC1 secondary encoder)." },
+  { id: "logging", title: "Logging", lead: "What is written to the log files." },
+  { id: "about", title: "About", lead: "" },
+];
+let state = null;
+let current = (location.hash || "#devices").slice(1);
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) e.append(k instanceof Node ? k : document.createTextNode(k));
+  return e;
+}
+function toast(text, bad) {
+  const t = document.getElementById("toast");
+  t.textContent = text; t.className = "on" + (bad ? " bad" : "");
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.className = "", 2200);
+}
+async function post(path, fields) {
+  const body = new URLSearchParams({ token: TOKEN, ...fields });
+  const r = await fetch(path, { method: "POST", body });
+  const j = await r.json().catch(() => ({ ok: false, error: "no answer" }));
+  if (!j.ok) throw new Error(j.error || "failed");
+}
+async function load() {
+  try {
+    const r = await fetch("/api/state?token=" + TOKEN);
+    if (!r.ok) throw new Error();
+    state = await r.json();
+    render();
+  } catch {
+    document.getElementById("main").innerHTML = '<div class="gone">The bridge is not answering. Is it running? (Tray icon: Restart bridge, then open Settings again.)</div>';
+  }
+}
+
+function pill(text) {
+  const cls = /connected|project open/.test(text) ? "ok" : /unplugged|not found|no project|waiting/.test(text) ? "warn" : "bad";
+  return el("span", { class: "pill " + cls }, text);
+}
+
+function settingCard(d) {
+  const card = el("div", { class: "card" },
+    el("h2", {}, d.label, d.live ? null : el("span", { class: "when" }, "takes effect when Cubase starts again")),
+    el("p", { class: "help" }, d.help));
+  for (const c of d.choices) {
+    const id = d.key + "-" + c.value;
+    const input = el("input", { type: "radio", name: d.key, id, value: c.value });
+    input.checked = d.value === c.value;
+    input.addEventListener("change", async () => {
+      try { await post("/api/set", { key: d.key, value: c.value }); d.value = c.value; toast("Saved"); }
+      catch (e) { toast("Not saved: " + e.message, true); load(); }
+    });
+    card.append(el("label", { class: "choice", for: id }, input,
+      el("span", {}, c.label, c.value === d.def ? el("span", { class: "def" }, "  (default)") : null)));
+  }
+  return card;
+}
+
+function favouriteColumn(title, key, names, known) {
+  const listId = "known-" + key;
+  const col = el("div", { class: "card" }, el("h2", {}, title),
+    el("p", { class: "help" }, "Up to eight, in the order the encoder steps through them. Type a plug-in's name as Cubase's plug-in list shows it."));
+  const dl = el("datalist", { id: listId });
+  for (const k of known) dl.append(el("option", { value: k }));
+  col.append(dl);
+  const inputs = [];
+  for (let i = 0; i < 8; i++) {
+    const inp = el("input", { type: "text", list: listId, "aria-label": title + " " + (i + 1) });
+    inp.value = names[i] || "";
+    inputs.push(inp);
+    const move = (dir) => {
+      const j = i + dir; if (j < 0 || j > 7) return;
+      [inputs[i].value, inputs[j].value] = [inputs[j].value, inputs[i].value];
+    };
+    col.append(el("div", { class: "slot" }, el("span", {}, String(i + 1)), inp,
+      el("button", { type: "button", title: "Move up", "aria-label": "Move up", onclick: () => move(-1) }, "↑"),
+      el("button", { type: "button", title: "Move down", "aria-label": "Move down", onclick: () => move(1) }, "↓")));
+  }
+  col.inputs = inputs;
+  return col;
+}
+
+function sectionBody(id) {
+  const s = el("div");
+  if (id === "devices") {
+    const st = state.status || {};
+    const card = el("div", { class: "card dev" });
+    for (const [name, v] of [["UF8", st.uf8], ["UF1", st.uf1], ["UC1", st.uc1], ["Cubase", st.cubase]])
+      card.append(el("strong", {}, name), el("div", {}, pill(v || "unknown")));
+    s.append(card, el("p", { class: "help" }, "Surfaces can be plugged in and out while everything runs; the bridge looks for a missing one every two seconds."));
+  } else if (id === "favourites") {
+    const f = state.favourites;
+    const strips = favouriteColumn("Channel strips (CS Fav)", "strips", f.strips, f.knownStrips);
+    const buses = favouriteColumn("Bus comps (BC Fav)", "bus", f.busComps, f.knownBusComps);
+    const save = el("button", { class: "primary", type: "button", onclick: async () => {
+      try {
+        await post("/api/favourites", { strips: strips.inputs.map(i => i.value).join("\n"), busComps: buses.inputs.map(i => i.value).join("\n") });
+        toast("Favourites saved");
+        load();
+      } catch (e) { toast("Not saved: " + e.message, true); }
+    } }, "Save favourites");
+    s.append(el("div", { class: "favs" }, strips, buses), save);
+  } else if (id === "about") {
+    s.append(el("div", { class: "card" },
+      el("h2", {}, "Cubase-Sixty"),
+      el("p", { class: "help" }, "SSL UF8, UF1 and UC1 in Cubase, ported from Rea-Sixty."),
+      el("p", { class: "help" }, "Logs: ", el("code", {}, state.paths.logs)),
+      el("p", { class: "help" }, "This page is served by the bridge on this computer only. The settings are kept in ", el("code", {}, "cubase\\settings.txt"), " and ", el("code", {}, "cubase\\favourites.txt"), "; editing those by hand works too.")));
+  } else {
+    const title = sections.find(x => x.id === id).title;
+    for (const d of state.settings.filter(d => d.section === title)) s.append(settingCard(d));
+  }
+  return s;
+}
+
+function render() {
+  const rail = document.getElementById("rail");
+  rail.innerHTML = "";
+  for (const sec of sections)
+    rail.append(el("a", { href: "#" + sec.id, class: sec.id === current ? "on" : "", onclick: () => { current = sec.id; setTimeout(render); } }, sec.title));
+  const main = document.getElementById("main");
+  main.innerHTML = "";
+  const sec = sections.find(x => x.id === current) || sections[0];
+  main.append(el("h1", {}, sec.title), sec.lead ? el("p", { class: "lead" }, sec.lead) : null, sectionBody(sec.id));
+}
+
+window.addEventListener("hashchange", () => { current = (location.hash || "#devices").slice(1); render(); });
+// The Devices status follows along while the page is open.
+setInterval(async () => {
+  if (current !== "devices") return;
+  try { const r = await fetch("/api/state?token=" + TOKEN); if (r.ok) { state = await r.json(); render(); } } catch {}
+}, 2000);
+load();
+</script>
+</body>
+</html>

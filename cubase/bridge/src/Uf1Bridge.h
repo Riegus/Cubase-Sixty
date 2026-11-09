@@ -16,6 +16,8 @@ void uf1Stop();
 // From the main loop: lets go of a UF1 that stopped answering or was unplugged, and picks up one that is
 // connected (tried every two seconds; the last state Cubase sent is drawn on it).
 void uf1Poll();
+// For the Settings page: "connected" or "not connected".
+const char* uf1State();
 // Defined in main.cpp: one bank step on the UF8 (the UF1's BANK keys use it). False if no UF8 is running.
 bool uf8BankPress(bool right);
 // Defined in main.cpp: BANK without a UF8: the UF8 script banks, and the track on the same strip is selected.

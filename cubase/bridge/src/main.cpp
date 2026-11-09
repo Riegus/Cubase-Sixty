@@ -26,6 +26,7 @@
 #include "RtMidi.h"
 #include "MidiPorts.h"
 #include "StopEvent.h"
+#include "SettingsServer.h"
 
 #include "Mapping.h"
 #include "Protocol.h"
@@ -1223,6 +1224,15 @@ int main(int argc, char** argv)
         if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
     }
 
+    // The Settings page (the tray app's Settings opens it).
+    cs::settingsServer::start(
+        [] {
+            const char* cubase = !g_cubaseSpoke ? "waiting for Cubase" : g_noProject ? "no project (the Hub)" : "project open";
+            return std::string("{\"uf8\":\"") + (g_uf8Running ? "connected" : "not connected") + "\",\"uf1\":\"" + cs::uf1State() +
+                   "\",\"uc1\":\"" + cs::uc1State() + "\",\"cubase\":\"" + cubase + "\"}";
+        },
+        [] { cs::uc1SendFavourites(); },
+        cs::logDir(argc > 0 ? argv[0] : nullptr).string());
     cs::stopEventInit();
     while (g_run) {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
@@ -1239,6 +1249,7 @@ int main(int argc, char** argv)
         g_uf8Running = false;
         g_dev.close();
     }
+    cs::settingsServer::stop();
     cs::uf1Stop();
     cs::uc1Stop();
     return 0;

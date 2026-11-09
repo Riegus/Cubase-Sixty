@@ -1690,6 +1690,8 @@ bool uf1Start()
     return ports;
 }
 
+const char* uf1State() { return g_open ? "connected" : "not connected"; }
+
 // From the main loop: a UF1 that stopped answering or was unplugged is let go of, and a missing one is looked
 // for every two seconds (plugged in while Cubase runs, or switched on later).
 void uf1Poll()

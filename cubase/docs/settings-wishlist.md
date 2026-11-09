@@ -4,12 +4,14 @@ Behaviour that is fixed in code today but should become a setting once Cubase-Si
 (a settings file read by the bridge, or a settings page). Each entry: what it is now, and what the choice would be.
 The Settings page that will hold them is step 4 of the [release plan](release-plan.md).
 
-Some settings are in `cubase\settings.txt` now (written with the defaults the first time the bridge starts; edit it,
-no restart needed): `track-stepping` = mixconsole (default) / project / all; `uc1-encoder2` = bus-comp (default) / strips / cs-fav / bc-fav.
+The Settings page (tray icon: click, or Settings in its menu) shows what is settable now; it writes
+`cubase\settings.txt` and `cubase\favourites.txt`, which can still be edited by hand. On it so far: track stepping,
+the UC1 secondary encoder's job at start, the script log, and the favourites (eight per domain). A new setting is one
+entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
 
 ## Logging
 
-- **Script log** (`cubase\logs\scripts.log`). Now: on, `--no-script-log` turns it off. For releases: off by default.
+- **Script log** (`cubase\logs\scripts.log`). On the Settings page now (on / off). For releases: off by default.
 - **Bridge log** (`cubase\logs\bridge.log`). Now: always on. Could get the same switch.
 
 ## UC1
@@ -34,3 +36,20 @@ no restart needed): `track-stepping` = mixconsole (default) / project / all; `uc
 - **Favourites.** Now: listed by hand in `cubase\favourites.txt` (eight channel strips, eight bus comps). Rea-Sixty
   picks them in its Settings window (eight slots per domain, a dropdown of mapped plug-ins), with named sets, a
   per-project base bank, copy / own settings per domain and which channel strip sections a swap carries.
+
+## Candidates from Rea-Sixty's Settings window
+
+Rea-Sixty's Settings (Devices, Appearance, Behaviour, Bindings, Modes, FX Learn, Favourites, Selection Sets, Sticky
+Pot, Parameter Groups, About) has these that would make sense in Cubase-Sixty (looked at 9.11.2026):
+
+- **Devices**: LED and display brightness per surface; sleep the surfaces when idle (after N minutes); Identify (flash
+  a surface); a second UF8.
+- **Behaviour**: touching a fader selects its channel; the selection mode back to NORM at start; the UC1 shows the
+  main output as track 0; plug-in cycling wraps around; the UF1 starts in a fixed view (DAW / SENDS / PLUGIN / METER);
+  the UF8 / UF1 start on a fixed soft-key bank; announce the soft-key bank on the time display; the UF1 follows the
+  UF8's SSL Strip Mode; the UF1's PLUG-IN key opens the plug-in window.
+- **Metering**: where the gain reduction comes from; the UF1 soft-key LEDs as bus comp gain reduction.
+- **Favourites**: named sets, a base bank per project, copy / own settings per domain, which strip sections a swap
+  carries.
+- Not for Cubase (REAPER-only): TCP / MCP mirroring, pinned tracks, VCA spill, FX-chain window pinning, ReaScript
+  bindings.
