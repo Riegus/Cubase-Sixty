@@ -69,6 +69,12 @@ measured, what failed and why. Newest findings go in their section with the date
   stepped blindly the way it was pressed, further away. Now the script remembers the last listed channel the
   selection was on; when no visible track lies that way from it, the press steps back towards it instead. The
   landing check treats any track not in the list (not only -1) as "not there yet".
+- **Collapsed folders** (10.11.2026, step log): **Cubase's next / previous track skips the tracks inside a collapsed
+  folder** (as the Project window shows them), while the MixConsole list has them all. Counting from the list then
+  lands far away: one step from track 14 (VCA Bass Link) went to the folder, the next to track 34 (Piano - EP);
+  one back from track 12 went past a collapsed Drums folder to Stereo Out. Scripts cannot see whether a folder is
+  collapsed. Counting next / previous triggers cannot work with collapsed folders; selecting the target channel
+  directly (a bank zone channel's `mValue.mSelected`) would.
 - **Selecting is not what is slow** (10.11.2026, Mackie Control test): Mackie SELECT lit within 1-20 ms when steps
   were spaced, 200-700 ms when they came quickly, those late ones at the same moment as the scripts' work for the
   new track (UF1 EQ graph and plug-in scan, UC1 selected-track scan). Mackie's cursor up / down do not select
