@@ -74,3 +74,9 @@ is collected in [Banking and track stepping](banking.md).
   (10.11.2026). So there is no "Stop bridge" in the tray app.
 - **Mackie Control's cursor keys do not select tracks**; its SELECT keys do, within its bank of eight
   (10.11.2026, timing test: see [banking.md](banking.md)).
+- **Send levels through MIDI Remote value bindings are slow.** While a bound send level keeps changing, Cubase
+  pauses ~0.8 s at a time and re-reports the selected track (10.11.2026); volume and pan bindings do not do this.
+  Direct Access writes (setParameterProcessValue on the channel's Sends > slot > Level) are smooth.
+- **Every bound surface element needs a binding in every sub page.** A knob bound only in some sub pages stopped the
+  script at load ("DukValue is uninitialized", the line number pointing nowhere useful).
+- **A callback read back from a surface value is Cubase's wrapper, not the function.** Keep your own reference.
