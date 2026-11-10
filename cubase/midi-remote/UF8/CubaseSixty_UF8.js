@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -201,8 +201,9 @@ function paintStripName(activeDevice, index) {
 	var text = stripTitles[index] || ''
 	// (A track without that send shows a blank name, not an empty one: the bridge takes an empty name as no track
 	// on the strip and switches its LEDs off.)
-	if (route.fader === 'send') text = text ? (sendTitles[index][route.send] || ' ') : ''
-	else if (route.vpot === 'sends') text = selSendTitles[index] || ' '
+	// The fader send view keeps the track names (each strip is a track; the destination is the same on all of them);
+	// the V-pot send view shows the selected track's send names.
+	if (route.vpot === 'sends' && route.fader !== 'send') text = emptySend(selSendTitles[index]) ? ' ' : selSendTitles[index]
 	sendStripName(activeDevice, index, text)
 }
 ;(function () {
@@ -253,7 +254,7 @@ for (var i = 0; i < STRIPS; ++i) {
 		;(function (index, n) {
 			sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
 				sendTitles[index][n] = title || ''
-				if (route.fader === 'send' && route.send === n) paintStripName(activeDevice, index)
+				if (route.fader === 'send' && route.send === n) skRescanAt = Date.now() + 150   // a send added / removed: the fader's target
 			}
 		})(i, sn)
 	}
@@ -1116,6 +1117,9 @@ function stripTags(index) {
 // writes the send slot's level through Direct Access (the strip's channel / the selected channel) and reports it
 // back (27 for the motor, the dB field; 0D / 0E for the V-pot's value line and ring). Their bindings are on the
 // send's on switch, as placeholders. The V-pot push switches the selected track's send on / off.
+// An empty send slot: Cubase keeps eight per track, an empty one has no destination (its title is "" or only its
+// number) but still a level (0 dB).
+function emptySend(title) { return !title || /^\s*\d*\s*-?\s*$/.test(String(title)) }
 var selDa = null
 try { selDa = page.mHostAccess.makeDirectAccess(routeSelected) } catch (e) { out('[CubaseSixty] no Direct Access on the selected track: the V-pot send view does nothing: ' + e) }
 // The level parameter of send slot n (0-7) on the channel da is on: { obj, tag, on } or null.
@@ -1154,7 +1158,7 @@ function stripModeUpdate(activeDevice, index) {
 	if (route.fader === 'send') {
 		fKind = 'send'
 		var fs = null
-		try { fs = sendSlotLevel(skDa[index], route.send) } catch (e) {}
+		if (!emptySend(sendTitles[index][route.send])) { try { fs = sendSlotLevel(skDa[index], route.send) } catch (e) {} }
 		if (fs) { fObj = fs.obj; fTag = fs.tag }
 	} else if (stripModeOn && (normal || flipped) && stripTags(index)) {
 		fTag = normal ? st.faderTag : st.panTag
@@ -1165,7 +1169,7 @@ function stripModeUpdate(activeDevice, index) {
 	if (route.vpot === 'sends' && route.fader !== 'send') {
 		vKind = 'send'; vDa = selDa; vObj = -1; vTag = -1
 		var vs = null
-		try { vs = sendSlotLevel(selDa, index) } catch (e) {}
+		if (!emptySend(selSendTitles[index])) { try { vs = sendSlotLevel(selDa, index) } catch (e) {} }
 		if (vs) { vObj = vs.obj; vTag = vs.tag; vOn = vs.on }
 	}
 	// A send view takes the control even where the track has no such send (it then shows an empty send).
@@ -1181,6 +1185,7 @@ function stripModeUpdate(activeDevice, index) {
 	st.vKind = vKind
 	st.vDa = vDa
 	st.vOn = vOn
+	if (changed) { st.fPolled = st.vPolled = st.vOnPolled = null }
 	if (changed) {
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
 		flipResets[index](activeDevice)   // the track's own values where the script no longer has them
@@ -1266,7 +1271,7 @@ function skMessage(activeDevice, m) {
 		var st = skStrip[pi], da = st.vDa
 		var cur = da.getParameterProcessValue(skAm, st.vObj, st.vTag)
 		da.setParameterProcessValue(skAm, st.vObj, st.vTag, Math.max(0, Math.min(1, cur + (m[6] - 64) / 100)))
-		stripPanSend(activeDevice, pi)
+		if (st.vKind !== 'send') stripPanSend(activeDevice, pi)   // (a send: shown by the poll)
 		return
 	}
 	if (m[4] === 0x29 && m.length >= 7) {   // V-pot push: centre the plug-in's pan; on a send: the send on / off
@@ -1285,8 +1290,7 @@ function skMessage(activeDevice, m) {
 		var si = m[5]
 		if (si >= STRIPS || !skStrip[si].faderOn || skStrip[si].fObj < 0) return
 		skDa[si].setParameterProcessValue(skAm, skStrip[si].fObj, skStrip[si].fTag, ((m[6] << 7) | m[7]) / 16383)
-		stripFaderShow(activeDevice, si)
-		return
+		return   // (shown by the poll, sendViewPoll: read back at once, the text was not updated yet)
 	}
 	if (m[4] === 0x21 && m.length >= 8) {
 		skFocus = m[5] === 0x7F ? null : { bank: m[5] & 7, slot: m[6], bc: m[5] >= 8 }   // bank + 8 = the bus comp (Q2)
@@ -1318,8 +1322,27 @@ function skMessage(activeDevice, m) {
 	skReport(activeDevice, index)
 }
 page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping }
+// The send views' levels read about nine times a second (each idle tick) and sent when changed: Cubase reports a
+// Direct Access change only when an edit ends (a mouse drag showed only at the release), and right after a write the
+// text was not updated yet (10.11.2026).
+function sendViewPoll(activeDevice) {
+	for (var i = 0; i < STRIPS; ++i) {
+		var st = skStrip[i]
+		if (!st) continue
+		if (st.faderOn && st.fKind === 'send' && st.fObj >= 0) {
+			var v = skDa[i].getParameterProcessValue(skAm, st.fObj, st.fTag)
+			if (v !== st.fPolled) { st.fPolled = v; stripFaderSend(activeDevice, i) }
+		}
+		if (st.panOn && st.vKind === 'send' && st.vObj >= 0) {
+			var w = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
+			var on = st.vOn >= 0 ? st.vDa.getParameterProcessValue(skAm, st.vObj, st.vOn) : 0
+			if (w !== st.vPolled || on !== st.vOnPolled) { st.vPolled = w; st.vOnPolled = on; stripPanSend(activeDevice, i) }
+		}
+	}
+}
 page.mOnIdle = function (activeDevice, activeMapping) {
 	skAm = activeMapping
+	if (route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
 		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
