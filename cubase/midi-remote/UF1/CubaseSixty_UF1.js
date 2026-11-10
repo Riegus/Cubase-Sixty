@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.1-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -266,7 +266,7 @@ function attachSendFeedback(surfaceValue, number) {
 		cell.qcObject = valueTitle ? (objectTitle || '') : ''   // what the Quick Control belongs to (a plug-in's name)
 		if (qcActive) sendQcCell(activeDevice, number - 1)   // the name can change without the value changing
 	}
-	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) {
+	var onDisplay = function (activeDevice, value, units) {
 		if (!qcActive) {
 			var v = String(value)
 			cell.value = v === '' ? '' : v + (units ? units : (/^-?[0-9.]+$/.test(v) ? 'dB' : ''))
@@ -290,7 +290,7 @@ function attachSendFeedback(surfaceValue, number) {
 		lastText = text
 		sendValueLine(activeDevice, text, false)
 	}
-	surfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+	var onProcess = function (activeDevice, value) {
 		reportVpotPosition(activeDevice, number - 1, value)
 		var qp = Math.max(0, Math.min(100, Math.round(value * 100)))
 		if (qcActive && qp !== cell.qcPos) { cell.qcPos = qp; sendQcCell(activeDevice, number - 1) } else cell.qcPos = qp
@@ -299,6 +299,11 @@ function attachSendFeedback(surfaceValue, number) {
 		lastPos = value
 		sendBar(activeDevice, value, 0x02, false)
 	}
+	surfaceValue.mOnDisplayValueChange = onDisplay
+	surfaceValue.mOnProcessValueChange = onProcess
+	// Our own references: a callback read back from Cubase's object is Cubase's wrapper, not this function (calling
+	// it gave "DukValue is uninitialized", 10.11.2026).
+	return { process: onProcess, display: onDisplay }
 }
 
 // Pan is the value line's home view (sends show for a few seconds); the fader's level goes to the dB field.
@@ -438,12 +443,10 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 		.setTypeAbsolute()
 	var sendPush = cmdButton()   // (the V-pot's push)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
-	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
+	var feedback = attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
 	// Send levels through Direct Access (above): a turn from the bridge is written to the send slot; the display
 	// handlers are kept for showing what is read back.
-	;(function (sv, k) {
-		var proc = sv.mOnProcessValueChange
-		var disp = sv.mOnDisplayValueChange
+	;(function (sv, k, proc, disp) {
 		var cell = sendCells[k]
 		sendDa.show[k] = {
 			level: function (activeDevice, value, text, units, line) {
@@ -462,7 +465,7 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 			sendDaWrite(activeDevice, k, value)
 			try { sendDaShow(activeDevice, k, true) } catch (e) {}
 		}
-	})(sendKnob.mSurfaceValue, sendIndex)
+	})(sendKnob.mSurfaceValue, sendIndex, feedback.process, feedback.display)
 	var banks = [{ subPage: sends14, index: sendIndex }, { subPage: sends58, index: sendIndex + 4 }]
 	if (quickControls) {
 		try {
@@ -1898,3 +1901,6 @@ deviceDriver.mOnDeactivate = function (activeDevice) {
 	try { flushLog(activeDevice) } catch (e) {}
 }
 deviceDriver.mOnActivate = function (activeDevice) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7])) }
+
+// The last line: if this is not in scripts.log after a (re)load, the script stopped part way (an error at load).
+out('[CubaseSixty UF1] loaded to the end')
