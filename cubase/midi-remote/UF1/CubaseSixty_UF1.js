@@ -378,8 +378,8 @@ var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 // DAW / SENDS they are bound to the send's on switch, which does not change while a level turns, and their callbacks
 // are ignored there. Quick Controls (PLUGIN) keep the knobs, CC 17-20.
 // While a send turns, the script shows nothing itself (the bridge draws the turn from its own position) and ignores
-// Cubase's reports of that send: they come late and out of step, and made the display jump. 0.25 s after the last
-// step the level is read back once, so the display and the next turn start from Cubase's real value (10.11.2026).
+// Cubase's reports of that send: they come late and out of step, and made the display jump. 0.6 s after the last
+// step the level is read back once (0.6 s: the bridge keeps its own position for 0.5 s), so the display and the next turn start from Cubase's real value (10.11.2026).
 var sendDa = { base: -2, slots: [], tags: {}, show: [], refreshAt: 0, logged: {}, lastWrite: [0, 0, 0, 0], settleAt: [0, 0, 0, 0] }
 function sendDaSlots() {
 	var base = plugDa.getBaseObjectID(plugAm)
@@ -463,7 +463,7 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 			sendDaWrite(activeDevice, k, value)
 			var now = Date.now()
 			sendDa.lastWrite[k] = now
-			sendDa.settleAt[k] = now + 250
+			sendDa.settleAt[k] = now + 600   // (after the bridge's own 0.5 s window, or it would not take the position)
 		}
 	})(sendIndex)
 	;(function (k, proc, disp) {
@@ -1603,7 +1603,7 @@ if (plugDa && !TEST_NO_DA_LISTENERS) {
 			var slots = sendDa.slots
 			for (var sk = 0; sk < 4; ++sk) {
 				if (slots[sendOffset + sk] !== objectID || sendDa.tags[objectID] !== tag) continue
-				if (Date.now() - sendDa.lastWrite[sk] < 400) continue   // our own turn: shown once it has settled
+				if (Date.now() - sendDa.lastWrite[sk] < 600) continue   // our own turn: shown once it has settled
 				try { sendDaShow(activeDevice, sk, true) } catch (e) {}
 			}
 		}
