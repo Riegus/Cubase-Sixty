@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.15.0-dev'
+var SCRIPT_VERSION = '0.15.2-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -1724,8 +1724,15 @@ if (daMix) {
 	}
 }
 
+// Cubase reports the selected track again while one of its values changes (a send: about every 0.8 s): repeats of the
+// same track (same object, same name) are skipped, as in the UF1 script (10.11.2026).
+var lastTrackId = -2
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	am = activeMapping
+	var trackId = -1
+	try { trackId = da.getBaseObjectID(activeMapping) } catch (e) {}
+	if (trackId === lastTrackId && title === state.trackName) return
+	lastTrackId = trackId
 	state.trackName = title
 	picker = null
 	sysex(activeDevice, [0x30].concat(encodeName(title)))

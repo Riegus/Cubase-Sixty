@@ -143,6 +143,76 @@ void startIdleCycle();
 // wobbled).
 std::array<int, 4> g_vpotPos{-1, -1, -1, -1};
 std::array<long long, 4> g_vpotOwnUntil{};
+
+// With --trace: per turn of a control, what came in and what went out, logged once the control has been still for
+// 0.8 s (made for the V-pot lag found 10.11.2026). 0 = the pan knob, 1-4 = V-pots 1-4, 5 = the channel encoder,
+// 6 = the jog wheel. "Answers": Cubase sending a V-pot's position back (SysEx 17).
+struct TurnDiag {
+    long long first = 0, last = 0, maxGap = 0, firstAnswer = -1, lastAnswer = -1;
+    int events = 0, detents = 0, sent = 0, answers = 0, dropped = 0;
+    std::string path;
+};
+std::array<TurnDiag, 7> g_turn{};
+std::mutex g_turnMx;
+long long nowMs();
+void turnIn(int id, int delta)
+{
+    if (id < 0 || id > 6) return;
+    std::lock_guard<std::mutex> lk(g_turnMx);
+    TurnDiag& t = g_turn[size_t(id)];
+    const long long now = nowMs();
+    if (!t.first) t.first = now;
+    else t.maxGap = std::max(t.maxGap, now - t.last);
+    t.last = now;
+    ++t.events;
+    t.detents += std::abs(delta);
+}
+void turnOut(int id, const char* path)
+{
+    if (id < 0 || id > 6) return;
+    std::lock_guard<std::mutex> lk(g_turnMx);
+    ++g_turn[size_t(id)].sent;
+    g_turn[size_t(id)].path = path;
+}
+void turnDropped(int id, const char* why)
+{
+    if (id < 0 || id > 6) return;
+    std::lock_guard<std::mutex> lk(g_turnMx);
+    ++g_turn[size_t(id)].dropped;
+    g_turn[size_t(id)].path = why;
+}
+void turnAnswer(int id)
+{
+    if (id < 0 || id > 6) return;
+    std::lock_guard<std::mutex> lk(g_turnMx);
+    TurnDiag& t = g_turn[size_t(id)];
+    if (!t.first) return;
+    const long long d = nowMs() - t.first;
+    if (t.firstAnswer < 0) t.firstAnswer = d;
+    t.lastAnswer = d;
+    ++t.answers;
+}
+void turnReport()
+{
+    static const char* kNames[7] = {"pan knob", "V-pot 1", "V-pot 2", "V-pot 3", "V-pot 4", "channel encoder", "jog wheel"};
+    std::lock_guard<std::mutex> lk(g_turnMx);
+    const long long now = nowMs();
+    for (size_t i = 0; i < g_turn.size(); ++i) {
+        TurnDiag& t = g_turn[i];
+        if (!t.first || now - t.last < 800) continue;
+        if (!g_trace) { t = TurnDiag{}; continue; }
+        std::string line = "Turn test: " + std::string(kNames[i]) + ", " + std::to_string(t.detents) + " detents in " +
+                           std::to_string(t.events) + " events over " + std::to_string(t.last - t.first) + " ms (longest pause " +
+                           std::to_string(t.maxGap) + " ms); sent " + std::to_string(t.sent) + " (" + t.path + ")";
+        if (t.dropped) line += ", dropped " + std::to_string(t.dropped);
+        if (i >= 1 && i <= 4)
+            line += t.answers ? "; Cubase answered " + std::to_string(t.answers) + " times, first after " + std::to_string(t.firstAnswer) +
+                                    " ms, last after " + std::to_string(t.lastAnswer) + " ms"
+                              : std::string("; no answer from Cubase");
+        std::printf("%s\n", line.c_str());
+        t = TurnDiag{};
+    }
+}
 constexpr int kVpotStep = 82;   // per detent: half a percent of the range (what the relative steps gave)
 
 struct SendCell { std::string name, value; uint8_t pos = 0; bool used = false; };
@@ -150,6 +220,9 @@ std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
+std::string levelTextFor(int pos);
+void valueTemporary(const std::string& t);
+void barTemporary(uint8_t pos, uint8_t style);
 void paintSoftKeys();
 // The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
 void sendVpotPage_(int view)
@@ -371,6 +444,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         // The channel encoder (5) and the jog wheel (6) are sent as note pulses: one per detent, 40/41 = channel
         // encoder left/right, 42/43 = jog left/right. The script binds them to Cubase commands.
         if (ev.id == 5 || ev.id == 6) {
+            turnIn(ev.id, ev.delta);
             // Slow the encoders down: one pulse per kDetentsPerPulse detents (the remainder is kept between events).
             static int acc[2] = {0, 0};
             const int kDetentsPerPulse[2] = {4, 4};          // channel encoder, jog wheel: raise to slow down
@@ -406,6 +480,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                     continue;
                 }
                 if (jog && !g_scrub && !g_shift && jogStep(right)) continue;
+                turnOut(ev.id, jog ? "jog step" : "track step");
                 if (!jog && settings::projectStepping()) { cmd2(right ? 49 : 48); continue; }   // Navigate Down / Up
                 if (!jog && settings::trackStepping() == settings::Stepping::MixConsole) { uf1StepTrack(right ? 1 : -1); continue; }
                 note(uint8_t(base + (right ? 1 : 0)), true);
@@ -414,21 +489,33 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 1 && ev.id <= 4) {
-            if (g_presetsOpen) { if (ev.id == 4) g_browserScroll += ev.delta; break; }   // the browser: V-pot 4 scrolls
-            if (g_view == kViewMeter) break;   // METER: the V-pots have no meter settings yet (and would change sends unseen)
-            if (plugActive()) { plugEvent(0, uint8_t(ev.id - 1), uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }
+            turnIn(ev.id, ev.delta);
+            if (g_presetsOpen) { turnDropped(ev.id, "preset browser"); if (ev.id == 4) g_browserScroll += ev.delta; break; }   // the browser: V-pot 4 scrolls
+            if (g_view == kViewMeter) { turnDropped(ev.id, "METER view"); break; }   // METER: the V-pots have no meter settings yet (and would change sends unseen)
+            if (plugActive()) { turnOut(ev.id, "PLUGIN, plug-in parameter"); plugEvent(0, uint8_t(ev.id - 1), uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }
             const size_t k = size_t(ev.id - 1);
-            if (g_vpotPos[k] < 0) break;   // position not known yet (comes from Cubase within a second)
+            if (g_vpotPos[k] < 0) { turnDropped(ev.id, "position not known yet"); break; }   // position not known yet (comes from Cubase within a second)
+            turnOut(ev.id, g_view == kViewPlugin ? "Quick Control" : "send level");
             const int v = std::clamp(g_vpotPos[k] + ev.delta * (g_fine ? kVpotStep / 4 : kVpotStep), 0, 16383);
             g_vpotPos[k] = v;
             g_vpotOwnUntil[k] = nowMs() + 500;   // Cubase's echoes of our own turns are not taken back meanwhile
-            const uint8_t cc = uint8_t(uf1m::kCcEncoder + ev.id);
+            // DAW / SENDS: CC 21-24 (+ 53-56), which the script writes to the send slot through Direct Access (a send
+            // level through a MIDI Remote binding made Cubase pause ~0.8 s at a time, 10.11.2026); PLUGIN's Quick
+            // Controls: CC 17-20 (+ 49-52), their bindings.
+            const uint8_t cc = uint8_t(g_view == kViewPlugin ? uf1m::kCcEncoder + ev.id : 20 + ev.id);
             sendMidi({0xB0, cc, uint8_t((v >> 7) & 0x7F)});
             sendMidi({0xB0, uint8_t(cc + 32), uint8_t(v & 0x7F)});
             if (g_view == kViewSends || g_view == kViewPlugin) paintSendCells(false);
+            // DAW: the send on the left display while turning ("S1 -6.02dB" and its bar), from the bridge's own position
+            // and its level curve. (It came from the send's binding until the levels went through Direct Access.)
+            if (g_view == kViewDaw) {
+                const std::string t = levelTextFor(v);
+                valueTemporary("S" + std::to_string(int(k) + 1 + (g_sends58 ? 4 : 0)) + " " + (t.empty() ? "..." : t));
+                barTemporary(uint8_t(std::lround(v * 100.0 / 16383.0)), 0x02);
+            }
             break;
         }
-        if (ev.id == 0) panTurned();
+        if (ev.id == 0) { panTurned(); turnIn(0, ev.delta); turnOut(0, g_stripPan ? "strip pan" : "pan"); }
         if (ev.id == 0 && g_stripPan) { plugEvent(7, 0, uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }   // strip mode: the strip's pan
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
         break;
@@ -1353,6 +1440,7 @@ void onSysex(const std::vector<unsigned char>& m)
                 g_levelText[v] = g_lastCubaseText[k];
             }
         }
+        turnAnswer(int(k) + 1);
         if (nowMs() >= g_vpotOwnUntil[k]) {
             const int v = (int(m[6]) << 7) | int(m[7]);
             if (v != g_vpotPos[k]) { g_vpotPos[k] = v; if (g_view == kViewSends) paintSendCells(false); }
@@ -1747,6 +1835,7 @@ void uf1RedrawName()
 // for every two seconds (plugged in while Cubase runs, or switched on later).
 void uf1Poll()
 {
+    turnReport();
     if (g_open) {
         if (!g_dev.needsReopen()) return;
         std::fprintf(stderr, "The UF1 stopped answering or was unplugged (%s); looking for it again.\n", g_dev.lastError().c_str());
