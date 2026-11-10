@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.3-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.4-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -377,7 +377,10 @@ var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 // binding in every page (without one the whole script stopped at load: "DukValue is uninitialized", 10.11.2026): in
 // DAW / SENDS they are bound to the send's on switch, which does not change while a level turns, and their callbacks
 // are ignored there. Quick Controls (PLUGIN) keep the knobs, CC 17-20.
-var sendDa = { base: -2, slots: [], tags: {}, show: [], refreshAt: 0, logged: {} }
+// While a send turns, the script shows nothing itself (the bridge draws the turn from its own position) and ignores
+// Cubase's reports of that send: they come late and out of step, and made the display jump. 0.25 s after the last
+// step the level is read back once, so the display and the next turn start from Cubase's real value (10.11.2026).
+var sendDa = { base: -2, slots: [], tags: {}, show: [], refreshAt: 0, logged: {}, lastWrite: [0, 0, 0, 0], settleAt: [0, 0, 0, 0] }
 function sendDaSlots() {
 	var base = plugDa.getBaseObjectID(plugAm)
 	if (base === sendDa.base) return sendDa.slots
@@ -458,7 +461,9 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 		write.mOnProcessValueChange = function (activeDevice, value) {
 			if (qcActive) return
 			sendDaWrite(activeDevice, k, value)
-			try { sendDaShow(activeDevice, k, true) } catch (e) {}
+			var now = Date.now()
+			sendDa.lastWrite[k] = now
+			sendDa.settleAt[k] = now + 250
 		}
 	})(sendIndex)
 	;(function (k, proc, disp) {
@@ -1596,7 +1601,11 @@ if (plugDa && !TEST_NO_DA_LISTENERS) {
 		// A send level changed (the mouse, automation, or our own write): show it.
 		if (!qcActive) {
 			var slots = sendDa.slots
-			for (var sk = 0; sk < 4; ++sk) if (slots[sendOffset + sk] === objectID && sendDa.tags[objectID] === tag) { try { sendDaShow(activeDevice, sk, true) } catch (e) {} }
+			for (var sk = 0; sk < 4; ++sk) {
+				if (slots[sendOffset + sk] !== objectID || sendDa.tags[objectID] !== tag) continue
+				if (Date.now() - sendDa.lastWrite[sk] < 400) continue   // our own turn: shown once it has settled
+				try { sendDaShow(activeDevice, sk, true) } catch (e) {}
+			}
 		}
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
@@ -1658,6 +1667,11 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	if (sendDa.refreshAt && t >= sendDa.refreshAt && plugDa) {
 		sendDa.refreshAt = 0
 		sendDaRefresh(activeDevice)
+	}
+	for (var sd = 0; sd < 4; ++sd) {
+		if (!sendDa.settleAt[sd] || t < sendDa.settleAt[sd]) continue
+		sendDa.settleAt[sd] = 0
+		try { sendDaShow(activeDevice, sd, true) } catch (e) {}
 	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
