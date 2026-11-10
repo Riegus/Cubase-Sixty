@@ -64,6 +64,7 @@ bool g_mcuOpen = false;
 // TEST (track-stepping = mackie): when the last step was sent, and whether its Mackie feedback was logged yet.
 std::atomic<long long> g_stepSentAt{0};
 std::atomic<bool> g_stepFbSelect{false}, g_stepFbText{false};
+std::atomic<int> g_mcuSelected{-1};   // the Mackie strip whose SELECT LED Cubase lit last (0-7), -1 = none
 MidiInPort  g_in;
 std::mutex g_outMx;
 std::atomic<bool> g_touched{false};
@@ -1685,6 +1686,10 @@ bool uf1OpenDevice(bool quiet)
 // Cubase's (e.g. after a restart of either side).
 void onMcuIn(std::vector<unsigned char>& m)
 {
+    if (m.size() >= 3 && (m[0] & 0xF0) == 0x90 && m[1] >= 0x18 && m[1] <= 0x1F) {
+        if (m[2] > 0) g_mcuSelected = m[1] - 0x18;
+        else if (g_mcuSelected == m[1] - 0x18) g_mcuSelected = -1;
+    }
     // TEST: how long after a Mackie step Cubase's Mackie side shows a change (a SELECT LED lit, the display text).
     if (const long long at = g_stepSentAt; at && nowMs() - at < 3000) {
         if (m.size() >= 3 && (m[0] & 0xF0) == 0x90 && m[1] >= 0x18 && m[1] <= 0x1F && m[2] > 0 && !g_stepFbSelect.exchange(true))
@@ -1814,12 +1819,14 @@ void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 bool uf1StepTrack(int dir)
 {
     if (settings::trackStepping() == settings::Stepping::Mackie && g_mcuOpen) {
-        const uint8_t n = dir > 0 ? 0x61 : 0x60;
-        mcuSend({0x90, n, 0x7F});
-        mcuSend({0x90, n, 0x00});
+        // Cursor up / down did nothing in Cubase (10.11.2026): SELECT on the next / previous of Mackie's eight
+        // strips instead (within its current bank; the strip comes from Cubase's SELECT LEDs).
+        const int strip = std::clamp(g_mcuSelected.load() + (dir > 0 ? 1 : -1), 0, 7);
+        mcuSend({0x90, uint8_t(0x18 + strip), 0x7F});
+        mcuSend({0x90, uint8_t(0x18 + strip), 0x00});
         g_stepFbSelect = g_stepFbText = false;
         g_stepSentAt = nowMs();
-        std::printf("Step test: Mackie cursor %s sent\n", dir > 0 ? "down" : "up");
+        std::printf("Step test: Mackie SELECT %d sent\n", strip + 1);
         return true;
     }
     if (!g_portsOpen) return false;
