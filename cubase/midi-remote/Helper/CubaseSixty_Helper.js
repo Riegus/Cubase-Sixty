@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.3.1-dev'
+var SCRIPT_VERSION = '0.3.2-test'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -125,16 +125,24 @@ function stepSelect(activeDevice, dir) {
 	if (n === 0) return
 	var to = Math.max(0, Math.min(n - 1, from + dir))
 	if (to === from) return   // the first / last channel
+	if (!selVars[to]) return
 	selVars[to].setProcessValue(activeDevice, 1)
 	stepTarget = to
 	stepAt = now
 	out('[CubaseSixty Helper] step ' + (dir > 0 ? '+' : '-') + ': ' + from + ' -> ' + to + ' "' + allTitles[to] + '"')
 }
 
+// TEST (10.11.2026): without the per-channel value bindings (selected, solo: 512). On 6.11 (a03b82a) 640 such bindings
+// in hidden banks made Cubase pause up to 0.7 s while a value kept changing; the V-pots now show the same pauses.
+// Without them: track steps go through Cubase's next / previous track (the selection is not known here), and the
+// UF1's SOLO ACTIVE does not light.
+var TEST_NO_CHANNEL_BINDINGS = true
+out('[CubaseSixty Helper] TEST: per-channel value bindings ' + (TEST_NO_CHANNEL_BINDINGS ? 'left out' : 'made'))
 var allZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: all channels').excludeInputChannels().excludeOutputChannels()
 for (var c = 0; c < CHANNELS; ++c) {
 	var ch = allZone.makeMixerBankChannel()
 	;(function (index, ch) {
+		if (!TEST_NO_CHANNEL_BINDINGS) {
 		var sel = surface.makeCustomValueVariable('sel' + index)
 		page.makeValueBinding(sel, ch.mValue.mSelected)
 		sel.mOnProcessValueChange = function (activeDevice, value) {
@@ -150,6 +158,7 @@ for (var c = 0; c < CHANNELS; ++c) {
 			soloed[index] = on
 			soloCount += on ? 1 : -1
 			sendSolo(activeDevice)
+		}
 		}
 		ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			hostMapping = activeMapping
