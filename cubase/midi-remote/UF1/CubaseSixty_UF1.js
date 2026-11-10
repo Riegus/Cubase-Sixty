@@ -109,6 +109,10 @@ var click = transportButton(6, 87)
 // Mapping: everything acts on the selected track
 // ---------------------------------------------------------------------------
 
+// Defined before any binding: Cubase delivers the first values while the script is still loading, and the
+// callbacks use these (10.11.2026: "cannot read property 'concat' / 'pp' of undefined" after Reload Scripts).
+var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
+var stripMode = { on: false, sent: false, param: null, pan: null, panSent: false, fp: null, pp: null }
 var page = deviceDriver.mMapping.makePage('Selected track')
 
 var track = page.mHostAccess.mTrackSelection.mMixerChannel.mValue
@@ -468,7 +472,7 @@ page.makeValueBinding(click.mSurfaceValue, transport.mMetronomeActive).setTypeTo
 // (same header and name / colour messages as the UF8; strip 0). Command 03 = level text.
 // ---------------------------------------------------------------------------
 
-var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
+// (SYSEX_HEADER is defined near the top: Cubase delivers the first values while the script is still loading.)
 var DEBUG = false
 
 function dbg(text) {
@@ -1452,7 +1456,7 @@ function plugEvent(activeDevice, kind, a, b, fine) {
 // position as PLUGIN event kind 6 (14 bit in a / b) and ignores Cubase's volume while it is on (SysEx 5A <0/1>); the
 // strip's fader comes back as SysEx 5B <msb> <lsb> for the motor, its value in the dB field. On a track without
 // an SSL channel strip (or one without such a parameter) the fader stays on volume; the mode stays on for the next.
-var stripMode = { on: false, sent: false, param: null, pan: null, panSent: false, fp: null, pp: null }
+// (stripMode is defined near the top, for the same reason as SYSEX_HEADER.)
 var STRIP_PAN_NAMES = ['pan', 'panning', 'stereo pan', 'pan/bal', 'balance']
 var STRIP_FADER_NAMES = ['Fader Level', 'Fader', 'Output Gain', 'Out Gain', 'Output Level']
 function stripFaderParam() {
