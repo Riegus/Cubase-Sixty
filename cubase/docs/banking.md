@@ -64,6 +64,15 @@ measured, what failed and why. Newest findings go in their section with the date
 - **Folders on single steps**: a step that lands on -1 steps once more (back instead, if there is no visible track
   beyond the target), checked once the reports have settled; the extra step is remembered per (track, direction),
   so the next step there goes past at once. Forgotten when the channel list changes.
+- **Above the first track / below the last** (10.11.2026): the selection got stuck on the Input/Output folder (and
+  the Stereo Out in it, which has a channel but is not in the list). From a track that is not in the list a press
+  stepped blindly the way it was pressed, further away. Now the script remembers the last listed channel the
+  selection was on; when no visible track lies that way from it, the press steps back towards it instead. The
+  landing check treats any track not in the list (not only -1) as "not there yet".
+- **Selecting is not what is slow** (10.11.2026, Mackie Control test): Mackie SELECT lit within 1-20 ms when steps
+  were spaced, 200-700 ms when they came quickly, those late ones at the same moment as the scripts' work for the
+  new track (UF1 EQ graph and plug-in scan, UC1 selected-track scan). Mackie's cursor up / down do not select
+  tracks in Cubase. Next to try: make the scripts' per-selection work cheaper or wait until the selection settles.
 
 ## UF1 BANK without a UF8 (9.11.2026)
 
