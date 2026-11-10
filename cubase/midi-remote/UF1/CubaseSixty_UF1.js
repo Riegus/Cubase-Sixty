@@ -513,6 +513,9 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 var stepMix = null
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
+// The last channel the selection was on (or a step went to): from a track without a channel (a folder, the
+// Input/Output folder, the ruler) a press needs to know which way the tracks are.
+var stepChan = -1
 // Folder tracks (and the other tracks without a channel: ruler, marker, the Input/Output folder) are not among the
 // MixConsole's channels, but the next / previous track action stops on them. When a step lands on one, the script
 // steps once more the same way (back, if there is no track beyond the target) and remembers it per track and
@@ -556,6 +559,24 @@ function stepTrack(activeDevice, dir) {
 			var cur = (stepPending || now - stepLast.at < 1500) && stepLast.id >= 0 ? stepLast.id : plugDa.getBaseObjectID(plugAm)
 			var at = -1
 			for (var i = 0; i < list.length; ++i) if (list[i].id === cur) at = i
+			if (at >= 0) stepChan = cur
+			// On a track that is not in the list (a folder, the ruler, the Input/Output folder and the Stereo Out in
+			// it), with no visible track that way from the last channel (above the first track or below the last): a
+			// step that way would only go further from the tracks (10.11.2026: stuck on Input/Output / Stereo Out).
+			// Step back towards the last channel instead.
+			if (at < 0 && stepChan >= 0) {
+				var atChan = -1
+				for (var ci = 0; ci < list.length; ++ci) if (list[ci].id === stepChan) atChan = ci
+				var ahead = false
+				for (var cj = atChan + dir; atChan >= 0 && cj >= 0 && cj < list.length; cj += dir) if (list[cj].vis) { ahead = true; break }
+				if (atChan >= 0 && !ahead) {
+					out('[CubaseSixty UF1] track step: on "' + selectedInfo.title + '" (not a track in the list), no track that way; back towards the last one')
+					stepLast = { id: stepChan, at: now }
+					stepPending = { from: cur, to: stepChan, dir: -dir, at: now, fixes: 0 }
+					trackAction(dir < 0).trigger(plugAm)
+					return
+				}
+			}
 			var key = list.map(function (c) { return c.id }).join(',')
 			if (key !== stepExtraKey) { stepExtra = {}; stepExtraKey = key }
 			if (at >= 0) {
@@ -565,6 +586,7 @@ function stepTrack(activeDevice, dir) {
 				var extra = stepExtra[cur + ':' + dir] || 0   // a known folder on the way
 				count = Math.abs(k - at) + extra
 				stepLast = { id: list[k].id, at: now }
+				stepChan = list[k].id
 				// Checked where it lands, unless it already goes past a known folder.
 				stepPending = extra ? null : { from: cur, to: list[k].id, dir: dir, at: now, fixes: 0 }
 			}
@@ -587,10 +609,13 @@ function stepCheckLanding() {
 	if (!p || !stepMix || !plugAm || Date.now() - p.at > 4000) { stepPending = null; return }
 	var cur = -1
 	try { cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
-	if (cur === p.to || cur >= 0) { stepPending = null; return }   // arrived, or on a track (with a channel)
+	if (cur === p.to) { stepChan = cur; stepPending = null; return }   // arrived
 	var list = stepChannels()
-	var atTo = -1
-	for (var i = 0; i < list.length; ++i) if (list[i].id === p.to) atTo = i
+	var atTo = -1, atCur = -1
+	for (var i = 0; i < list.length; ++i) { if (list[i].id === p.to) atTo = i; if (list[i].id === cur) atCur = i }
+	// On a track in the list: left as it is. Not in it (no channel: -1; or the Stereo Out in the Input/Output
+	// folder): one more step.
+	if (atCur >= 0) { stepChan = cur; stepPending = null; return }
 	if (atTo < 0 || p.fixes >= 3) { stepPending = null; return }
 	var beyond = false
 	for (var b = atTo + p.dir; b >= 0 && b < list.length; b += p.dir) if (list[b].vis) { beyond = true; break }
