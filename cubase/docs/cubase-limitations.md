@@ -66,3 +66,11 @@ is collected in [Banking and track stepping](banking.md).
 - **Window commands need Cubase in front.** A command that opens a window (the MixConsole: Devices > Mixer) did
   nothing while another program had the focus (the browser with the Settings page); with Cubase's window active it
   works. Value bindings (a plug-in's or Channel Settings' window switch) do not have this catch.
+- **Navigate Up / Down need the Project window focused** (track-stepping = project): with another window or program
+  in front they do nothing (10.11.2026). The Settings page says so.
+- **Cubase does not survive a long bridge outage cleanly.** A restart (about 1.5 s down) is fine: Cubase finds the
+  new ports by itself. After a minute down with SSL plug-ins in the project (they start SSL360Core.exe, which makes
+  ports of its own), Cubase stopped sending to the bridge; Reload Scripts only half helped, a Cubase restart did
+  (10.11.2026). So there is no "Stop bridge" in the tray app.
+- **Mackie Control's cursor keys do not select tracks**; its SELECT keys do, within its bank of eight
+  (10.11.2026, timing test: see [banking.md](banking.md)).
