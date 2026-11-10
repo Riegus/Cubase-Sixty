@@ -661,10 +661,10 @@ void uf8NoProject()
     for (int s = 0; s < kStrips; ++s) {
         std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
         std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
-        std::vector<unsigned char> fader{uint8_t(0xE0 | s), 0, 0};
+        // The faders stay where they are (all eight motors running to the bottom at once was loud, 10.11.2026);
+        // the dark displays and LEDs show that nothing is connected.
         onMidiIn(name);
         onMidiIn(colour);
-        onMidiIn(fader);
         g_panLine[s].clear();
         g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
     }

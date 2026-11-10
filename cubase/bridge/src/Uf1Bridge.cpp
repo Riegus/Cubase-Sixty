@@ -1337,13 +1337,12 @@ void uf1NoProject(const char* label = "No Proj.")
     name.push_back(0xF7);
     std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
     std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
-    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0}, fader{0xE0, 0, 0};
+    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0};   // (the fader stays where it is, as on the UF8)
     onMidiIn(name);
     onMidiIn(colour);
     onMidiIn(level);
     onMidiIn(meterL);
     onMidiIn(meterR);
-    onMidiIn(fader);
     for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
     std::vector<unsigned char> time{0xF0, 0x7D, 0x52, 0x36, 0x0D, ' ', 0xF7};
     onMidiIn(time);
