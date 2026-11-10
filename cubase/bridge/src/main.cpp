@@ -259,7 +259,8 @@ void handleFrame(const uf8frames::Frame& fr)
         const auto r = uf8fader::read(pb14, (d[4] & 0x80) != 0, /*grabValid=*/false);
         if (!r.usable) return;
         const uint16_t v = pbToMidi14(r.pbOut);
-        if (g_stripFader[s]) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
+        // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
+        if (g_stripFader[s] || g_routeSend >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
         // Echo the hand position so the motor does not jump back on release.
         g_dev.send(uf8fader::echo(s, r.pbOut));
@@ -412,7 +413,9 @@ void handleFrame(const uf8frames::Frame& fr)
             paintVpots();
             break;
         }
-        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && g_stripPan[d[3] - 0x08]) {   // strip mode: centre the strip's pan
+        // Strip mode: centre the strip's pan; the V-pot send view: the selected track's send on / off (always the script's
+        // way there: the V-pot's binding is a placeholder on the send's on switch).
+        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && (g_stripPan[d[3] - 0x08] || (g_routeSelSends && g_routeSend < 0))) {
             if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x29, uint8_t(d[3] - 0x08), 0xF7});
             break;
         }
@@ -485,7 +488,7 @@ void handleFrame(const uf8frames::Frame& fr)
         const int delta = uf8frames::vpotDelta(d[4]);
         if (delta == 0) break;
         if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
-        else if (g_stripPan[s]) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // strip mode: the strip's pan
+        else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // strip mode's pan; a send (V-pot send view)
         else sendMidi({0xB0, uint8_t(kCcVPot + s), vpotToCc(delta)});
         break;
     }
@@ -972,6 +975,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
         const int s = m[0] & 0x0F;
         if (s >= kStrips) return;
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
+        // A fader send view: the faders are the script's (27, the send levels through Direct Access); what Cubase sends
+        // here is a placeholder binding and must not move the motors, nor be kept as the volume.
+        if (g_routeSend >= 0) return;
         g_volPb[s] = v;
         if (g_touched[s] || g_stripFader[s]) return;   // hand wins; strip mode: the strip's fader drives it
         driveFader(s, v);

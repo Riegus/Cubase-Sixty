@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.14.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -194,7 +194,7 @@ function routeChanged(activeDevice) {
 	uf8FlipActive = route.fader === 'pan'
 	for (var r = 0; r < flipResets.length; ++r) flipResets[r](activeDevice)
 	for (var i = 0; i < STRIPS; ++i) paintStripName(activeDevice, i)
-	if (stripModeOn) stripModeUpdateAll(activeDevice)   // FLIP and the send views take the fader back
+	stripModeUpdateAll(activeDevice)   // FLIP takes the fader back from strip mode; the send views put it on a send
 }
 // The name a strip shows: the send's destination in a send view, else the track's.
 function paintStripName(activeDevice, index) {
@@ -222,7 +222,7 @@ function paintStripName(activeDevice, index) {
 		var slot = routeSelected.mSends.getByIndex(s)
 		slot.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			selSendTitles[s] = title || ''
-			if (route.vpot === 'sends' && route.fader !== 'send') paintStripName(activeDevice, s)
+			if (route.vpot === 'sends' && route.fader !== 'send') { paintStripName(activeDevice, s); skRescanAt = Date.now() + 150 }   // (another track: its levels)
 		}
 	})(s)
 })()
@@ -241,12 +241,14 @@ for (var i = 0; i < STRIPS; ++i) {
 		.setValueTakeOverModeJump().setSubPage(faderPan)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(vpotPan)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(vpotVol)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mLevel).setSubPage(vpotSends)
+	// (Send levels go through Direct Access, see "Send views" below: the send's on switch is only a placeholder, a
+	// control needs a binding in every sub page.)
+	page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mOn).setSubPage(vpotSends)
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderVol)
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderPan)
 	for (var sn = 0; sn < 8; ++sn) {
 		var sendSlot = channel.mSends.getByIndex(sn)
-		page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mLevel).setValueTakeOverModeJump().setSubPage(faderSend[sn])
+		page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mOn).setSubPage(faderSend[sn])   // (placeholder: see "Send views")
 		page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(faderSend[sn])
 		;(function (index, n) {
 			sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
@@ -273,13 +275,14 @@ for (var i = 0; i < STRIPS; ++i) {
 	page.makeValueBinding(strip.autoWrite.mSurfaceValue, channel.mValue.mAutomationWrite)
 		.setTypeToggle()
 	;(function (index, ch) {
-		skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null, tag: -1, sent: null }
+		skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null, tag: -1, sent: null, faderOn: false, panOn: false, fTag: -1, vTag: -1, fObj: -1, vObj: -1, fKind: null, vKind: null, vDa: null, vOn: -1 }
 		try { skDa[index] = page.mHostAccess.makeDirectAccess(ch) } catch (e) { if (index === 0) out('[CubaseSixty] no Direct Access, the SSL soft keys do nothing: ' + e) }
 		if (!skDa[index]) return
 		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 			skAm = activeMapping
-			if (skStrip[index].faderOn && objectID === skStrip[index].obj && tag === skStrip[index].fTag) stripFaderSend(activeDevice, index)
-			if (skStrip[index].panOn && objectID === skStrip[index].obj && tag === skStrip[index].vTag) stripPanSend(activeDevice, index)
+			var st = skStrip[index]
+			if (st.faderOn && objectID === st.fObj && tag === st.fTag) stripFaderSend(activeDevice, index)
+			if (st.panOn && st.vKind === 'plugin' && objectID === st.vObj && tag === st.vTag) stripPanSend(activeDevice, index)
 			// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
 			if (skFocus && objectID === skStrip[index].tagObj && tag === skStrip[index].tag) skReport(activeDevice, index)
 		}
@@ -368,19 +371,6 @@ for (var i = 0; i < STRIPS; ++i) {
 			lastPanPos = pos
 			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, pos, 0xF7]))
 		}
-		// The V-pot on a send of the selected track: "Send" + its level on the value line, a unipolar ring.
-		function sendText(activeDevice, value, units) {
-			var text = 'S' + String(value) + (units ? units : '')
-			if (text === lastPanText) return
-			lastPanText = text
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(String(value) + (units ? ' ' + units : '')), [0xF7]))
-		}
-		function sendPos(activeDevice, value) {
-			var pos = Math.max(0, Math.min(127, Math.round(value * 127)))
-			if (pos === lastPanPos + 1000) return
-			lastPanPos = pos + 1000
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos, 0xF7]))
-		}
 		function dbText(activeDevice, value) {
 			var text = String(value)
 			if (route.fader === 'vol') trackDb[index] = text   // for leaving strip mode
@@ -403,14 +393,14 @@ for (var i = 0; i < STRIPS; ++i) {
 		function vpotDisplay(activeDevice, value, units) {
 			vpotShown.value = value; vpotShown.units = units
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || { pos: 0.5 }; trackPan[index].value = value; trackPan[index].units = units }
-			if (route.vpot === 'sends') sendText(activeDevice, value, units)
+			if (route.vpot === 'sends') return   // (the send levels are shown from Direct Access)
 			else if (route.vpot === 'vol') dbText(activeDevice, value)
 			else panText(activeDevice, value, units)
 		}
 		function vpotProcess(activeDevice, value) {
 			vpotShown.pos = value
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || {}; trackPan[index].pos = value }
-			if (route.vpot === 'sends') sendPos(activeDevice, value)
+			if (route.vpot === 'sends') return
 			else if (route.vpot === 'pan') panPos(activeDevice, value)
 		}
 		function faderDisplay(activeDevice, value, units) {
@@ -1120,58 +1110,147 @@ function stripTags(index) {
 	st.panTag = find(STRIP_PAN_NAMES)
 	return true
 }
-// What each control is on in strip mode: without FLIP the fader on the plug-in's fader and the V-pot on its pan;
-// with FLIP the other way round (the plug-in stays in control). st.fTag / st.vTag: the parameter the fader / V-pot
-// moves (-1 = the track's own, as without strip mode). The send views take both back.
-// 26 <strip> <fader 0/1> <V-pot 0/1>: whether the strip's fader / V-pot are on a plug-in parameter.
+// Send views (10.11.2026): a MIDI Remote binding on a send level made Cubase pause ~0.8 s at a time while the level
+// kept changing (found on the UF1). In the send views the faders (send N of every track) and the V-pots (the selected
+// track's sends) go through the same path as strip mode: the bridge sends the hand (25) / turn (28), the script
+// writes the send slot's level through Direct Access (the strip's channel / the selected channel) and reports it
+// back (27 for the motor, the dB field; 0D / 0E for the V-pot's value line and ring). Their bindings are on the
+// send's on switch, as placeholders. The V-pot push switches the selected track's send on / off.
+var selDa = null
+try { selDa = page.mHostAccess.makeDirectAccess(routeSelected) } catch (e) { out('[CubaseSixty] no Direct Access on the selected track: the V-pot send view does nothing: ' + e) }
+// The level parameter of send slot n (0-7) on the channel da is on: { obj, tag, on } or null.
+function sendSlotLevel(da, n) {
+	if (!da || !skAm) return null
+	var base = da.getBaseObjectID(skAm)
+	if (base < 0) return null
+	var c = da.getNumberOfChildObjects(skAm, base)
+	for (var i = 0; i < c; ++i) {
+		var id = da.getChildObjectID(skAm, base, i)
+		if (da.getObjectTypeName(skAm, id) !== 'Sends') continue
+		if (n >= da.getNumberOfChildObjects(skAm, id)) return null
+		var slot = da.getChildObjectID(skAm, id, n)
+		var np = da.getNumberOfParameters(skAm, slot), level = -1, on = -1
+		for (var k = 0; k < np; ++k) {
+			var tag = da.getParameterTagByIndex(skAm, slot, k)
+			var title = String(da.getParameterTitle(skAm, slot, tag, 32))
+			if (level < 0 && /level/i.test(title)) level = tag
+			if (on < 0 && /^on$/i.test(title)) on = tag
+		}
+		return level >= 0 ? { obj: slot, tag: level, on: on } : null
+	}
+	return null
+}
+// What each control is on: strip mode puts the fader on the plug-in's fader and the V-pot on its pan (FLIP: the other
+// way round); the fader send view puts each fader on its track's send N; the V-pot send view each V-pot on the
+// selected track's send. st.fObj / fTag, st.vObj / vTag: what the fader / V-pot moves; fKind / vKind 'plugin' or
+// 'send' (null = the track's own, through the bindings).
+// 26 <strip> <fader 0/1> <V-pot 0/1>: whether the strip's fader / V-pot are the script's (the bridge then sends 25 /
+// 28 and ignores Cubase's own values there).
 function stripModeUpdate(activeDevice, index) {
 	var st = skStrip[index]
+	if (!st) return
 	var normal = route.fader === 'vol' && route.vpot === 'pan', flipped = route.fader === 'pan' && route.vpot === 'vol'
-	var fTag = -1, vTag = -1
-	if (stripModeOn && (normal || flipped) && stripTags(index)) {
+	var fTag = -1, vTag = -1, fObj = -1, vObj = -1, fKind = null, vKind = null, vDa = null, vOn = -1
+	if (route.fader === 'send') {
+		fKind = 'send'
+		var fs = null
+		try { fs = sendSlotLevel(skDa[index], route.send) } catch (e) {}
+		if (fs) { fObj = fs.obj; fTag = fs.tag }
+	} else if (stripModeOn && (normal || flipped) && stripTags(index)) {
 		fTag = normal ? st.faderTag : st.panTag
 		vTag = normal ? st.panTag : st.faderTag
+		if (fTag >= 0) { fKind = 'plugin'; fObj = st.obj }
+		if (vTag >= 0) { vKind = 'plugin'; vObj = st.obj; vDa = skDa[index] }
 	}
-	var on = fTag >= 0, pan = vTag >= 0
-	var changed = on !== !!st.faderOn || pan !== !!st.panOn || fTag !== st.fTag || vTag !== st.vTag
+	if (route.vpot === 'sends' && route.fader !== 'send') {
+		vKind = 'send'; vDa = selDa; vObj = -1; vTag = -1
+		var vs = null
+		try { vs = sendSlotLevel(selDa, index) } catch (e) {}
+		if (vs) { vObj = vs.obj; vTag = vs.tag; vOn = vs.on }
+	}
+	// A send view takes the control even where the track has no such send (it then shows an empty send).
+	var on = fKind === 'send' || fTag >= 0, pan = vKind === 'send' || vTag >= 0
+	var changed = on !== !!st.faderOn || pan !== !!st.panOn || fTag !== st.fTag || vTag !== st.vTag || fObj !== st.fObj || vObj !== st.vObj
 	st.faderOn = on
 	st.panOn = pan
 	st.fTag = fTag
 	st.vTag = vTag
+	st.fObj = fObj
+	st.vObj = vObj
+	st.fKind = fKind
+	st.vKind = vKind
+	st.vDa = vDa
+	st.vOn = vOn
 	if (changed) {
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
-		flipResets[index](activeDevice)   // the track's own values where the plug-in no longer has them
+		flipResets[index](activeDevice)   // the track's own values where the script no longer has them
 	}
 	if (on) stripFaderSend(activeDevice, index)
 	if (pan) stripPanSend(activeDevice, index)
 }
-// Who shows in the dB field / on the value line: the plug-in where its fader / pan is on a control.
+// Who shows in the dB field / on the value line: the script where its fader / V-pot is on a plug-in control or send.
 function stripOwnsDb(index) {
 	var st = skStrip[index]
-	return !!st && ((st.faderOn && st.fTag === st.faderTag) || (st.panOn && st.vTag === st.faderTag))
+	return !!st && ((st.faderOn && (st.fKind === 'send' || st.fTag === st.faderTag)) || (st.panOn && st.vKind === 'plugin' && st.vTag === st.faderTag))
 }
 function stripOwnsPan(index) {
 	var st = skStrip[index]
-	return !!st && ((st.faderOn && st.fTag === st.panTag) || (st.panOn && st.vTag === st.panTag))
+	return !!st && ((st.faderOn && st.fKind === 'plugin' && st.fTag === st.panTag) || (st.panOn && (st.vKind === 'send' || st.vTag === st.panTag)))
 }
-function stripParamText(index, tag) {
-	var st = skStrip[index], da = skDa[index], text = ''
-	try { text = String(da.getParameterDisplayValue(skAm, st.obj, tag)) } catch (e) {}
+function daText(da, obj, tag) {
+	var text = ''
+	try { text = String(da.getParameterDisplayValue(skAm, obj, tag)) } catch (e) {}
 	return text.replace(/\s+/g, ' ').trim()
 }
-// A plug-in parameter shown where its kind belongs: the fader level in the dB field, the pan on the value line.
-function stripShow(activeDevice, index, tag) {
-	var st = skStrip[index]
-	if (tag === st.panTag) stripPanShow[index](activeDevice, stripParamText(index, tag), skDa[index].getParameterProcessValue(skAm, st.obj, tag))
-	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(stripParamText(index, tag)), [0xF7]))
+function daUnits(da, obj, tag) {
+	try { return String(da.getParameterDisplayUnits(skAm, obj, tag) || '') } catch (e) { return '' }
 }
-function stripPanSend(activeDevice, index) { stripShow(activeDevice, index, skStrip[index].vTag) }   // (the V-pot's)
+// The fader's target shown: a plug-in's fader level or a send level in the dB field, a plug-in's pan on the value line.
+function stripFaderShow(activeDevice, index) {
+	var st = skStrip[index]
+	if (st.fObj < 0) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(''), [0xF7])); return }
+	var text = daText(skDa[index], st.fObj, st.fTag)
+	if (st.fKind === 'plugin' && st.fTag === st.panTag) stripPanShow[index](activeDevice, text, skDa[index].getParameterProcessValue(skAm, st.fObj, st.fTag))
+	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
+}
+// The V-pot's target shown: a send on the value line ("Send" + level) and a unipolar ring; a plug-in's pan on the
+// value line, its fader level in the dB field.
+function stripPanSend(activeDevice, index) {
+	var st = skStrip[index]
+	if (st.vKind === 'send') {
+		var text = '', pos = 0
+		if (st.vObj >= 0) {
+			text = daText(st.vDa, st.vObj, st.vTag)
+			var u = daUnits(st.vDa, st.vObj, st.vTag)
+			if (text && u) text += ' ' + u
+			pos = Math.max(0, Math.min(127, Math.round(st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag) * 127)))
+		}
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(text), [0xF7]))
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos, 0xF7]))
+		return
+	}
+	var text2 = daText(st.vDa, st.vObj, st.vTag)
+	if (st.vTag === st.panTag) stripPanShow[index](activeDevice, text2, st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag))
+	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text2), [0xF7]))
+}
 function stripModeUpdateAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i) }
 function stripFaderSend(activeDevice, index) {
-	var st = skStrip[index], da = skDa[index]
-	var v = Math.round(Math.max(0, Math.min(1, da.getParameterProcessValue(skAm, st.obj, st.fTag))) * 16383)
+	var st = skStrip[index]
+	var v = st.fObj < 0 ? 0 : Math.round(Math.max(0, Math.min(1, skDa[index].getParameterProcessValue(skAm, st.fObj, st.fTag))) * 16383)
 	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x27, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
-	stripShow(activeDevice, index, st.fTag)
+	stripFaderShow(activeDevice, index)
+}
+// The selected track's sends changed elsewhere (the mouse, automation, our own writes): the V-pots show them.
+if (selDa) {
+	selDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+		skAm = activeMapping
+		if (route.vpot !== 'sends') return
+		for (var i = 0; i < STRIPS; ++i) {
+			var st = skStrip[i]
+			if (st && st.panOn && st.vKind === 'send' && st.vObj === objectID && (st.vTag === tag || st.vOn === tag)) stripPanSend(activeDevice, i)
+		}
+	}
+	selDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) { skAm = activeMapping; skRescanAt = Date.now() + 300 }
 }
 
 function skMessage(activeDevice, m) {
@@ -1181,27 +1260,32 @@ function skMessage(activeDevice, m) {
 		stripModeUpdateAll(activeDevice)
 		return
 	}
-	if (m[4] === 0x28 && m.length >= 8) {   // a V-pot turn on the plug-in's control (64 = no change)
+	if (m[4] === 0x28 && m.length >= 8) {   // a V-pot turn on the script's target (64 = no change)
 		var pi = m[5]
-		if (pi >= STRIPS || !skStrip[pi].panOn) return
-		var st = skStrip[pi], da = skDa[pi]
-		var cur = da.getParameterProcessValue(skAm, st.obj, st.vTag)
-		da.setParameterProcessValue(skAm, st.obj, st.vTag, Math.max(0, Math.min(1, cur + (m[6] - 64) / 100)))
+		if (pi >= STRIPS || !skStrip[pi].panOn || skStrip[pi].vObj < 0) return
+		var st = skStrip[pi], da = st.vDa
+		var cur = da.getParameterProcessValue(skAm, st.vObj, st.vTag)
+		da.setParameterProcessValue(skAm, st.vObj, st.vTag, Math.max(0, Math.min(1, cur + (m[6] - 64) / 100)))
 		stripPanSend(activeDevice, pi)
 		return
 	}
-	if (m[4] === 0x29 && m.length >= 7) {   // V-pot push: centre the plug-in's pan (when the V-pot is on it)
+	if (m[4] === 0x29 && m.length >= 7) {   // V-pot push: centre the plug-in's pan; on a send: the send on / off
 		var ci = m[5]
-		if (ci >= STRIPS || !skStrip[ci].panOn || skStrip[ci].vTag !== skStrip[ci].panTag) return
-		skDa[ci].setParameterProcessValue(skAm, skStrip[ci].obj, skStrip[ci].vTag, 0.5)
+		if (ci >= STRIPS || !skStrip[ci].panOn || skStrip[ci].vObj < 0) return
+		var cs = skStrip[ci]
+		if (cs.vKind === 'send') {
+			if (cs.vOn >= 0) cs.vDa.setParameterProcessValue(skAm, cs.vObj, cs.vOn, cs.vDa.getParameterProcessValue(skAm, cs.vObj, cs.vOn) >= 0.5 ? 0 : 1)
+		} else if (cs.vTag === cs.panTag) {
+			cs.vDa.setParameterProcessValue(skAm, cs.vObj, cs.vTag, 0.5)
+		}
 		stripPanSend(activeDevice, ci)
 		return
 	}
-	if (m[4] === 0x25 && m.length >= 9) {   // the hand on a fader that is on the plug-in's control
+	if (m[4] === 0x25 && m.length >= 9) {   // the hand on a fader that is the script's (a plug-in control or a send)
 		var si = m[5]
-		if (si >= STRIPS || !skStrip[si].faderOn) return
-		skDa[si].setParameterProcessValue(skAm, skStrip[si].obj, skStrip[si].fTag, ((m[6] << 7) | m[7]) / 16383)
-		stripShow(activeDevice, si, skStrip[si].fTag)
+		if (si >= STRIPS || !skStrip[si].faderOn || skStrip[si].fObj < 0) return
+		skDa[si].setParameterProcessValue(skAm, skStrip[si].fObj, skStrip[si].fTag, ((m[6] << 7) | m[7]) / 16383)
+		stripFaderShow(activeDevice, si)
 		return
 	}
 	if (m[4] === 0x21 && m.length >= 8) {
@@ -1239,6 +1323,6 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
 		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
-		if (stripModeOn) { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
+		if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
 	}
 }
