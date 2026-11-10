@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include "Uf1Text.h"
 #include "Names.h"
 #include "Brightness.h"
 #include "Sleep.h"
@@ -221,6 +222,14 @@ std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed wi
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
 std::string levelTextFor(int pos);
+// A value line as the UF1 shows it (and the UF8): the label on the left, the value right-aligned (Rea-Sixty's
+// uf1ValueLine: 11 label characters, 8 for the value). "Pan C" -> "Pan" + "C"; split at the last space.
+std::string alignedValueLine(const std::string& t)
+{
+    const size_t sp = t.rfind(' ');
+    if (t.empty() || sp == std::string::npos) return t;
+    return uf1ValueLine(std::string_view(t).substr(0, sp), std::string_view(t).substr(sp + 1));
+}
 void valueTemporary(const std::string& t);
 void barTemporary(uint8_t pos, uint8_t style);
 void paintSoftKeys();
@@ -510,7 +519,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             // and its level curve. (It came from the send's binding until the levels went through Direct Access.)
             if (g_view == kViewDaw) {
                 const std::string t = levelTextFor(v);
-                valueTemporary("S" + std::to_string(int(k) + 1 + (g_sends58 ? 4 : 0)) + " " + (t.empty() ? "..." : t));
+                valueTemporary(alignedValueLine("S" + std::to_string(int(k) + 1 + (g_sends58 ? 4 : 0)) + " " + (t.empty() ? "..." : t)));
                 barTemporary(uint8_t(std::lround(v * 100.0 / 16383.0)), 0x02);
             }
             break;
@@ -1417,8 +1426,8 @@ void onSysex(const std::vector<unsigned char>& m)
         // Value line text. 04 = temporary (a send V-pot), 08 = home (pan).
         std::string t;
         for (size_t i = 5; i + 1 < m.size(); ++i) t.push_back(char(m[i]));
-        if (t.size() > 12) t.resize(12);
         if (g_trace) std::printf("UF1 value line (%s): \"%s\"\n", m[4] == 0x08 ? "home" : "temporary", t.c_str());
+        t = alignedValueLine(t);
         if (m[4] == 0x08) valueHome(t);
         else if (g_view != kViewSends) valueTemporary(t);   // SENDS: the send's cell shows it already
     } else if ((m[4] == 0x05 || m[4] == 0x09) && m.size() >= 7) {
