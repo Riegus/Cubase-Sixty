@@ -15,9 +15,11 @@ std::string get(const std::string& key, const std::string& fallback);
 //   mixconsole (default) = the ones the MixConsole shows (the UF1 script steps on past hidden ones)
 //   project = the ones the Project window shows (Cubase's Navigate Up / Down)
 //   all     = every track (Select Track: Prev / Next)
-enum class Stepping { MixConsole, Project, All };
+enum class Stepping { MixConsole, Project, All, Mackie };
 Stepping trackStepping();
 inline bool projectStepping() { return trackStepping() == Stepping::Project; }
+// The bridge steps (uf1StepTrack): MixConsole through the UF1 script, Mackie (test) through the Mackie port.
+inline bool bridgeStepping() { const Stepping s = trackStepping(); return s == Stepping::MixConsole || s == Stepping::Mackie; }
 
 // The settings the Settings page shows (and settings.txt is written from): one entry per key.
 struct Choice { std::string value, label; };

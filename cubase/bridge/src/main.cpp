@@ -471,7 +471,7 @@ void handleFrame(const uf8frames::Frame& fr)
             for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
                 if (mode == kEncBank) { note(right ? kNotePageRight : kNotePageLeft, true); note(right ? kNotePageRight : kNotePageLeft, false); continue; }
                 if (mode == kEncCsFav || mode == kEncBcFav) { cs::uc1FavouriteStep(mode == kEncBcFav, right ? 1 : -1); continue; }
-                if (mode == kEncSelect && cs::settings::trackStepping() == cs::settings::Stepping::MixConsole && cs::uf1StepTrack(right ? 1 : -1)) continue;
+                if (mode == kEncSelect && cs::settings::bridgeStepping() && cs::uf1StepTrack(right ? 1 : -1)) continue;
                 // Select 0 / 1 (6 / 7 = Navigate Up / Down: only the tracks the Project window shows), Nudge 2 / 3, Markers 4 / 5
                 const uint8_t n = mode == kEncSelect && cs::settings::projectStepping() ? uint8_t(right ? 7 : 6) : uint8_t(mode * 2 + (right ? 1 : 0));
                 sendMidi({0x91, n, 127});

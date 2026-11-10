@@ -61,6 +61,9 @@ MidiOutPort g_mcuOut;
 void mcuSend(std::vector<unsigned char> m) { g_mcuOut.send(m); }
 MidiInPort g_mcuIn;
 bool g_mcuOpen = false;
+// TEST (track-stepping = mackie): when the last step was sent, and whether its Mackie feedback was logged yet.
+std::atomic<long long> g_stepSentAt{0};
+std::atomic<bool> g_stepFbSelect{false}, g_stepFbText{false};
 MidiInPort  g_in;
 std::mutex g_outMx;
 std::atomic<bool> g_touched{false};
@@ -407,7 +410,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 }
                 if (jog && !g_scrub && !g_shift && jogStep(right)) continue;
                 if (!jog && settings::projectStepping()) { cmd2(right ? 49 : 48); continue; }   // Navigate Down / Up
-                if (!jog && settings::trackStepping() == settings::Stepping::MixConsole) { uf1StepTrack(right ? 1 : -1); continue; }
+                if (!jog && settings::bridgeStepping()) { uf1StepTrack(right ? 1 : -1); continue; }
                 note(uint8_t(base + (right ? 1 : 0)), true);
                 note(uint8_t(base + (right ? 1 : 0)), false);
             }
@@ -558,7 +561,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             }
             // SHIFT + ARROW: step back / forward one bar (81 / 82).
             if (!g_shift && settings::projectStepping()) { cmd2(ev.id == 0x26 ? 49 : 48); break; }   // Navigate Down / Up
-            if (!g_shift && settings::trackStepping() == settings::Stepping::MixConsole) { uf1StepTrack(ev.id == 0x26 ? 1 : -1); break; }
+            if (!g_shift && settings::bridgeStepping()) { uf1StepTrack(ev.id == 0x26 ? 1 : -1); break; }
             const uint8_t n = g_shift ? (ev.id == 0x26 ? 82 : 81) : (ev.id == 0x26 ? 41 : 40);
             note(n, true);
             note(n, false);
@@ -1682,6 +1685,13 @@ bool uf1OpenDevice(bool quiet)
 // Cubase's (e.g. after a restart of either side).
 void onMcuIn(std::vector<unsigned char>& m)
 {
+    // TEST: how long after a Mackie step Cubase's Mackie side shows a change (a SELECT LED lit, the display text).
+    if (const long long at = g_stepSentAt; at && nowMs() - at < 3000) {
+        if (m.size() >= 3 && (m[0] & 0xF0) == 0x90 && m[1] >= 0x18 && m[1] <= 0x1F && m[2] > 0 && !g_stepFbSelect.exchange(true))
+            std::printf("Step test: Mackie SELECT %d lit after %lld ms\n", m[1] - 0x18 + 1, nowMs() - at);
+        if (m.size() >= 6 && m[0] == 0xF0 && m[5] == 0x12 && !g_stepFbText.exchange(true))
+            std::printf("Step test: Mackie display text after %lld ms\n", nowMs() - at);
+    }
     if (m.size() >= 3 && (m[0] & 0xF0) == 0x90 && m[1] == 0x65) {
         const bool on = m[2] > 0;
         if (on != g_scrub) {
@@ -1799,10 +1809,23 @@ void uf1SetStripNumber(int n)
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
+// TEST (track-stepping = mackie): Mackie Control's cursor down / up (notes 0x61 / 0x60) instead, to see whether
+// Cubase moves the selection quicker that way. Each step is logged, and so is the first Mackie feedback after it.
 bool uf1StepTrack(int dir)
 {
+    if (settings::trackStepping() == settings::Stepping::Mackie && g_mcuOpen) {
+        const uint8_t n = dir > 0 ? 0x61 : 0x60;
+        mcuSend({0x90, n, 0x7F});
+        mcuSend({0x90, n, 0x00});
+        g_stepFbSelect = g_stepFbText = false;
+        g_stepSentAt = nowMs();
+        std::printf("Step test: Mackie cursor %s sent\n", dir > 0 ? "down" : "up");
+        return true;
+    }
     if (!g_portsOpen) return false;
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
+    g_stepSentAt = nowMs();
+    std::printf("Step test: MIDI Remote step %s sent\n", dir > 0 ? "forward" : "back");
     return true;
 }
 

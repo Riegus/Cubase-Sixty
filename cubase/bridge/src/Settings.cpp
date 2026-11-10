@@ -27,7 +27,8 @@ const std::vector<Def>& defs()
          "Which tracks the UF1's arrows and the UF1 / UF8 / UC1 CHANNEL encoders step through.",
          {{"mixconsole", "The tracks the MixConsole shows (hidden ones are stepped past)"},
           {"project", "The tracks the Project window shows (Cubase's Navigate Up / Down; the Project window should have the focus)"},
-          {"all", "Every track, hidden ones included (Cubase's Select Track: Prev / Next)"}},
+          {"all", "Every track, hidden ones included (Cubase's Select Track: Prev / Next)"},
+          {"mackie", "TEST: Mackie Control's cursor up / down (is Cubase quicker that way?)"}},
          "mixconsole", true},
         {"uc1-encoder2", "Behaviour", "UC1 secondary encoder at start",
          "What the UC1's secondary encoder (right of the screen) turns when Cubase starts. Hold its push and turn to change it while working.",
@@ -221,7 +222,7 @@ bool set(const std::string& key, const std::string& value, std::string* why)
 Stepping trackStepping()
 {
     const std::string v = lower(get("track-stepping", "mixconsole"));
-    return v == "project" ? Stepping::Project : v == "all" ? Stepping::All : Stepping::MixConsole;
+    return v == "project" ? Stepping::Project : v == "all" ? Stepping::All : v == "mackie" ? Stepping::Mackie : Stepping::MixConsole;
 }
 
 } // namespace cs::settings
