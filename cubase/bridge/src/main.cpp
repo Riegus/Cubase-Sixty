@@ -344,7 +344,9 @@ void handleFrame(const uf8frames::Frame& fr)
             // held: the timer of this press fired, so its release is not a tap.
             static std::atomic<int> gen{0};
             static std::atomic<bool> held{false};
+            static std::atomic<bool> down{false};   // a release without its press (the UF8 sends one when it connects) is no tap
             if (pressed) {
+                down = true;
                 held = false;
                 const int g = ++gen;
                 std::thread([g] {
@@ -358,7 +360,7 @@ void handleFrame(const uf8frames::Frame& fr)
                 }).detach();
             } else {
                 ++gen;   // the timer of this press does nothing now
-                if (!held) {   // a tap
+                if (down.exchange(false) && !held) {   // a tap
                     g_encMode = g_encMode == kEncMarkers ? kEncSelect : kEncMarkers;
                     std::printf("UF8 NAV tap: encoder on %s\n", g_encMode == kEncMarkers ? "Markers" : "Ch Sel");
                     paintEncLeds();

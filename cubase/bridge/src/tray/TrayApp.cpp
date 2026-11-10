@@ -7,11 +7,8 @@
 //     state (read from cubase\logs\bridge.log), and has Settings (the bridge's Settings page in the browser; also a
 //     click on the icon), Restart bridge, Open logs folder, Start with Windows, Quit.
 //   - Start with Windows: the usual per-user Run entry (HKCU\Software\Microsoft\Windows\CurrentVersion\Run).
-//   - Switch to SSL 360 / Switch to Cubase-Sixty, only when SSL 360 is installed: the two cannot run together (both
-//     claim the controllers' USB devices, and SSL360Core.exe takes the SSL plug-ins). Switching to SSL 360 stops the
-//     bridge (it blanks and lets go of the surfaces) and starts SSL 360; the icon turns grey and the bridge is not
-//     started again, also after a reboot, until Switch to Cubase-Sixty (which quits SSL 360 and starts the bridge).
-//     The choice is kept in HKCU\Software\Cubase-Sixty, Mode.
+//   - Stop bridge / Start bridge: stopping blanks the surfaces and lets go of them (e.g. for another program); the
+//     icon turns grey and the bridge is not started again until Start bridge (or the app's next start).
 //   - One instance only. Not a Windows service on purpose (see docs\release-plan.md, step 3).
 //
 // When the bridge is started again, its MIDI ports are made anew; Cubase connects the scripts to them again by
@@ -26,7 +23,6 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
-#include <tlhelp32.h>
 
 #include <chrono>
 #include <cmath>
@@ -44,7 +40,7 @@ namespace {
 constexpr UINT kTrayMsg = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTimerMs = 500;
-enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdToSsl, kCmdToSixty };
+enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdStop };
 const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t* kRunValue = L"Cubase-Sixty";
 
@@ -62,9 +58,8 @@ bool g_loopMidi = false;
 // was connected before and has not spoken again within 20 s, the app says to restart Cubase.
 std::chrono::steady_clock::time_point g_expectCubaseBy{};
 bool g_expectCubase = false;
-// SSL 360 has the controllers (Switch to SSL 360): the bridge is not run.
-bool g_sslMode = false;
-const wchar_t* kAppKey = L"Software\\Cubase-Sixty";
+// Stopped from the menu: the bridge is not started again until Start bridge.
+bool g_paused = false;
 
 // What bridge.log says.
 struct Status {
@@ -164,12 +159,12 @@ HICON makeIcon(COLORREF rgb)
     return icon;
 }
 
-HICON g_icons[4]{};   // red, yellow, green, grey (SSL 360 has the controllers)
+HICON g_icons[4]{};   // red, yellow, green, grey (stopped from the menu)
 
 std::wstring tooltip()
 {
     std::wstring t = L"Cubase-Sixty: ";
-    if (g_sslMode) t += L"paused, SSL 360 has the controllers";
+    if (g_paused) t += L"bridge stopped (Start bridge in the menu)";
     else if (!g_bridgeRunning) t += g_gaveUp ? L"bridge stopped (restart it from the menu)" : L"bridge not running";
     else t += L"UF8 " + widen(g_status.uf8) + L", UF1 " + widen(g_status.uf1) + L", UC1 " + widen(g_status.uc1);
     if (t.size() > 127) t.resize(127);
@@ -178,7 +173,7 @@ std::wstring tooltip()
 
 void updateIcon()
 {
-    const int level = g_sslMode ? 3 : !g_bridgeRunning ? 0 : g_status.projectOpen ? 2 : 1;
+    const int level = g_paused ? 3 : !g_bridgeRunning ? 0 : g_status.projectOpen ? 2 : 1;
     g_nid.uFlags = NIF_ICON | NIF_TIP | NIF_SHOWTIP;   // (NIF_SHOWTIP: version 4 icons show no tip otherwise)
     g_nid.hIcon = g_icons[level];
     wcsncpy_s(g_nid.szTip, tooltip().c_str(), _TRUNCATE);
@@ -257,7 +252,7 @@ void checkBridge()
     g_bridge = {};
     g_bridgeRunning = false;
     updateIcon();
-    if (g_quitting || g_sslMode) return;
+    if (g_quitting || g_paused) return;
     const auto now = std::chrono::steady_clock::now();
     while (!g_restarts.empty() && now - g_restarts.front() > std::chrono::minutes(1)) g_restarts.pop_front();
     if (g_restarts.size() >= 5) {
@@ -314,123 +309,6 @@ void readLog()
     if (old != g_status.uf8 + g_status.uf1 + g_status.uc1 + g_status.cubase) updateIcon();
 }
 
-// ---------------------------------------------------------------------------------------------- SSL 360
-
-// Where SSL 360 is installed: its uninstall entry (InstallLocation, or the folder of its uninstaller), else the
-// default folder. Empty when SSL360Core.exe is not there (SSL 360 not installed: no switching offered).
-fs::path sslDir()
-{
-    std::vector<fs::path> tries;
-    for (REGSAM view : {KEY_WOW64_64KEY, KEY_WOW64_32KEY}) {
-        HKEY root;
-        if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", 0, KEY_READ | view, &root) != ERROR_SUCCESS) continue;
-        wchar_t name[256];
-        for (DWORD i = 0; ; ++i) {
-            DWORD n = 256;
-            if (RegEnumKeyExW(root, i, name, &n, nullptr, nullptr, nullptr, nullptr) != ERROR_SUCCESS) break;
-            wchar_t v[1024];
-            DWORD size = sizeof v;
-            if (RegGetValueW(root, name, L"DisplayName", RRF_RT_REG_SZ, nullptr, v, &size) != ERROR_SUCCESS) continue;
-            if (!wcsstr(v, L"SSL 360")) continue;
-            size = sizeof v;
-            if (RegGetValueW(root, name, L"InstallLocation", RRF_RT_REG_SZ, nullptr, v, &size) == ERROR_SUCCESS && *v)
-                tries.push_back(fs::path(v));
-            size = sizeof v;
-            if (RegGetValueW(root, name, L"UninstallString", RRF_RT_REG_SZ, nullptr, v, &size) == ERROR_SUCCESS && *v) {
-                std::wstring u = v;
-                if (!u.empty() && u[0] == L'"') u = u.substr(1, u.find(L'"', 1) - 1);
-                tries.push_back(fs::path(u).parent_path());
-            }
-        }
-        RegCloseKey(root);
-    }
-    wchar_t pf[MAX_PATH];
-    if (GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH)) tries.push_back(fs::path(pf) / L"Solid State Logic" / L"SSL 360");
-    std::error_code ec;
-    for (const auto& d : tries)
-        if (fs::exists(d / L"SSL360Core.exe", ec)) return d;
-    return {};
-}
-
-std::vector<DWORD> processesNamed(const wchar_t* exe)
-{
-    std::vector<DWORD> ids;
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return ids;
-    PROCESSENTRY32W pe{};
-    pe.dwSize = sizeof pe;
-    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe))
-        if (_wcsicmp(pe.szExeFile, exe) == 0) ids.push_back(pe.th32ProcessID);
-    CloseHandle(snap);
-    return ids;
-}
-
-// Asks a program's windows to close, waits up to waitMs, then ends what is left.
-void endProgram(const wchar_t* exe, DWORD waitMs)
-{
-    auto ids = processesNamed(exe);
-    if (ids.empty()) return;
-    EnumWindows([](HWND w, LPARAM lp) -> BOOL {
-        DWORD pid = 0;
-        GetWindowThreadProcessId(w, &pid);
-        for (DWORD id : *reinterpret_cast<std::vector<DWORD>*>(lp))
-            if (id == pid) PostMessageW(w, WM_CLOSE, 0, 0);
-        return TRUE;
-    }, reinterpret_cast<LPARAM>(&ids));
-    for (DWORD id : ids) {
-        HANDLE h = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, id);
-        if (!h) continue;
-        if (WaitForSingleObject(h, waitMs) != WAIT_OBJECT_0) TerminateProcess(h, 0);
-        CloseHandle(h);
-    }
-}
-
-void saveMode()
-{
-    HKEY key;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, kAppKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
-    const std::wstring v = g_sslMode ? L"ssl360" : L"cubase-sixty";
-    RegSetValueExW(key, L"Mode", 0, REG_SZ, reinterpret_cast<const BYTE*>(v.c_str()), DWORD((v.size() + 1) * sizeof(wchar_t)));
-    RegCloseKey(key);
-}
-bool savedSslMode()
-{
-    wchar_t v[64];
-    DWORD size = sizeof v;
-    return RegGetValueW(HKEY_CURRENT_USER, kAppKey, L"Mode", RRF_RT_REG_SZ, nullptr, v, &size) == ERROR_SUCCESS && wcscmp(v, L"ssl360") == 0;
-}
-
-void switchToSsl()
-{
-    const fs::path dir = sslDir();
-    if (dir.empty()) return;
-    g_sslMode = true;   // first: checkBridge must not start the bridge again
-    saveMode();
-    stopBridge();
-    updateIcon();
-    Sleep(1500);   // let Windows release the USB devices
-    // Core first (it takes the controllers), then its window. (SSL 360 may start its Core itself; a second start of
-    // it is expected to do nothing.)
-    if (processesNamed(L"SSL360Core.exe").empty())
-        ShellExecuteW(nullptr, L"open", (dir / L"SSL360Core.exe").c_str(), nullptr, dir.c_str(), SW_SHOWMINNOACTIVE);
-    Sleep(1000);
-    if (processesNamed(L"SSL360Gui.exe").empty() && fs::exists(dir / L"SSL360Gui.exe"))
-        ShellExecuteW(nullptr, L"open", (dir / L"SSL360Gui.exe").c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL);
-    notify(L"SSL 360 has the controllers", L"Cubase-Sixty is paused. Tray menu: Switch to Cubase-Sixty to take them back.");
-}
-
-void switchToSixty()
-{
-    endProgram(L"SSL360Gui.exe", 3000);
-    endProgram(L"SSL360Core.exe", 3000);
-    g_sslMode = false;
-    saveMode();
-    Sleep(1500);   // let Windows release the USB devices
-    g_gaveUp = false;
-    g_restarts.clear();
-    if (!startBridge()) notify(L"Cubase-Sixty", L"The bridge could not be started.");
-}
-
 // ---------------------------------------------------------------------------------------------- autostart
 
 bool autostartOn()
@@ -461,9 +339,8 @@ void showMenu()
 {
     HMENU m = CreatePopupMenu();
     auto info = [&](const std::wstring& t) { AppendMenuW(m, MF_STRING | MF_GRAYED, 0, t.c_str()); };
-    const bool sslThere = !sslDir().empty();
-    if (g_sslMode) {
-        info(L"Paused: SSL 360 has the controllers");
+    if (g_paused) {
+        info(L"Bridge: stopped (the surfaces are free)");
     } else if (g_bridgeRunning) {
         info(L"Bridge: running");
         info(L"UF8: " + widen(g_status.uf8));
@@ -476,10 +353,8 @@ void showMenu()
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (g_bridgeRunning && !g_status.settingsUrl.empty() ? 0 : MF_GRAYED), kCmdSettings, L"Settings...");
     SetMenuDefaultItem(m, kCmdSettings, FALSE);
-    if (!g_sslMode) AppendMenuW(m, MF_STRING, kCmdRestart, g_bridgeRunning ? L"Restart bridge" : L"Start bridge");
-    // Only with SSL 360 installed; going back is always offered while paused.
-    if (g_sslMode) AppendMenuW(m, MF_STRING, kCmdToSixty, L"Switch to Cubase-Sixty");
-    else if (sslThere) AppendMenuW(m, MF_STRING, kCmdToSsl, L"Switch to SSL 360");
+    AppendMenuW(m, MF_STRING, kCmdRestart, g_bridgeRunning ? L"Restart bridge" : L"Start bridge");
+    if (g_bridgeRunning) AppendMenuW(m, MF_STRING, kCmdStop, L"Stop bridge");
     AppendMenuW(m, MF_STRING, kCmdLogs, L"Open logs folder");
     AppendMenuW(m, MF_STRING | (autostartOn() ? MF_CHECKED : 0), kCmdAutostart, L"Start with Windows");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -505,7 +380,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         // A click opens the Settings page (the menu while there is none); the right button the menu.
         // (Version 4 icons: a click comes as NIN_SELECT, the right button as WM_CONTEXTMENU; each once.)
         if (LOWORD(lp) == NIN_SELECT || LOWORD(lp) == NIN_KEYSELECT) {
-            if (!g_sslMode && g_bridgeRunning && !g_status.settingsUrl.empty()) PostMessageW(h, WM_COMMAND, kCmdSettings, 0);
+            if (!g_paused && g_bridgeRunning && !g_status.settingsUrl.empty()) PostMessageW(h, WM_COMMAND, kCmdSettings, 0);
             else showMenu();
         } else if (LOWORD(lp) == WM_CONTEXTMENU) showMenu();
         return 0;
@@ -520,13 +395,13 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case kCmdToSsl:
-            switchToSsl();
-            break;
-        case kCmdToSixty:
-            switchToSixty();
+        case kCmdStop:
+            g_paused = true;   // first: checkBridge must not start it again
+            stopBridge();
+            updateIcon();
             break;
         case kCmdRestart:
+            g_paused = false;
             g_gaveUp = false;
             g_restarts.clear();
             restartBridge(false);
@@ -595,11 +470,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     g_nid.uVersion = NOTIFYICON_VERSION_4;
     Shell_NotifyIconW(NIM_SETVERSION, &g_nid);
 
-    // Left on SSL 360 (also across a reboot): stay paused, unless SSL 360 has been uninstalled since.
-    g_sslMode = savedSslMode() && !sslDir().empty();
-    if (g_sslMode) {
-        updateIcon();
-    } else if (!fs::exists(g_bridgeExe)) {
+    if (!fs::exists(g_bridgeExe)) {
         notify(L"Cubase-Sixty", L"The bridge was not found next to this program: " + g_bridgeExe.wstring());
     } else if (!startBridge()) {
         notify(L"Cubase-Sixty", L"The bridge could not be started.");
