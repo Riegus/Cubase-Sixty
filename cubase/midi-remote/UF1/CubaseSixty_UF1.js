@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.6-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.7-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -251,7 +251,9 @@ function sendQcCell(activeDevice, index) {
 	if (!c) return
 	if (qcActive) sendQcSource(activeDevice)
 	var name = c.qcTitle || '', v = c.qcValue || ''
-	qcCells[index] = [0x51, index, c.qcPos || 0, name || v ? 2 : 0].concat(toAscii7(name || v ? cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + v : ''))
+	// A Quick Control with nothing assigned (Cubase sends no name and no value): "QC1" and a dash, so the cell does not
+	// look broken (10.11.2026).
+	qcCells[index] = [0x51, index, c.qcPos || 0, 2].concat(toAscii7(cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + (name || v ? v : '-')))
 	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
 }
 function attachSendFeedback(surfaceValue, number) {
@@ -261,7 +263,6 @@ function attachSendFeedback(surfaceValue, number) {
 	var cell = { name: '', value: '', pos: 0, sent: null }
 	sendCells[number - 1] = cell
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
-		if (qcActive) { ++idleStat.qcTitles; idleStat.qcLastTitle = String(valueTitle || objectTitle || '') }
 		title = valueTitle || objectTitle || ''
 		cell.qcTitle = title
 		cell.qcObject = valueTitle ? (objectTitle || '') : ''   // what the Quick Control belongs to (a plug-in's name)
@@ -302,8 +303,8 @@ function attachSendFeedback(surfaceValue, number) {
 	}
 	// Bound callbacks count only for the Quick Controls: in DAW / SENDS the knob is bound to the send's on switch (see
 	// sendDa), and the level is shown from Direct Access.
-	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) { if (qcActive) { ++idleStat.qcDisplay; onDisplay(activeDevice, value, units) } }
-	surfaceValue.mOnProcessValueChange = function (activeDevice, value) { if (qcActive) { ++idleStat.qcProcess; onProcess(activeDevice, value) } }
+	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) { if (qcActive) onDisplay(activeDevice, value, units) }
+	surfaceValue.mOnProcessValueChange = function (activeDevice, value) { if (qcActive) onProcess(activeDevice, value) }
 	// Our own references: a callback read back from Cubase's object is Cubase's wrapper, not this function (calling
 	// it gave "DukValue is uninitialized", 10.11.2026).
 	return { process: onProcess, display: onDisplay }
@@ -614,16 +615,6 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
 	}
-	if (m[4] === 0x5F && m.length >= 7) {   // TEST: skip repeated track reports (Settings: test-skip-same-track)
-		skipSameTrack = m[5] !== 0
-		out('[CubaseSixty UF1] turn test: repeated track reports ' + (skipSameTrack ? 'skipped' : 'rescanned'))
-		return
-	}
-	if (m[4] === 0x5E && m.length >= 7) {   // TEST: EQ graph polling on / off (Settings: uf1-eq-poll)
-		eqPollOn = m[5] !== 0
-		out('[CubaseSixty UF1] turn test: EQ graph polling ' + (eqPollOn ? 'on' : 'off'))
-		return
-	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
 		try { stepTrack(activeDevice, m[5] ? 1 : -1) } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 		return
@@ -778,19 +769,14 @@ function stepCheckLanding() {
 }
 // Cubase reports the selected track again while one of its values changes (a send: about every 0.8 s); handled as a
 // new track, each report put the pan back on the value line in the middle of a send turn (10.11.2026). Repeats of
-// the same track are skipped (on by default; the TEST switch on the Settings page can still turn it off).
-var skipSameTrack = true
+// the same track (same object, same name) are skipped.
 var lastTrackId = -2
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
-	// TEST: Cubase reports the selected track again while one of its values changes (a send turned: about every
-	// 0.8 s); each report used to rescan the track's plug-ins. With the switch on, a report of the same track (same
-	// object, same name) is skipped.
 	var trackId = -1
 	try { trackId = plugDa.getBaseObjectID(activeMapping) } catch (e) {}
-	++idleStat.titles
-	if (skipSameTrack && trackId === lastTrackId && title === selectedInfo.title) { ++idleStat.titlesSkipped; return }
+	if (trackId === lastTrackId && title === selectedInfo.title) return
 	lastTrackId = trackId
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	sendDa.base = -2                   // the new track's sends
@@ -1591,12 +1577,7 @@ function stripFaderMove(activeDevice, v14) {
 	stripShow(activeDevice, p)
 }
 
-// TEST (10.11.2026): Direct Access parameter / object listeners off. a03b82a (smooth V-pots) had none; every build
-// since added some (UC1: the selected track and the whole MixConsole; UF1: the selected track; UF8: its 8 strips).
-// With them off, displays that follow plug-in parameters changed with the mouse stop following.
-var TEST_NO_DA_LISTENERS = false
-out('[CubaseSixty UF1] TEST: Direct Access listeners ' + (TEST_NO_DA_LISTENERS ? 'off' : 'on'))
-if (plugDa && !TEST_NO_DA_LISTENERS) {
+if (plugDa) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		plugAm = activeMapping
 		// Only a parameter on show repaints (a plug-in can report many changes, e.g. under automation).
@@ -1621,6 +1602,7 @@ if (plugDa && !TEST_NO_DA_LISTENERS) {
 		sendDa.refreshAt = Date.now() + 300
 	}
 }
+var eqPollAt = 0
 page.mOnActivate = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
 	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
@@ -1630,29 +1612,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	slotReported = null
 	plug.rescanAt = Date.now() + 200
 }
-var eqPollAt = 0
-// TEST (10.11.2026, V-pots / encoders not smooth since 6.11): the EQ polling can be switched off from the Settings
-// page (SysEx 5E), and every 10 s the script logs how long the EQ reads took and the longest wait between two idle
-// calls (a long wait = Cubase busy, and the V-pots' values wait too).
-var eqPollOn = true
-var idleStat = { since: 0, last: 0, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0, qcDisplay: 0, qcProcess: 0, qcTitles: 0, qcLastTitle: '' }
-function idleStats() {
-	var now = Date.now()
-	var st = idleStat
-	if (!st.since) { st.since = now; st.last = now; return }
-	st.maxGap = Math.max(st.maxGap, now - st.last)
-	st.last = now
-	++st.calls
-	if (now - st.since < 10000) return
-	out('[CubaseSixty UF1] turn test: ' + st.calls + ' idle calls in ' + (now - st.since) + ' ms, longest wait ' + st.maxGap +
-		' ms; EQ polling ' + (eqPollOn ? 'on: ' + st.eqReads + ' reads, ' + st.eqMs + ' ms in all, longest ' + st.eqMax + ' ms' : 'off') +
-		'; track reports ' + st.titles + (skipSameTrack ? ' (' + st.titlesSkipped + ' skipped)' : '') + '; plug-in scans ' + st.scans +
-		', ' + st.scanMs + ' ms in all, longest ' + st.scanMax + ' ms' +
-		(qcActive ? '; Quick Controls: ' + st.qcDisplay + ' display values, ' + st.qcProcess + ' positions, ' + st.qcTitles + ' titles (last "' + st.qcLastTitle + '"), SSL plug-in object ' + plug.obj : ''))
-	idleStat = { since: now, last: now, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0, qcDisplay: 0, qcProcess: 0, qcTitles: 0, qcLastTitle: '' }
-}
 page.mOnIdle = function (activeDevice, activeMapping) {
-	idleStats()
 	if (stepPending && stepPending.settleAt && Date.now() >= stepPending.settleAt) {
 		stepPending.settleAt = 0
 		try { stepCheckLanding() } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
@@ -1662,13 +1622,9 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	// changes.
 	// Only a changed band list is sent.
 	var t = Date.now()
-	if (eqPollOn && t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
+	if (t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
 		eqPollAt = t + 150
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
-		var took = Date.now() - t
-		++idleStat.eqReads
-		idleStat.eqMs += took
-		idleStat.eqMax = Math.max(idleStat.eqMax, took)
 	}
 	windowIdle(activeDevice)
 	if (sendDa.refreshAt && t >= sendDa.refreshAt && plugDa) {
@@ -1682,12 +1638,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
-		var scanT0 = Date.now()
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
-		var scanTook = Date.now() - scanT0
-		++idleStat.scans
-		idleStat.scanMs += scanTook
-		idleStat.scanMax = Math.max(idleStat.scanMax, scanTook)
 	}
 }
 

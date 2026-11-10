@@ -22,7 +22,6 @@ void uc1RedrawNames();
 void uc1ApplyBrightness();
 void uc1RedrawSevenSeg();
 void uc1SendKnobStep();
-void uc1SendSkipSame();   // TEST: Settings test-skip-same-track
 void uc1SendKeyJobs();
 // One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL
 // encoder: on to the UC1 script (SysEx 44), which shows and swaps them.

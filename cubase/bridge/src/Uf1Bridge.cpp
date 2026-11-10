@@ -144,8 +144,8 @@ void startIdleCycle();
 std::array<int, 4> g_vpotPos{-1, -1, -1, -1};
 std::array<long long, 4> g_vpotOwnUntil{};
 
-// TEST (10.11.2026, the V-pots / encoders not smooth since 6.11): per turn of a control, what came in and what went
-// out, logged once the control has been still for 0.8 s. 0 = the pan knob, 1-4 = V-pots 1-4, 5 = the channel encoder,
+// With --trace: per turn of a control, what came in and what went out, logged once the control has been still for
+// 0.8 s (made for the V-pot lag found 10.11.2026). 0 = the pan knob, 1-4 = V-pots 1-4, 5 = the channel encoder,
 // 6 = the jog wheel. "Answers": Cubase sending a V-pot's position back (SysEx 17).
 struct TurnDiag {
     long long first = 0, last = 0, maxGap = 0, firstAnswer = -1, lastAnswer = -1;
@@ -200,6 +200,7 @@ void turnReport()
     for (size_t i = 0; i < g_turn.size(); ++i) {
         TurnDiag& t = g_turn[i];
         if (!t.first || now - t.last < 800) continue;
+        if (!g_trace) { t = TurnDiag{}; continue; }
         std::string line = "Turn test: " + std::string(kNames[i]) + ", " + std::to_string(t.detents) + " detents in " +
                            std::to_string(t.events) + " events over " + std::to_string(t.last - t.first) + " ms (longest pause " +
                            std::to_string(t.maxGap) + " ms); sent " + std::to_string(t.sent) + " (" + t.path + ")";
@@ -1499,7 +1500,6 @@ void onSysex(const std::vector<unsigned char>& m)
         // The script (re)started: the view to start in (Settings: UF1 view at start), and its V-pot page.
         std::printf("UF1 script started: view at start = %s\n", settings::get("uf1-start-view", "daw").c_str());
         showView(startView());
-        uf1SendEqPoll();
     } else if (m[4] == 0x58 && m.size() >= 7) {
         g_plugSlot = m[5] < 16 ? int(m[5]) : -1;
         if (g_trace) std::printf("UF1 plug-in window: %s\n", g_plugSlot >= 0 ? ("insert slot " + std::to_string(g_plugSlot + 1)).c_str() : "the channel editor");
@@ -1886,15 +1886,6 @@ void uf1SetStripNumber(int n)
 }
 
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
-// TEST: the UF1 script's EQ graph polling on / off (Settings: uf1-eq-poll), SysEx 5E <1 / 0>.
-void uf1SendEqPoll()
-{
-    const bool on = settings::get("uf1-eq-poll", "on") != "off";
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5E, uint8_t(on ? 1 : 0), 0xF7});
-    const bool skip = settings::get("test-skip-same-track", "on") == "on";
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5F, uint8_t(skip ? 1 : 0), 0xF7});
-    std::printf("Turn test: UF1 EQ graph polling %s, repeated track reports %s\n", on ? "on" : "off", skip ? "skipped" : "rescanned");
-}
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
 bool helperSend(const std::vector<unsigned char>& msg);   // main.cpp

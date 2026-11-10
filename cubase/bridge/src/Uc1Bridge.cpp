@@ -151,11 +151,6 @@ void sendKeyJobs()
         sysex({0x4F, k, j});
     }
 }
-// TEST: skip the rescans on repeated track reports (Settings: test-skip-same-track), SysEx 5F <1 / 0>.
-void sendSkipSame()
-{
-    sysex({0x5F, uint8_t(settings::get("test-skip-same-track", "on") == "on" ? 1 : 0)});
-}
 void sendKnobStep()
 {
     const std::string v = settings::get("uc1-knob-step", "normal");
@@ -676,7 +671,6 @@ void onSysex(const std::vector<unsigned char>& m)
         for (auto& f : favourites::messages()) sendMidi(std::move(f));
         sendKnobStep();
         sendKeyJobs();
-        sendSkipSame();
         const std::string job = settings::get("uc1-encoder2", "bus-comp");
         const uint8_t mode = job == "strips" ? 1 : job == "cs-fav" ? 2 : job == "bc-fav" ? 3 : 0;
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x4C, mode, 0xF7});
@@ -1287,7 +1281,6 @@ void uc1ApplyBrightness()
 }
 void uc1RedrawSevenSeg() { if (g_open) paintSevenSeg(); }
 void uc1SendKnobStep() { sendKnobStep(); }
-void uc1SendSkipSame() { sendSkipSame(); }
 void uc1SendKeyJobs() { sendKeyJobs(); }
 void uc1RedrawNames() { if (g_open && !menuOn()) paintCentre(); }
 void uc1SendFavourites() { for (auto& f : favourites::messages()) sendMidi(std::move(f)); }
