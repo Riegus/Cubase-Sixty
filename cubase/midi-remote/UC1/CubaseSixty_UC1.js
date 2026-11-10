@@ -1734,7 +1734,7 @@ if (daMix && !TEST_NO_DA_LISTENERS) {
 
 // TEST (10.11.2026, V-pots not smooth): counts and times of the scans, logged every 10 s while anything happened;
 // with the switch on (Settings: test-skip-same-track, SysEx 5F), a repeated report of the same track is skipped.
-var skipSameTrack = false
+var skipSameTrack = true   // (as in the UF1 script: Cubase's repeats of the same track are skipped)
 var lastTrackId = -2
 var scanStat = { since: 0, titles: 0, skipped: 0, objChanges: 0, mixObjChanges: 0, rescans: 0, rescanMs: 0, rescanMax: 0, mixScans: 0, mixMs: 0, mixMax: 0 }
 function scanStats() {

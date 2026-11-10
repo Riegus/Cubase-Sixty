@@ -154,7 +154,7 @@ void sendKeyJobs()
 // TEST: skip the rescans on repeated track reports (Settings: test-skip-same-track), SysEx 5F <1 / 0>.
 void sendSkipSame()
 {
-    sysex({0x5F, uint8_t(settings::get("test-skip-same-track", "off") == "on" ? 1 : 0)});
+    sysex({0x5F, uint8_t(settings::get("test-skip-same-track", "on") == "on" ? 1 : 0)});
 }
 void sendKnobStep()
 {

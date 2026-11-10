@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.5-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.6-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -776,7 +776,10 @@ function stepCheckLanding() {
 	out('[CubaseSixty UF1] track step: on a track without a channel ("' + selectedInfo.title + '"); one ' + (beyond ? 'more' : 'back'))
 	trackAction(beyond === (p.dir > 0)).trigger(plugAm)
 }
-var skipSameTrack = false   // TEST (Settings: test-skip-same-track, SysEx 5F)
+// Cubase reports the selected track again while one of its values changes (a send: about every 0.8 s); handled as a
+// new track, each report put the pan back on the value line in the middle of a send turn (10.11.2026). Repeats of
+// the same track are skipped (on by default; the TEST switch on the Settings page can still turn it off).
+var skipSameTrack = true
 var lastTrackId = -2
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
