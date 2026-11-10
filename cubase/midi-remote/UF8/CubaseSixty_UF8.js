@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.13.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.14.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -64,26 +64,50 @@ deviceDriver
 var surface = deviceDriver.mSurface
 
 // ---------------------------------------------------------------------------
-// Surface layout (a simple on-screen picture of the UF8)
+// Surface layout: the on-screen picture of the UF8 in Cubase's MIDI Remote tab. Positions are those of Rea-Sixty's
+// drawing of the UF8 (1000 x 490, its settings window, from SSL's user guide), divided by 20. Keys the bridge
+// handles itself are plain panels (they have no element here). Elements that are not a key of their own (commands
+// and modes the bridge sends: encoder modes, routes, SEL in AUTO, ...) sit small in rows below the unit.
 // ---------------------------------------------------------------------------
+
+function px(v) { return v / 20 }
+var cmdCount = 0
+function cmdButton() {
+	var n = cmdCount++
+	return surface.makeButton(px(10 + (n % 40) * 24.5), px(500 + Math.floor(n / 40) * 24.5), px(22), px(22))
+}
+function panel(x, y, w, h) { surface.makeBlindPanel(px(x), px(y), px(w), px(h)) }
+// Left panel: LAYER 1-3, Q1-Q3, 360, the soft-key pages, PLUGIN / CHANNEL, FLIP.
+for (var lq = 0; lq < 3; ++lq) { panel(15, 22 + lq * 26, 36, 22); panel(57, 22 + lq * 26, 36, 22) }
+panel(15, 108, 78, 24)
+for (var sp = 0; sp < 8; ++sp) panel(13 + (sp % 2) * 42, 152 + Math.floor(sp / 2) * 26, 38, 22)
+panel(13, 260, 50, 22); panel(67, 260, 50, 22)
+panel(13, 326, 104, 22)
+// Right panel: soft-key banks, PAN / FINE, NORM / REC / AUTO, the CHANNEL encoder, NAV / NUDGE / FOCUS.
+for (var sb = 0; sb < 6; ++sb) panel(852 + (sb % 3) * 46, 22 + Math.floor(sb / 3) * 24, 41, 20)
+panel(852, 80, 64, 22); panel(921, 80, 64, 22)
+panel(852, 128, 43, 20); panel(899, 128, 43, 20); panel(946, 128, 39, 20)
+surface.makeBlindPanel(px(886), px(168), px(64), px(64))
+panel(852, 244, 44, 22); panel(898, 244, 44, 22); panel(944, 244, 41, 22)
 
 var STRIPS = 8
 var strips = []
 
 for (var i = 0; i < STRIPS; ++i) {
-	var x = i * 3
+	var sx = 138 + i * 87   // the strip's left edge
 	var strip = {}
 
-	strip.select = surface.makeButton(x, 0, 2, 1)
-	strip.solo = surface.makeButton(x, 1, 1, 1)
-	strip.cut = surface.makeButton(x + 1, 1, 1, 1)
-	strip.vpot = surface.makeKnob(x, 2, 2, 2)
-	strip.fader = surface.makeFader(x, 4, 2, 8)
+	strip.softKey = surface.makeButton(px(sx + 6), px(12), px(68), px(22))
+	panel(sx + 4, 40, 72, 58)   // the colour display
+	strip.vpot = surface.makeKnob(px(sx + 22), px(106), px(36), px(36))
+	strip.solo = surface.makeButton(px(sx + 8), px(152), px(64), px(16))
+	strip.cut = surface.makeButton(px(sx + 8), px(172), px(64), px(16))
+	strip.select = surface.makeButton(px(sx + 8), px(192), px(64), px(16))
+	strip.fader = surface.makeFader(px(sx + 28), px(220), px(24), px(220))
 	strip.faderTouch = surface.makeCustomValueVariable('faderTouch' + (i + 1))
-	strip.vpush = surface.makeButton(x, 12, 2, 1)
-	strip.softKey = surface.makeButton(x, 13, 2, 1)
+	strip.vpush = cmdButton()   // (the V-pot's push)
 	// SEL in the AUTO selection mode (the bridge sends it on its own note): the track's automation Write.
-	strip.autoWrite = surface.makeButton(x, 15, 2, 1)
+	strip.autoWrite = cmdButton()
 
 	strip.select.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput).setOutputPort(midiOutput)
@@ -117,11 +141,12 @@ for (var i = 0; i < STRIPS; ++i) {
 	strips.push(strip)
 }
 
-var bankLeft = surface.makeButton(0, 14, 2, 1)
-var bankRight = surface.makeButton(2, 14, 2, 1)
-var stopButton = surface.makeButton(6, 14, 2, 1)
-var playButton = surface.makeButton(8, 14, 2, 1)
-var recordButton = surface.makeButton(10, 14, 2, 1)
+var bankLeft = surface.makeButton(px(870), px(314), px(42), px(22))
+var bankRight = surface.makeButton(px(922), px(314), px(42), px(22))
+// (The UF8 has no transport keys: these come from the bridge.)
+var stopButton = cmdButton()
+var playButton = cmdButton()
+var recordButton = cmdButton()
 
 bankLeft.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 46)
 bankRight.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 47)
@@ -182,7 +207,7 @@ function paintStripName(activeDevice, index) {
 }
 ;(function () {
 	function key(note, sub, apply) {
-		var k = surface.makeButton(30 + (note - 80) % 6, 15 + Math.floor((note - 80) / 6), 1, 1)
+		var k = cmdButton()
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, note)
 		page.makeActionBinding(k.mSurfaceValue, sub.mAction.mActivate)
 		sub.mOnActivate = function (activeDevice) { apply(); routeChanged(activeDevice) }
@@ -425,8 +450,8 @@ for (var i = 0; i < STRIPS; ++i) {
 }
 
 // Automation Read / Write act on the selected track (the UF8 buttons are global).
-var autoRead = surface.makeButton(12, 14, 2, 1)
-var autoWrite = surface.makeButton(14, 14, 2, 1)
+var autoRead = surface.makeButton(px(48), px(372), px(33), px(22))
+var autoWrite = surface.makeButton(px(83), px(372), px(33), px(22))
 autoRead.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 56)
 autoWrite.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 57)
 var selectedTrack = page.mHostAccess.mTrackSelection.mMixerChannel
@@ -442,8 +467,8 @@ page.makeValueBinding(playButton.mSurfaceValue, transport.mStart).setTypeToggle(
 page.makeValueBinding(recordButton.mSurfaceValue, transport.mRecord).setTypeToggle()
 
 // Foot switches 1 and 2: play and record.
-var foot1 = surface.makeButton(16, 14, 2, 1)
-var foot2 = surface.makeButton(18, 14, 2, 1)
+var foot1 = surface.makeButton(px(13), px(442), px(50), px(22))
+var foot2 = surface.makeButton(px(67), px(442), px(50), px(22))
 foot1.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 62)
 foot2.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 63)
 page.makeValueBinding(foot1.mSurfaceValue, transport.mStart).setTypeToggle()
@@ -614,7 +639,7 @@ for (var nm = 1; nm <= 8; ++nm) {
 // After a cycle marker is recalled (which only sets the locators), the cursor goes to its start.
 encoderCommands.push({ note: 26, category: 'Transport', command: 'To Left Locator' })
 for (var ec = 0; ec < encoderCommands.length; ++ec) {
-	var encButton = surface.makeButton(ec, 16, 1, 1)
+	var encButton = cmdButton()
 	encButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, encoderCommands[ec].note)
 	page.makeCommandBinding(encButton.mSurfaceValue, encoderCommands[ec].category, encoderCommands[ec].command)
 }
@@ -629,7 +654,9 @@ var zoomKeys = [
 	{ note: 76, category: 'Zoom', command: 'Zoom Out Vertically' }
 ]
 for (var z = 0; z < zoomKeys.length; ++z) {
-	var zoomButton = surface.makeButton(20 + z, 14, 1, 1)
+	// The cursor pad: up, left, centre, right, down.
+	var zoomAt = [[901, 374], [864, 406], [901, 406], [938, 406], [901, 438]][z]
+	var zoomButton = surface.makeButton(px(zoomAt[0]), px(zoomAt[1]), px(34), px(26))
 	zoomButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, zoomKeys[z].note)
 	page.makeCommandBinding(zoomButton.mSurfaceValue, zoomKeys[z].category, zoomKeys[z].command)
 }
@@ -638,8 +665,8 @@ for (var z = 0; z < zoomKeys.length; ++z) {
 // Page left / right (notes 44 / 45): move the bank by one channel instead of eight.
 // ---------------------------------------------------------------------------
 
-var pageLeft = surface.makeButton(26, 14, 1, 1)
-var pageRight = surface.makeButton(27, 14, 1, 1)
+var pageLeft = surface.makeButton(px(13), px(300), px(50), px(22))
+var pageRight = surface.makeButton(px(67), px(300), px(50), px(22))
 pageLeft.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 44)
 pageRight.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 45)
 page.makeActionBinding(pageLeft.mSurfaceValue, bankZone.mAction.mShiftLeft)
@@ -659,7 +686,9 @@ var autoModes = [
 	{ note: 61, command: 'Automation Mode - Touch' }
 ]
 for (var a = 0; a < autoModes.length; ++a) {
-	var modeButton = surface.makeButton(28 + a, 15, 1, 1)
+	// OFF, TRIM, LATCH, TOUCH (READ / WRITE are above)
+	var modeAt = [[13, 372], [13, 396], [48, 396], [83, 396]][a]
+	var modeButton = surface.makeButton(px(modeAt[0]), px(modeAt[1]), px(33), px(22))
 	modeButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, autoModes[a].note)
 	page.makeCommandBinding(modeButton.mSurfaceValue, 'Automation', autoModes[a].command)
 }
@@ -867,7 +896,7 @@ var followQuietUntil = 0
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x12]).concat(two(total)).concat(two(offset)).concat([0xF7]))
 	}
 	followOnStripTitle = function (activeDevice) { reportBank(activeDevice) }
-	var resetKey = surface.makeButton(36, 14, 1, 1)
+	var resetKey = cmdButton()
 	resetKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 79)
 	page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank)
 	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script

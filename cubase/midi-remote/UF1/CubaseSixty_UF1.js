@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.23.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.24.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -49,15 +49,37 @@ deviceDriver
 var surface = deviceDriver.mSurface
 
 // ---------------------------------------------------------------------------
-// Surface layout
+// Surface layout: the on-screen picture of the UF1 in Cubase's MIDI Remote tab. Positions are those of Rea-Sixty's
+// drawing of the UF1 (600 x 680, its settings window), divided by 20. Keys the bridge handles itself are plain
+// panels. Elements that are not a key of their own (commands and modes the bridge sends: jog modes, shuttle speeds,
+// SHIFT functions, ...) sit small in rows below the unit.
 // ---------------------------------------------------------------------------
 
-var fader = surface.makeFader(0, 4, 2, 8)
+function px(v) { return v / 20 }
+var cmdCount = 0
+function cmdButton() {
+	var n = cmdCount++
+	return surface.makeButton(px(10 + (n % 24) * 24.5), px(690 + Math.floor(n / 24) * 24.5), px(22), px(22))
+}
+function panel(x, y, w, h) { surface.makeBlindPanel(px(x), px(y), px(w), px(h)) }
+panel(34, 22, 54, 20)        // SOFT
+panel(26, 48, 124, 106)      // the small screen
+for (var ds = 0; ds < 4; ++ds) panel(242.5 + ds * 95 - 38, 22, 76, 20)   // the display soft keys
+panel(195, 50, 380, 150)     // the screen
+panel(228, 296, 80, 80)      // CHANNEL encoder
+panel(360, 266, 52, 24); panel(416, 266, 52, 24); panel(490, 266, 38, 24); panel(530, 266, 38, 24)   // MODE, 5-8, ARROW
+panel(360, 300, 38, 24); panel(400, 300, 38, 24); panel(530, 300, 40, 24)   // BANK, SCRUB
+panel(422, 392, 120, 120)    // jog wheel
+panel(204, 572, 48, 28); panel(257, 572, 48, 28); panel(363, 572, 48, 28); panel(469, 572, 48, 28)   // < > CLICK 2
+panel(523, 572, 46, 28)      // SHIFT
+panel(16, 592, 52, 24); panel(72, 592, 52, 24)   // FOOT 1 / 2
+
+var fader = surface.makeFader(px(108), px(214), px(24), px(262))
 var faderTouch = surface.makeCustomValueVariable('faderTouch')
-var solo = surface.makeButton(3, 1, 1, 1)
-var cut = surface.makeButton(4, 1, 1, 1)
-var sel = surface.makeButton(5, 1, 1, 1)
-var vpot = surface.makeKnob(0, 2, 2, 2)
+var solo = surface.makeButton(px(26), px(214), px(56), px(24))
+var cut = surface.makeButton(px(26), px(242), px(56), px(24))
+var sel = surface.makeButton(px(26), px(270), px(56), px(24))
+var vpot = surface.makeKnob(px(72), px(164), px(32), px(32))
 
 fader.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToPitchBend(0)
 faderTouch.mMidiBinding
@@ -70,7 +92,8 @@ vpot.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, 1
 
 // Transport keys (notes 86/87/91..95), with LED feedback.
 function transportButton(x, note) {
-	var button = surface.makeButton(x, 13, 1, 1)
+	// RWD FFW STOP PLAY REC along the bottom; CYCLE is the third key of the row above.
+	var button = x < 5 ? surface.makeButton(px(204 + x * 82.75), px(608), px(34), px(34)) : surface.makeButton(px(310), px(572), px(48), px(28))
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, note)
 	return button
 }
@@ -131,7 +154,8 @@ try {
 }
 
 function activatorButton(x, note, subPage) {
-	var button = surface.makeButton(x, 7, 1, 1)
+	// MASTER and FLIP have their keys; the other two combinations come from the bridge.
+	var button = x === 1 ? surface.makeButton(px(26), px(522), px(56), px(26)) : x === 4 ? surface.makeButton(px(26), px(492), px(56), px(26)) : cmdButton()
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
 	page.makeActionBinding(button.mSurfaceValue, subPage.mAction.mActivate)
 }
@@ -334,12 +358,12 @@ try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { out('
 
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
-	var sendKnob = surface.makeKnob(6 + sendIndex * 2, 2, 2, 2)
+	var sendKnob = surface.makeKnob(px(222.5 + sendIndex * 95), px(208), px(40), px(40))
 	sendKnob.mSurfaceValue.mMidiBinding
 		.setInputPort(midiInput)
 		.bindToControlChange14Bit(0, 17 + sendIndex)   // absolute, 14 bit (CC 17-20 + 49-52): the bridge owns the turn
 		.setTypeAbsolute()
-	var sendPush = surface.makeButton(6 + sendIndex * 2, 4, 2, 1)
+	var sendPush = cmdButton()   // (the V-pot's push)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
 	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
 	var banks = [{ subPage: sends14, index: sendIndex }, { subPage: sends58, index: sendIndex + 4 }]
@@ -666,7 +690,7 @@ stripMasterFlip.mOnActivate = function (activeDevice) { stripActivated(activeDev
 // ---------------------------------------------------------------------------
 
 function pulseButton(x, note) {
-	var button = surface.makeButton(x, 6, 1, 1)
+	var button = cmdButton()
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
 	return button
 }
@@ -680,7 +704,7 @@ page.makeCommandBinding(trackNext.mSurfaceValue, 'Project', 'Select Track: Next'
 page.makeCommandBinding(jogLeft.mSurfaceValue, 'Transport', 'Nudge Cursor Left')
 // Quick key 1 (without SHIFT) = clear every solo, as in Rea-Sixty: MIDI channel 2, note 20 (channel 1's notes
 // near the transport keys started playback, see the key above the display).
-var soloClear = surface.makeButton(12, 6, 1, 1)
+var soloClear = surface.makeButton(px(416), px(572), px(48), px(28))   // quick key 1
 soloClear.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 20)
 page.makeCommandBinding(soloClear.mSurfaceValue, 'Edit', 'Deactivate All Solo')
 page.makeCommandBinding(jogRight.mSurfaceValue, 'Transport', 'Nudge Cursor Right')
@@ -702,7 +726,7 @@ var shuttleSpeeds = ['Reverse 8x', 'Reverse 4x', 'Reverse 2x', 'Reverse 1x', 'Re
 	'1/8x', '1/4x', '1/2x', '1x', '2x', '4x', '8x']
 for (var sp = 0; sp < shuttleSpeeds.length; ++sp) moreTransport.push({ note: 65 + sp, command: 'Shuttle Play ' + shuttleSpeeds[sp] })
 for (var mt = 0; mt < moreTransport.length; ++mt) {
-	var mtButton = surface.makeButton(mt, 9, 1, 1)
+	var mtButton = cmdButton()
 	mtButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, moreTransport[mt].note)
 	page.makeCommandBinding(mtButton.mSurfaceValue, 'Transport', moreTransport[mt].command)
 }
@@ -721,7 +745,9 @@ var navKeys = [
 	{ note: 52, category: 'Zoom', command: 'Zoom Out Vertically' }
 ]
 for (var n = 0; n < navKeys.length; ++n) {
-	var navButton = surface.makeButton(4 + n, 6, 1, 1)
+	// The NAV cross: up, left, centre, right, down.
+	var navAt = [[252, 408, 32, 30], [212, 442, 36, 32], [252, 442, 32, 32], [288, 442, 36, 32], [252, 476, 32, 30]][n]
+	var navButton = surface.makeButton(px(navAt[0]), px(navAt[1]), px(navAt[2]), px(navAt[3]))
 	navButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, navKeys[n].note)
 	page.makeCommandBinding(navButton.mSurfaceValue, navKeys[n].category, navKeys[n].command)
 }
@@ -745,7 +771,7 @@ var jogCommands = [
 	[54, 'Zoom', 'Zoom to Selection'], [55, 'Zoom', 'Undo Zoom']
 ]
 for (var jc = 0; jc < jogCommands.length; ++jc) {
-	var jogKey = surface.makeButton(jc % 13, 14 + Math.floor(jc / 13), 1, 1)
+	var jogKey = cmdButton()
 	jogKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, jogCommands[jc][0])
 	page.makeCommandBinding(jogKey.mSurfaceValue, jogCommands[jc][1], jogCommands[jc][2])
 }
@@ -757,7 +783,7 @@ for (var jc = 0; jc < jogCommands.length; ++jc) {
 // ---------------------------------------------------------------------------
 
 function noteButton(x, note) {
-	var button = surface.makeButton(x, 8, 1, 1)
+	var button = cmdButton()
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
 	return button
 }
@@ -842,7 +868,7 @@ try {
 					updateLed(activeDevice)
 				}
 			})(slot, k)
-			var slotKey = surface.makeButton(k, 10, 1, 1)
+			var slotKey = cmdButton()
 			slotKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, k)
 			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
 		}
@@ -874,7 +900,7 @@ try {
 		lastTime = time
 		midiOutput.sendMidi(arguments[0], SYSEX_HEADER.concat([0x0D], toAscii7(time), [0xF7]))
 	}
-	var formatKey = surface.makeButton(7, 1, 1, 1)
+	var formatKey = surface.makeButton(px(490), px(300), px(38), px(24))   // the 360 key
 	formatKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 55)
 	var holders = [locator.mAction, locator.mActions, primary.mAction, primary.mActions]
 	var names = ['mNextTimeFormat', 'mCycleTimeFormat', 'mCycleTimeFormats', 'mNextFormat']

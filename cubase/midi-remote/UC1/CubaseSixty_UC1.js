@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.14.0-dev'
+var SCRIPT_VERSION = '0.15.0-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -60,6 +60,43 @@ deviceDriver
 	.expectOutputNameEquals('Cubase-Sixty UC1 from Cubase')
 
 var surface = deviceDriver.mSurface
+
+// The on-screen picture of the UC1 in Cubase's MIDI Remote tab. Positions are those of Rea-Sixty's drawing of the
+// UC1 (860 x 660, its settings window), divided by 20. The knobs and most keys are the bridge's (they have no element
+// here): plain panels. SOLO, CUT and the polarity key are keys of their own; the rest of this script's elements are
+// switches and commands the bridge sends, small in rows below the unit.
+function px(v) { return v / 20 }
+var cmdCount = 0
+function cmdSlot() {
+	var n = cmdCount++
+	return [px(10 + (n % 34) * 24.5), px(670 + Math.floor(n / 34) * 24.5), px(22), px(22)]
+}
+function cmdButton() { var a = cmdSlot(); return surface.makeButton(a[0], a[1], a[2], a[3]) }
+function cmdKnob() { var a = cmdSlot(); return surface.makeKnob(a[0], a[1], a[2], a[3]) }
+function panel(x, y, w, h) { surface.makeBlindPanel(px(x), px(y), px(w), px(h)) }
+function knobPanel(cx, cy, r) { panel(cx - r, cy - r, 2 * r, 2 * r) }
+;(function () {
+	// Channel strip (left): filters, HF, HMF, LMF, LF, with their BELL / IN / TYPE keys.
+	var knobs = [[82, 44], [162, 70], [82, 160], [162, 188], [82, 260], [162, 288], [82, 328], [82, 430], [162, 458],
+		[82, 498], [162, 558], [82, 598]]
+	for (var i = 0; i < knobs.length; ++i) knobPanel(knobs[i][0], knobs[i][1], 20)
+	panel(145, 140, 34, 18); panel(145, 370, 34, 18); panel(183, 370, 34, 18); panel(145, 620, 34, 18)
+	// Bus comp (centre top): the gain-reduction meter, its knobs, IN; INPUT / OUTPUT.
+	panel(332, 44, 196, 80)
+	var bc = [[370, 172], [490, 172], [370, 240], [490, 240], [370, 308], [370, 376], [490, 376], [310, 376], [550, 376]]
+	for (var b = 0; b < bc.length; ++b) knobPanel(bc[b][0], bc[b][1], 20)
+	panel(470, 288, 40, 40)
+	// Central control: 7-segment display, screen, 360 / MAGNIFY, the two encoders.
+	panel(264, 454, 56, 30); panel(328, 452, 222, 76)
+	panel(340, 540, 80, 22); panel(440, 540, 80, 22)
+	knobPanel(390, 585, 18); knobPanel(470, 585, 18)
+	// Dynamics (right): FAST ATK / PEAK, compressor, gate / expander, S/C LISTEN, channel IN.
+	panel(772, 24, 66, 22); panel(772, 50, 66, 22)
+	var dyn = [[678, 100], [774, 128], [678, 168], [678, 324], [774, 352], [678, 392], [774, 420]]
+	for (var d = 0; d < dyn.length; ++d) knobPanel(dyn[d][0], dyn[d][1], 20)
+	panel(661, 235, 34, 22); panel(645, 462, 66, 22); panel(645, 488, 66, 22)
+	panel(632, 574, 96, 26); panel(776, 547, 40, 40)
+})()
 
 // ---------------------------------------------------------------------------
 // UC1 control ids (Rea-Sixty extension/src/UC1Protocol.h)
@@ -204,7 +241,9 @@ var da = page.mHostAccess.makeDirectAccess(selected)
 
 // Note-bound keys (the bridge sends these as notes, with the LED coming back the same way).
 function noteButton(x, note) {
-	var button = surface.makeButton(x, 0, 1, 1)
+	// SOLO, CUT (bottom right, under the polarity key), polarity
+	var at = [[632, 608, 46, 26], [682, 608, 46, 26], [632, 540, 96, 26]][x]
+	var button = surface.makeButton(px(at[0]), px(at[1]), px(at[2]), px(at[3]))
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, note)
 	return button
 }
@@ -214,7 +253,7 @@ try {
 	page.makeValueBinding(noteButton(2, B.Polarity).mSurfaceValue, selected.mPreFilter.mPhaseSwitch).setTypeToggle()
 } catch (e) { log('polarity could not be bound: ' + e) }
 function commandButton(x, note, category, command) {
-	var button = surface.makeButton(x, 1, 1, 1)
+	var button = cmdButton()
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
 	page.makeCommandBinding(button.mSurfaceValue, category, command)
 }
@@ -553,7 +592,7 @@ var stripOn = { gate: -1, comp: -1 }   // the modules' on switches as Cubase rep
 try {
 	var stripFx = selected.mInsertAndStripEffects.mStripEffects
 	var bindOn = function (x, cc, kind, hostValue) {
-		var k = surface.makeKnob(x, 3, 1, 1)
+		var k = cmdKnob()
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
 		page.makeValueBinding(k.mSurfaceValue, hostValue)
 		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
@@ -837,7 +876,7 @@ var CC_INSERT_BYPASS = 80, CC_MIXCONSOLE = 99
 var insertEditOpen = [], channelEditOpen = 0, insertBypassed = []
 try {
 	var bindCc = function (x, y, cc, hostValue, onChange) {
-		var k = surface.makeKnob(x, y, 1, 1)
+		var k = cmdKnob()
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
 		page.makeValueBinding(k.mSurfaceValue, hostValue)
 		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) { onChange(value) }
@@ -852,7 +891,7 @@ try {
 	bindCc(0, 5, CC_CHANNEL_EDIT, track.mEditorOpen, function (v) { channelEditOpen = v })
 } catch (e) { log('window switches could not be bound: ' + e) }
 try {
-	var mixKey = surface.makeButton(16, 4, 1, 1)
+	var mixKey = cmdButton()
 	mixKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, CC_MIXCONSOLE)
 	// The MixConsole keeps its old internal name: Devices > Mixer (Cubase 15's Key Commands.xml, checked 9.11.2026).
 	page.makeCommandBinding(mixKey.mSurfaceValue, 'Devices', 'Mixer')
