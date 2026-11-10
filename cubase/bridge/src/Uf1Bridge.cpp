@@ -1799,8 +1799,13 @@ void uf1SetStripNumber(int n)
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
+bool helperSend(const std::vector<unsigned char>& msg);   // main.cpp
 bool uf1StepTrack(int dir)
 {
+    // The helper script selects the next / previous channel directly (folders, collapsed or not, and hidden
+    // channels are not in its list); the UF1 script's counting of next / previous track triggers only if the
+    // helper's ports are not there.
+    if (helperSend({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7})) return true;
     if (!g_portsOpen) return false;
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5C, uint8_t(dir > 0 ? 1 : 0), 0xF7});
     return true;

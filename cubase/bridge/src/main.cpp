@@ -1198,6 +1198,18 @@ void uf8Poll()
     g_uf8MissingSaid = !uf8Connect(g_uf8MissingSaid);
 }
 
+// To the helper script (track steps: Uf1Bridge.cpp). False if its ports are not open.
+namespace cs {
+bool helperSend(const std::vector<unsigned char>& msg)
+{
+    if (!g_helperOpen) return false;
+    std::vector<unsigned char> copy = msg;
+    std::lock_guard<std::mutex> lk(g_helperMx);
+    try { g_helperOut.send(copy); } catch (const RtMidiError& e) { std::fprintf(stderr, "helper out: %s\n", e.getMessage().c_str()); return false; }
+    return true;
+}
+} // namespace cs
+
 int main(int argc, char** argv)
 {
     cs::redirectTempToLogs(argc > 0 ? argv[0] : nullptr);
