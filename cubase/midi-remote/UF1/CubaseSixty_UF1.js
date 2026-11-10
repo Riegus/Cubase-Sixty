@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.24.2-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.24.3-test (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -357,6 +357,54 @@ var quickControls = null
 try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { out('[CubaseSixty UF1] Quick Controls not available: ' + e) }
 
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
+// TEST (10.11.2026): send levels lag (known issue) and Cubase pauses ~0.8 s at a time while one is turned, whatever the
+// scripts do. V-pot 1 on send 1 writes the level through Direct Access instead of the MIDI Remote value binding;
+// V-pots 2-4 stay on the binding, for a side-by-side comparison. (Its display then comes from the bridge alone.)
+var TEST_SEND1_DA = true
+var send1Da = { base: -2, obj: -1, tag: -1, writes: 0, ms: 0, max: 0, since: 0 }
+function send1Find() {
+	var base = plugDa.getBaseObjectID(plugAm)
+	if (base === send1Da.base) return send1Da.obj >= 0
+	send1Da.base = base
+	send1Da.obj = send1Da.tag = -1
+	var n = plugDa.getNumberOfChildObjects(plugAm, base)
+	for (var i = 0; i < n; ++i) {
+		var id = plugDa.getChildObjectID(plugAm, base, i)
+		if (!/Sends/.test(plugDa.getObjectTypeName(plugAm, id))) continue
+		if (plugDa.getNumberOfChildObjects(plugAm, id) < 1) break
+		var slot = plugDa.getChildObjectID(plugAm, id, 0)
+		var np = plugDa.getNumberOfParameters(plugAm, slot)
+		var titles = []
+		for (var k = 0; k < np; ++k) {
+			var tag = plugDa.getParameterTagByIndex(plugAm, slot, k)
+			var t = plugDa.getParameterTitle(plugAm, slot, tag, 32)
+			titles.push(t)
+			if (send1Da.tag < 0 && /level|lev|gain|volume/i.test(t)) { send1Da.obj = slot; send1Da.tag = tag }
+		}
+		out('[CubaseSixty UF1] TEST send 1 through Direct Access: slot #' + slot + ' "' + plugDa.getObjectTitle(plugAm, slot) + '", parameters: ' + titles.join(', ') + (send1Da.tag >= 0 ? '; level tag ' + send1Da.tag : '; no level parameter found'))
+		break
+	}
+	return send1Da.obj >= 0
+}
+function send1Write(activeDevice, value) {
+	if (!plugDa || !plugAm || qcActive || sendOffset !== 0) return
+	try {
+		if (!send1Find()) return
+		var t0 = Date.now()
+		plugDa.setParameterProcessValue(plugAm, send1Da.obj, send1Da.tag, value)
+		var took = Date.now() - t0
+		var now = Date.now()
+		if (!send1Da.since) send1Da.since = now
+		++send1Da.writes
+		send1Da.ms += took
+		send1Da.max = Math.max(send1Da.max, took)
+		if (now - send1Da.since > 3000) {
+			out('[CubaseSixty UF1] TEST send 1 through Direct Access: ' + send1Da.writes + ' writes, ' + send1Da.ms + ' ms in all, longest ' + send1Da.max + ' ms')
+			send1Da.writes = send1Da.ms = send1Da.max = 0
+			send1Da.since = now
+		}
+	} catch (e) { out('[CubaseSixty UF1] TEST send 1 through Direct Access failed: ' + e) }
+}
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendKnob = surface.makeKnob(px(222.5 + sendIndex * 95), px(208), px(40), px(40))
 	sendKnob.mSurfaceValue.mMidiBinding
@@ -366,6 +414,15 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendPush = cmdButton()   // (the V-pot's push)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
 	attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
+	if (TEST_SEND1_DA && sendIndex === 0) {
+		;(function (sv) {
+			var before = sv.mOnProcessValueChange
+			sv.mOnProcessValueChange = function (activeDevice, value) {
+				if (before) before(activeDevice, value)
+				send1Write(activeDevice, value)
+			}
+		})(sendKnob.mSurfaceValue)
+	}
 	var banks = [{ subPage: sends14, index: sendIndex }, { subPage: sends58, index: sendIndex + 4 }]
 	if (quickControls) {
 		try {
@@ -384,7 +441,7 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 					if (!qcActive && slot >= sendOffset && slot < sendOffset + 4) refreshCellNames(activeDevice)
 				}
 			})(banks[bk].index)
-			page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
+			if (!(TEST_SEND1_DA && sendIndex === 0 && bk === 0)) page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
 			page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
 		} catch (e) {
 			out('[CubaseSixty UF1] send ' + (banks[bk].index + 1) + ' could not be bound: ' + e)
@@ -1472,7 +1529,7 @@ function stripFaderMove(activeDevice, v14) {
 // TEST (10.11.2026): Direct Access parameter / object listeners off. a03b82a (smooth V-pots) had none; every build
 // since added some (UC1: the selected track and the whole MixConsole; UF1: the selected track; UF8: its 8 strips).
 // With them off, displays that follow plug-in parameters changed with the mouse stop following.
-var TEST_NO_DA_LISTENERS = true
+var TEST_NO_DA_LISTENERS = false
 out('[CubaseSixty UF1] TEST: Direct Access listeners ' + (TEST_NO_DA_LISTENERS ? 'off' : 'on'))
 if (plugDa && !TEST_NO_DA_LISTENERS) {
 	plugDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {

@@ -93,7 +93,7 @@ panel(852, 244, 44, 22); panel(898, 244, 44, 22); panel(944, 244, 41, 22)
 // TEST (10.11.2026): Direct Access parameter / object listeners off. a03b82a (smooth V-pots) had none; every build
 // since added some (UC1: the selected track and the whole MixConsole; UF1: the selected track; UF8: its 8 strips).
 // With them off, displays that follow plug-in parameters changed with the mouse stop following.
-var TEST_NO_DA_LISTENERS = true
+var TEST_NO_DA_LISTENERS = false
 out('[CubaseSixty] TEST: Direct Access listeners ' + (TEST_NO_DA_LISTENERS ? 'off' : 'on'))
 var STRIPS = 8
 var strips = []
