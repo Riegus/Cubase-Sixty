@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include "Uf1Text.h"
 #include "Names.h"
 #include "Brightness.h"
 #include "Sleep.h"
@@ -221,6 +222,15 @@ std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed wi
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
 std::string levelTextFor(int pos);
+std::string sendCellValue(int k);   // the send's last level text from Cubase (its V-pot cell)
+// A value line as the UF1 shows it (and the UF8): the label on the left, the value right-aligned (Rea-Sixty's
+// uf1ValueLine: 11 label characters, 8 for the value). "Pan C" -> "Pan" + "C"; split at the last space.
+std::string alignedValueLine(const std::string& t)
+{
+    const size_t sp = t.rfind(' ');
+    if (t.empty() || sp == std::string::npos) return t;
+    return uf1ValueLine(std::string_view(t).substr(0, sp), std::string_view(t).substr(sp + 1));
+}
 void valueTemporary(const std::string& t);
 void barTemporary(uint8_t pos, uint8_t style);
 void paintSoftKeys();
@@ -509,8 +519,10 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             // DAW: the send on the left display while turning ("S1 -6.02dB" and its bar), from the bridge's own position
             // and its level curve. (It came from the send's binding until the levels went through Direct Access.)
             if (g_view == kViewDaw) {
-                const std::string t = levelTextFor(v);
-                valueTemporary("S" + std::to_string(int(k) + 1 + (g_sends58 ? 4 : 0)) + " " + (t.empty() ? "..." : t));
+                // Where the level curve is not known yet: the send's last level from Cubase (its cell), not "...".
+                std::string t = levelTextFor(v);
+                if (t.empty()) t = sendCellValue(int(k));
+                valueTemporary(alignedValueLine("S" + std::to_string(int(k) + 1 + (g_sends58 ? 4 : 0)) + " " + (t.empty() ? "-" : t)));
                 barTemporary(uint8_t(std::lround(v * 100.0 / 16383.0)), 0x02);
             }
             break;
@@ -724,6 +736,7 @@ void showSelLed()
 // cells show them only in SENDS (PLUGIN shows its own, below; DAW none).
 std::array<SendCell, 4> g_sendCells;
 std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
+std::string sendCellValue(int k) { std::lock_guard<std::mutex> lk(g_cellMx); return k >= 0 && k < 4 ? g_sendCells[size_t(k)].value : std::string(); }
 // PLUGIN view cells and soft keys (SysEx 51 / 52), under g_cellMx: the SSL plug-in's controls on the current
 // page, or (no SSL plug-in) the Quick Controls' names and values.
 struct PlugCell { std::string name, value; uint8_t pos = 0; bool used = false, bipolar = false; };
@@ -1222,7 +1235,7 @@ void screenText(uint16_t addr, const std::string& text)
 // kTemporaryMs after the last change, then the home view comes back. Called from the MIDI thread and the
 // revert thread, hence the mutex.
 // ---------------------------------------------------------------------------
-constexpr long long kTemporaryMs = 3000;
+constexpr long long kTemporaryMs = 2000;   // (3 s felt too long, 10.11.2026)
 constexpr long long kSelectionQuietMs = 500;
 std::mutex g_lineMx;
 std::string g_homeText;
@@ -1417,8 +1430,8 @@ void onSysex(const std::vector<unsigned char>& m)
         // Value line text. 04 = temporary (a send V-pot), 08 = home (pan).
         std::string t;
         for (size_t i = 5; i + 1 < m.size(); ++i) t.push_back(char(m[i]));
-        if (t.size() > 12) t.resize(12);
         if (g_trace) std::printf("UF1 value line (%s): \"%s\"\n", m[4] == 0x08 ? "home" : "temporary", t.c_str());
+        t = alignedValueLine(t);
         if (m[4] == 0x08) valueHome(t);
         else if (g_view != kViewSends) valueTemporary(t);   // SENDS: the send's cell shows it already
     } else if ((m[4] == 0x05 || m[4] == 0x09) && m.size() >= 7) {

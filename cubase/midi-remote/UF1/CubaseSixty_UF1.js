@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.7-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.8-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -1634,7 +1634,9 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	for (var sd = 0; sd < 4; ++sd) {
 		if (!sendDa.settleAt[sd] || t < sendDa.settleAt[sd]) continue
 		sendDa.settleAt[sd] = 0
-		try { sendDaShow(activeDevice, sd, true) } catch (e) {}
+		// The cell and the bridge's position only: the value line and bar are the bridge's while turning, and sending
+		// them again restarted its 3 s and moved the bar (10.11.2026).
+		try { sendDaShow(activeDevice, sd, false) } catch (e) {}
 	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0

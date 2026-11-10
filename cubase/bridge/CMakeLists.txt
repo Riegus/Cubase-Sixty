@@ -86,7 +86,8 @@ add_executable(cubase_sixty_bridge
     ${EXT_SRC}/SslCoreImpersonator.cpp
     ${EXT_SRC}/SslMeterProtocol.cpp
     ${EXT_SRC}/Uf1EqCurve.cpp
-    ${EXT_SRC}/TrackName.cpp)
+    ${EXT_SRC}/TrackName.cpp
+    ${EXT_SRC}/Uf1Text.cpp)
 # The Settings page (src/settings-page.html) goes into the bridge as C++ string pieces (MSVC limits one literal to
 # 16 KB): build/gen/SettingsPage.inc, made again whenever the page changes.
 set(CS_PAGE "${CMAKE_CURRENT_SOURCE_DIR}/src/settings-page.html")
