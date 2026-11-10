@@ -17,3 +17,7 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   reads, the insert viewer. Still slow (9.11.2026). Measured since: Cubase reports a new selection 0.7-0.9 s after
   the step (bridge.log), so the UF1's name and values follow that late. May be the same regression as the V-pots
   (above): to look at together. See [Banking and track stepping](banking.md).
+  10.11.2026: much better after unticking **In 'All MIDI Inputs'** for the Cubase-Sixty ports (it had been on for
+  all of them): new track reported 20-300 ms after a step, mostly, instead of 600-800 ms. A Mackie Control test
+  showed Cubase selects within 1-20 ms; what lags is Cubase being busy after each selection change (the scripts'
+  per-track work among it). Watch whether it stays quick.
