@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.1-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.2-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -351,8 +351,8 @@ var qc14 = sendArea.makeSubPage('Quick Controls 1-4')
 var qc58 = sendArea.makeSubPage('Quick Controls 5-8')
 var sendOffset = 0
 var qcActive = false
-sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false; refreshCellNames(activeDevice); sendDa.refreshAt = Date.now() + 50 }
-sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false; refreshCellNames(activeDevice); sendDa.refreshAt = Date.now() + 50 }
+sends14.mOnActivate = function (activeDevice) { sendOffset = 0; qcActive = false; refreshCellNames(activeDevice) }
+sends58.mOnActivate = function (activeDevice) { sendOffset = 4; qcActive = false; refreshCellNames(activeDevice) }
 // After a switch between 1-4 and 5-8 the cells are sent once more a moment later, when Cubase has reported the
 // new Quick Controls (the order of its callbacks and the activation is not fixed).
 var qcResendAt = 0
@@ -368,10 +368,12 @@ try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { out('
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
 // Send levels go to Cubase through Direct Access, not through MIDI Remote value bindings (10.11.2026): with a
 // binding on a send level Cubase paused ~0.8 s at a time while it kept changing (answering about 1 step in 20); a
-// write with setParameterProcessValue on the send slot's level was smooth. The level is read back the same way for
-// the display: after a turn, on a change made elsewhere (mOnParameterChange) and when the track or page changes.
-// The send's on / off (V-pot push) and names stay on the bindings.
-var sendDa = { base: -2, slots: [], tags: {}, show: [], refreshAt: 0, logged: {} }
+// write with setParameterProcessValue on the send slot's level was smooth. So the bridge sends a send turn on CC
+// 21-24 (+ 53-56, 14 bit) to a custom value of the script, which writes the slot's level; the V-pot knobs (CC 17-20)
+// stay bound to the send levels for the display (names, levels, mouse changes, track and page changes), and the bridge
+// no longer moves them in DAW / SENDS. (Left without a binding in a page, the knobs stopped the whole script at load:
+// "DukValue is uninitialized", 10.11.2026.)
+var sendDa = { base: -2, slots: [], tags: {}, logged: {} }
 function sendDaSlots() {
 	var base = plugDa.getBaseObjectID(plugAm)
 	if (base === sendDa.base) return sendDa.slots
@@ -420,21 +422,6 @@ function sendDaWrite(activeDevice, k, value) {
 		if (t) plugDa.setParameterProcessValue(plugAm, t[0], t[1], value)
 	} catch (e) { out('[CubaseSixty UF1] send ' + (sendOffset + k + 1) + ' level: ' + e) }
 }
-// Shows send k's level: the cell, the V-pot's position for the bridge, and (line = true) the value line.
-function sendDaShow(activeDevice, k, line) {
-	var t = sendDaTarget(k)
-	var show = sendDa.show[k]
-	if (!show) return
-	if (!t) { show.empty(activeDevice); return }
-	var value = plugDa.getParameterProcessValue(plugAm, t[0], t[1])
-	var text = plugDa.getParameterDisplayValue(plugAm, t[0], t[1])
-	var units = ''
-	try { units = plugDa.getParameterDisplayUnits(plugAm, t[0], t[1]) } catch (e) {}
-	show.level(activeDevice, value, text, units, line)
-}
-function sendDaRefresh(activeDevice) {
-	for (var k = 0; k < 4; ++k) { try { sendDaShow(activeDevice, k, false) } catch (e) {} }
-}
 for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendKnob = surface.makeKnob(px(222.5 + sendIndex * 95), px(208), px(40), px(40))
 	sendKnob.mSurfaceValue.mMidiBinding
@@ -444,28 +431,13 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	var sendPush = cmdButton()   // (the V-pot's push)
 	sendPush.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 33 + sendIndex)
 	var feedback = attachSendFeedback(sendKnob.mSurfaceValue, sendIndex + 1)
-	// Send levels through Direct Access (above): a turn from the bridge is written to the send slot; the display
-	// handlers are kept for showing what is read back.
-	;(function (sv, k, proc, disp) {
-		var cell = sendCells[k]
-		sendDa.show[k] = {
-			level: function (activeDevice, value, text, units, line) {
-				if (line) { proc(activeDevice, value); disp(activeDevice, text, units); return }
-				reportVpotPosition(activeDevice, k, value)
-				var v = String(text)
-				cell.value = v === '' ? '' : v + (units ? units : (/^-?[0-9.]+$/.test(v) ? 'dB' : ''))
-				cell.pos = Math.max(0, Math.min(100, Math.round(value * 100)))
-				sendCellInfo(activeDevice, k, cell)
-			},
-			empty: function (activeDevice) { cell.value = ''; cell.pos = 0; sendCellInfo(activeDevice, k, cell) }
-		}
-		sv.mOnProcessValueChange = function (activeDevice, value) {
-			proc(activeDevice, value)   // (Quick Controls in PLUGIN still come this way, from their bindings)
-			if (qcActive) return
-			sendDaWrite(activeDevice, k, value)
-			try { sendDaShow(activeDevice, k, true) } catch (e) {}
-		}
-	})(sendKnob.mSurfaceValue, sendIndex, feedback.process, feedback.display)
+	// Send levels through Direct Access (above): the bridge's turns in DAW / SENDS arrive here and are written to the
+	// send slot.
+	;(function (k) {
+		var write = surface.makeCustomValueVariable('sendWrite' + (k + 1))
+		write.mMidiBinding.setInputPort(midiInput).bindToControlChange14Bit(0, 21 + k).setTypeAbsolute()
+		write.mOnProcessValueChange = function (activeDevice, value) { if (!qcActive) sendDaWrite(activeDevice, k, value) }
+	})(sendIndex)
 	var banks = [{ subPage: sends14, index: sendIndex }, { subPage: sends58, index: sendIndex + 4 }]
 	if (quickControls) {
 		try {
@@ -478,6 +450,7 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	for (var bk = 0; bk < banks.length; ++bk) {
 		try {
 			var send = selectedChannel.mSends.getByIndex(banks[bk].index)
+			page.makeValueBinding(sendKnob.mSurfaceValue, send.mLevel).setSubPage(banks[bk].subPage)
 			;(function (slot) {
 				send.mOnTitleChange = function (activeDevice, activeMapping, name) {
 					sendNames[slot] = name || ''
@@ -773,7 +746,6 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	lastTrackId = trackId
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	sendDa.base = -2                   // the new track's sends
-	sendDa.refreshAt = Date.now() + 150
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
 	// Cubase reports the tracks a step passes too (folders among them), late: the landing is looked at once the
@@ -1583,17 +1555,11 @@ if (plugDa && !TEST_NO_DA_LISTENERS) {
 		if (objectID === plug.obj && stripMode.sent && stripMode.param && tag === stripMode.param.tag) stripFaderSend(activeDevice)
 		if (objectID === plug.obj && stripMode.panSent && stripMode.pan && tag === stripMode.pan.tag) stripPanSend(activeDevice)
 		if (objectID === cubaseEq.eq || objectID === cubaseEq.filter) cubaseEqSend(activeDevice)
-		// A send level changed (also by our own writes: harmless, the bridge keeps its own position while turning).
-		if (!qcActive) {
-			var slots = sendDa.slots
-			for (var sk = 0; sk < 4; ++sk) if (slots[sendOffset + sk] === objectID && sendDa.tags[objectID] === tag) { try { sendDaShow(activeDevice, sk, true) } catch (e) {} }
-		}
 	}
 	plugDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 		plugAm = activeMapping
 		plug.rescanAt = Date.now() + 300
 		sendDa.base = -2   // a send added or removed
-		sendDa.refreshAt = Date.now() + 300
 	}
 }
 page.mOnActivate = function (activeDevice, activeMapping) {
@@ -1601,7 +1567,6 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
 	plug.obj = -2   // look again and send everything
 	sendDa.base = -2
-	sendDa.refreshAt = Date.now() + 200
 	slotReported = null
 	plug.rescanAt = Date.now() + 200
 }
@@ -1645,10 +1610,6 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		idleStat.eqMax = Math.max(idleStat.eqMax, took)
 	}
 	windowIdle(activeDevice)
-	if (sendDa.refreshAt && t >= sendDa.refreshAt && plugDa) {
-		sendDa.refreshAt = 0
-		sendDaRefresh(activeDevice)
-	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
 		var scanT0 = Date.now()

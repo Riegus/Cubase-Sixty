@@ -495,7 +495,10 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             const int v = std::clamp(g_vpotPos[k] + ev.delta * (g_fine ? kVpotStep / 4 : kVpotStep), 0, 16383);
             g_vpotPos[k] = v;
             g_vpotOwnUntil[k] = nowMs() + 500;   // Cubase's echoes of our own turns are not taken back meanwhile
-            const uint8_t cc = uint8_t(uf1m::kCcEncoder + ev.id);
+            // DAW / SENDS: CC 21-24 (+ 53-56), which the script writes to the send slot through Direct Access (a send
+            // level through a MIDI Remote binding made Cubase pause ~0.8 s at a time, 10.11.2026); PLUGIN's Quick
+            // Controls: CC 17-20 (+ 49-52), their bindings.
+            const uint8_t cc = uint8_t(g_view == kViewPlugin ? uf1m::kCcEncoder + ev.id : 20 + ev.id);
             sendMidi({0xB0, cc, uint8_t((v >> 7) & 0x7F)});
             sendMidi({0xB0, uint8_t(cc + 32), uint8_t(v & 0x7F)});
             if (g_view == kViewSends || g_view == kViewPlugin) paintSendCells(false);
