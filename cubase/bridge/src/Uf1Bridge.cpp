@@ -1878,7 +1878,9 @@ void uf1SendEqPoll()
 {
     const bool on = settings::get("uf1-eq-poll", "on") != "off";
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5E, uint8_t(on ? 1 : 0), 0xF7});
-    std::printf("Turn test: UF1 EQ graph polling %s\n", on ? "on" : "off");
+    const bool skip = settings::get("test-skip-same-track", "off") == "on";
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x5F, uint8_t(skip ? 1 : 0), 0xF7});
+    std::printf("Turn test: UF1 EQ graph polling %s, repeated track reports %s\n", on ? "on" : "off", skip ? "skipped" : "rescanned");
 }
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).

@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.15.0-dev'
+var SCRIPT_VERSION = '0.15.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -1662,6 +1662,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		if (message[5] <= 2 && KEY_JOBS[message[6]]) { keyJob[message[5]] = KEY_JOBS[message[6]]; log('key ' + ['magnifier', '360', 'encoder push'][message[5]] + ': ' + keyJob[message[5]]) }
 		return
 	}
+	if (cmd === 0x5F) { skipSameTrack = message[5] !== 0; log('turn test: repeated track reports ' + (skipSameTrack ? 'skipped' : 'rescanned')); return }
 	if (cmd === 0x4E) { knobDiv = [128, 64, 32][message[5]] || 64; log('knob step: 1/' + knobDiv); return }   // Settings: UC1 knob steps
 	if (cmd === 0x4C) { if (!enc2.started) { enc2.started = true; enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder at start: ' + ENC2_MODES[enc2.mode].name) } return }
 	if (cmd === 0x4D && am) { try { extEvent(activeDevice, message[5], message[6] - 64) } catch (e) { log('EXT FUNCS: ' + e) } return }
@@ -1708,6 +1709,7 @@ da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 // Objects added or removed (a plug-in inserted, removed or replaced): look again shortly.
 da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 	am = activeMapping
+	++scanStat.objChanges
 	state.rescanAt = Date.now() + 300
 	state.mixScanAt = Date.now() + 500   // a bus comp added to the selected track belongs in the list too
 }
@@ -1720,12 +1722,34 @@ if (daMix) {
 	daMix.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 		am = activeMapping
 		if (++mixChanges <= 5) log('MixConsole object change #' + objectID)
+		++scanStat.mixObjChanges
 		state.mixScanAt = Date.now() + 500
 	}
 }
 
+// TEST (10.11.2026, V-pots not smooth): counts and times of the scans, logged every 10 s while anything happened;
+// with the switch on (Settings: test-skip-same-track, SysEx 5F), a repeated report of the same track is skipped.
+var skipSameTrack = false
+var lastTrackId = -2
+var scanStat = { since: 0, titles: 0, skipped: 0, objChanges: 0, mixObjChanges: 0, rescans: 0, rescanMs: 0, rescanMax: 0, mixScans: 0, mixMs: 0, mixMax: 0 }
+function scanStats() {
+	var now = Date.now()
+	var st = scanStat
+	if (!st.since) { st.since = now; return }
+	if (now - st.since < 10000) return
+	if (st.titles || st.objChanges || st.mixObjChanges || st.rescans || st.mixScans)
+		log('turn test: track reports ' + st.titles + (skipSameTrack ? ' (' + st.skipped + ' skipped)' : '') + ', object changes ' + st.objChanges +
+			', MixConsole object changes ' + st.mixObjChanges + '; track scans ' + st.rescans + ' (' + st.rescanMs + ' ms, longest ' + st.rescanMax +
+			'), MixConsole scans ' + st.mixScans + ' (' + st.mixMs + ' ms, longest ' + st.mixMax + ')')
+	scanStat = { since: now, titles: 0, skipped: 0, objChanges: 0, mixObjChanges: 0, rescans: 0, rescanMs: 0, rescanMax: 0, mixScans: 0, mixMs: 0, mixMax: 0 }
+}
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	am = activeMapping
+	var trackId = -1
+	try { trackId = da.getBaseObjectID(activeMapping) } catch (e) {}
+	++scanStat.titles
+	if (skipSameTrack && trackId === lastTrackId && title === state.trackName) { ++scanStat.skipped; return }
+	lastTrackId = trackId
 	state.trackName = title
 	picker = null
 	sysex(activeDevice, [0x30].concat(encodeName(title)))
@@ -1761,14 +1785,24 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	if (fav.commitAt && now >= fav.commitAt) { try { favCommit(activeDevice) } catch (e) { log('favourite swap: ' + e) } }
 	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0
+		var r0 = Date.now()
 		try { rescan(activeDevice) } catch (e) { log('scan failed: ' + e) }
+		var rTook = Date.now() - r0
+		++scanStat.rescans
+		scanStat.rescanMs += rTook
+		scanStat.rescanMax = Math.max(scanStat.rescanMax, rTook)
 	}
 	if (state.mixScanAt && now >= state.mixScanAt) {
 		state.mixScanAt = 0
 		var t0 = Date.now()
 		try { scanMixer(activeDevice) } catch (e) { log('MixConsole scan failed: ' + e) }
-		if (mixScans <= 3) log('MixConsole scan took ' + (Date.now() - t0) + ' ms')
+		var mTook = Date.now() - t0
+		if (mixScans <= 3) log('MixConsole scan took ' + mTook + ' ms')
+		++scanStat.mixScans
+		scanStat.mixMs += mTook
+		scanStat.mixMax = Math.max(scanStat.mixMax, mTook)
 	}
+	scanStats()
 }
 
 // Closing a project (Cubase shows the Hub) deactivates the driver, opening one activates it again: the bridge shows

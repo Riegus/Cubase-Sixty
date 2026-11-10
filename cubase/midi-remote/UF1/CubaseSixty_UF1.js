@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.24.1-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.24.2-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -497,6 +497,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
 	}
+	if (m[4] === 0x5F && m.length >= 7) {   // TEST: skip repeated track reports (Settings: test-skip-same-track)
+		skipSameTrack = m[5] !== 0
+		out('[CubaseSixty UF1] turn test: repeated track reports ' + (skipSameTrack ? 'skipped' : 'rescanned'))
+		return
+	}
 	if (m[4] === 0x5E && m.length >= 7) {   // TEST: EQ graph polling on / off (Settings: uf1-eq-poll)
 		eqPollOn = m[5] !== 0
 		out('[CubaseSixty UF1] turn test: EQ graph polling ' + (eqPollOn ? 'on' : 'off'))
@@ -654,9 +659,19 @@ function stepCheckLanding() {
 	out('[CubaseSixty UF1] track step: on a track without a channel ("' + selectedInfo.title + '"); one ' + (beyond ? 'more' : 'back'))
 	trackAction(beyond === (p.dir > 0)).trigger(plugAm)
 }
+var skipSameTrack = false   // TEST (Settings: test-skip-same-track, SysEx 5F)
+var lastTrackId = -2
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
+	// TEST: Cubase reports the selected track again while one of its values changes (a send turned: about every
+	// 0.8 s); each report used to rescan the track's plug-ins. With the switch on, a report of the same track (same
+	// object, same name) is skipped.
+	var trackId = -1
+	try { trackId = plugDa.getBaseObjectID(activeMapping) } catch (e) {}
+	++idleStat.titles
+	if (skipSameTrack && trackId === lastTrackId && title === selectedInfo.title) { ++idleStat.titlesSkipped; return }
+	lastTrackId = trackId
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	uc1Choice = null                   // the UC1 says again which strip it is on
 	selectedInfo.title = title
@@ -1480,7 +1495,7 @@ var eqPollAt = 0
 // page (SysEx 5E), and every 10 s the script logs how long the EQ reads took and the longest wait between two idle
 // calls (a long wait = Cubase busy, and the V-pots' values wait too).
 var eqPollOn = true
-var idleStat = { since: 0, last: 0, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0 }
+var idleStat = { since: 0, last: 0, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0 }
 function idleStats() {
 	var now = Date.now()
 	var st = idleStat
@@ -1490,8 +1505,10 @@ function idleStats() {
 	++st.calls
 	if (now - st.since < 10000) return
 	out('[CubaseSixty UF1] turn test: ' + st.calls + ' idle calls in ' + (now - st.since) + ' ms, longest wait ' + st.maxGap +
-		' ms; EQ polling ' + (eqPollOn ? 'on: ' + st.eqReads + ' reads, ' + st.eqMs + ' ms in all, longest ' + st.eqMax + ' ms' : 'off'))
-	idleStat = { since: now, last: now, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0 }
+		' ms; EQ polling ' + (eqPollOn ? 'on: ' + st.eqReads + ' reads, ' + st.eqMs + ' ms in all, longest ' + st.eqMax + ' ms' : 'off') +
+		'; track reports ' + st.titles + (skipSameTrack ? ' (' + st.titlesSkipped + ' skipped)' : '') + '; plug-in scans ' + st.scans +
+		', ' + st.scanMs + ' ms in all, longest ' + st.scanMax + ' ms')
+	idleStat = { since: now, last: now, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0 }
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	idleStats()
@@ -1515,7 +1532,12 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	windowIdle(activeDevice)
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
+		var scanT0 = Date.now()
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
+		var scanTook = Date.now() - scanT0
+		++idleStat.scans
+		idleStat.scanMs += scanTook
+		idleStat.scanMax = Math.max(idleStat.scanMax, scanTook)
 	}
 }
 
