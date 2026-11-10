@@ -10,7 +10,8 @@
 //   - The channels that can record (groups, FX, VCA, inputs and outputs excluded), up to 128: names, for the
 //     UF8's record-enable keys (SysEx 19 <slot> <name>).
 //   - Which of the first list's channels is selected, and track steps (SysEx 5C <1 forward / 0 back>, from the
-//     bridge): the next / previous channel of the list is selected directly (its mValue.mSelected). Cubase's own
+//     bridge): the next / previous channel of the list is selected directly (its mValue.mSelected); from a track
+//     that is not in the list (a folder, the Stereo Out), Cubase's own next / previous track first. Cubase's own
 //     next / previous track skips the tracks in collapsed folders and stops on folders; this does neither, and
 //     hidden channels are not in the list (the zone follows the MixConsole's visibility).
 //   - Whether any of the first list's channels is soloed (SysEx 1D <0 / 1>), for the UF1's SOLO ACTIVE: Cubase's
@@ -98,21 +99,34 @@ function sendSolo(activeDevice) {
 // Track steps: which channel is selected (-1: none of the list, e.g. a folder or the Stereo Out), the last one that
 // was, and the last step's target (a quick next press counts from it: Cubase reports the selection late).
 var selVars = []
-var selIndex = -1, selLast = -1
+var hostMapping = null   // for Cubase's next / previous track (from the callbacks that pass it)
+page.mOnActivate = function (activeDevice, activeMapping) { hostMapping = activeMapping }
+var selIndex = -1
 var stepTarget = -1, stepAt = 0
 function stepSelect(activeDevice, dir) {
 	var now = Date.now()
 	var n = 0
 	for (var i = 0; i < CHANNELS; ++i) if (allTitles[i]) n = i + 1
-	var from = stepTarget >= 0 && now - stepAt < 1500 ? stepTarget : selIndex >= 0 ? selIndex : selLast
-	if (from < 0 || n === 0) { out('[CubaseSixty Helper] step: no selected channel known yet'); return }
+	var recent = stepTarget >= 0 && now - stepAt < 1500
+	// The selection is off the list (a folder, the Stereo Out, nothing): Cubase's own next / previous track moves on
+	// from where it is (the last channel selected can be far from it, and selecting a channel left the folder
+	// selected too, 10.11.2026). Once on a channel, the steps select directly again.
+	if (!recent && selIndex < 0) {
+		if (!hostMapping) { out('[CubaseSixty Helper] step: no selected channel known yet'); return }
+		var action = page.mHostAccess.mTrackSelection.mAction
+		;(dir > 0 ? action.mNextTrack : action.mPrevTrack).trigger(hostMapping)
+		stepTarget = -1
+		out('[CubaseSixty Helper] step ' + (dir > 0 ? '+' : '-') + ': not on a channel of the list; Cubase\'s ' + (dir > 0 ? 'next' : 'previous') + ' track')
+		return
+	}
+	var from = recent ? stepTarget : selIndex
+	if (n === 0) return
 	var to = Math.max(0, Math.min(n - 1, from + dir))
-	// At the first / last channel: nothing to do, unless the selection is off the list (back onto that channel).
-	if (to === from && selIndex === from) return
+	if (to === from) return   // the first / last channel
 	selVars[to].setProcessValue(activeDevice, 1)
 	stepTarget = to
 	stepAt = now
-	out('[CubaseSixty Helper] step ' + (dir > 0 ? '+' : '-') + ': ' + from + ' -> ' + to + ' "' + allTitles[to] + '"' + (selIndex < 0 ? ' (selection was off the list)' : ''))
+	out('[CubaseSixty Helper] step ' + (dir > 0 ? '+' : '-') + ': ' + from + ' -> ' + to + ' "' + allTitles[to] + '"')
 }
 
 var allZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: all channels').excludeInputChannels().excludeOutputChannels()
@@ -122,7 +136,7 @@ for (var c = 0; c < CHANNELS; ++c) {
 		var sel = surface.makeCustomValueVariable('sel' + index)
 		page.makeValueBinding(sel, ch.mValue.mSelected)
 		sel.mOnProcessValueChange = function (activeDevice, value) {
-			if (value > 0.5) { selIndex = index; selLast = index }
+			if (value > 0.5) selIndex = index
 			else if (selIndex === index) selIndex = -1
 		}
 		selVars[index] = sel
@@ -136,6 +150,7 @@ for (var c = 0; c < CHANNELS; ++c) {
 			sendSolo(activeDevice)
 		}
 		ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+			hostMapping = activeMapping
 			if (allTitles[index] === title) return
 			allTitles[index] = title
 			sendAll(activeDevice, index)

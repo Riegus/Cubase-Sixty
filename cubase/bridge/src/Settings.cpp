@@ -26,7 +26,7 @@ const std::vector<Def>& defs()
         {"track-stepping", "Behaviour", "Track stepping",
          "Which tracks the UF1's arrows and the UF1 / UF8 / UC1 CHANNEL encoders step through.",
          {{"mixconsole", "The tracks the MixConsole shows (hidden ones are stepped past)"},
-          {"project", "The tracks the Project window shows (Cubase's Navigate Up / Down; the Project window should have the focus)"},
+          {"project", "The tracks the Project window shows (Cubase's Navigate Up / Down; click in the Project window first: it only works while that window has the focus)"},
           {"all", "Every track, hidden ones included (Cubase's Select Track: Prev / Next)"}},
          "mixconsole", true},
         {"uc1-encoder2", "Behaviour", "UC1 secondary encoder at start",
