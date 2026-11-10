@@ -69,6 +69,12 @@ measured, what failed and why. Newest findings go in their section with the date
   stepped blindly the way it was pressed, further away. Now the script remembers the last listed channel the
   selection was on; when no visible track lies that way from it, the press steps back towards it instead. The
   landing check treats any track not in the list (not only -1) as "not there yet".
+- **Now (10.11.2026, confirmed): steps select the target channel directly**, in the helper script (its
+  all-channels zone follows the MixConsole's visibility, so hidden channels and folders are not in it): it keeps
+  which channel is selected (`mValue.mSelected` per channel) and on a step selects the next / previous one. A press
+  within 1.5 s counts from the last target. From a track not in the list (folder, Stereo Out) Cubase's own
+  next / previous track goes first (selecting a channel from there left the folder selected and could jump far).
+  The UF1 script's counting (above) is only the fallback without the helper.
 - **Selecting is not what is slow** (10.11.2026, Mackie Control test): Mackie SELECT lit within 1-20 ms when steps
   were spaced, 200-700 ms when they came quickly, those late ones at the same moment as the scripts' work for the
   new track (UF1 EQ graph and plug-in scan, UC1 selected-track scan). Mackie's cursor up / down do not select
