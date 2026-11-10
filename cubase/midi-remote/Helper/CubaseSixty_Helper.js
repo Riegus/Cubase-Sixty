@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.3.0-dev'
+var SCRIPT_VERSION = '0.3.1-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -67,7 +67,9 @@ deviceDriver
 	.expectOutputNameEquals('Cubase-Sixty Helper from Cubase')
 
 var surface = deviceDriver.mSurface
-surface.makeLabelField(0, 0, 6, 1)   // the device needs something to show; nothing to operate
+// The device needs something to show (nothing to operate). Cubase draws every device at the same height and keeps
+// its proportions, so a 6 x 1 label took a third of the MIDI Remote tab: a small square panel instead.
+try { surface.makeBlindPanel(0, 0, 1, 1) } catch (e) { surface.makeLabelField(0, 0, 1, 1) }
 var page = deviceDriver.mMapping.makePage('Helper')
 
 var allTitles = []
