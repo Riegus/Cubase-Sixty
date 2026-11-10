@@ -1290,6 +1290,7 @@ int main(int argc, char** argv)
             }
             if (key == "uc1-7seg") { cs::uc1RedrawSevenSeg(); return; }
             if (key == "uc1-knob-step") { cs::uc1SendKnobStep(); return; }
+            if (key == "uf1-eq-poll") { cs::uf1SendEqPoll(); return; }
             if (key.rfind("uc1-key-", 0) == 0) { cs::uc1SendKeyJobs(); return; }
             if (key != "track-names") return;
             // The names again, abbreviated or cut as now set (the UC1 redraws its own all the time).

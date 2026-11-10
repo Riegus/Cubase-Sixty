@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.24.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.24.1-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -495,6 +495,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length >= 9 && m[0] === 0xF0 && m[4] === 0x53) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
+		return
+	}
+	if (m[4] === 0x5E && m.length >= 7) {   // TEST: EQ graph polling on / off (Settings: uf1-eq-poll)
+		eqPollOn = m[5] !== 0
+		out('[CubaseSixty UF1] turn test: EQ graph polling ' + (eqPollOn ? 'on' : 'off'))
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
@@ -1471,7 +1476,25 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	plug.rescanAt = Date.now() + 200
 }
 var eqPollAt = 0
+// TEST (10.11.2026, V-pots / encoders not smooth since 6.11): the EQ polling can be switched off from the Settings
+// page (SysEx 5E), and every 10 s the script logs how long the EQ reads took and the longest wait between two idle
+// calls (a long wait = Cubase busy, and the V-pots' values wait too).
+var eqPollOn = true
+var idleStat = { since: 0, last: 0, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0 }
+function idleStats() {
+	var now = Date.now()
+	var st = idleStat
+	if (!st.since) { st.since = now; st.last = now; return }
+	st.maxGap = Math.max(st.maxGap, now - st.last)
+	st.last = now
+	++st.calls
+	if (now - st.since < 10000) return
+	out('[CubaseSixty UF1] turn test: ' + st.calls + ' idle calls in ' + (now - st.since) + ' ms, longest wait ' + st.maxGap +
+		' ms; EQ polling ' + (eqPollOn ? 'on: ' + st.eqReads + ' reads, ' + st.eqMs + ' ms in all, longest ' + st.eqMax + ' ms' : 'off'))
+	idleStat = { since: now, last: now, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0 }
+}
 page.mOnIdle = function (activeDevice, activeMapping) {
+	idleStats()
 	if (stepPending && stepPending.settleAt && Date.now() >= stepPending.settleAt) {
 		stepPending.settleAt = 0
 		try { stepCheckLanding() } catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
@@ -1481,9 +1504,13 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	// changes.
 	// Only a changed band list is sent.
 	var t = Date.now()
-	if (t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
+	if (eqPollOn && t >= eqPollAt && (cubaseEq.eq >= 0 || cubaseEq.filter >= 0)) {
 		eqPollAt = t + 150
 		try { cubaseEqSend(activeDevice) } catch (e) { if (!cubaseEq.failed) { cubaseEq.failed = true; out('[CubaseSixty UF1] EQ graph: ' + e) } }
+		var took = Date.now() - t
+		++idleStat.eqReads
+		idleStat.eqMs += took
+		idleStat.eqMax = Math.max(idleStat.eqMax, took)
 	}
 	windowIdle(activeDevice)
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {

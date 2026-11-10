@@ -38,6 +38,7 @@ void uf1SetSoloActive(bool on);
 // A SysEx message for the UF1 script (passed on from the UF8 script: which of several same-named tracks is
 // selected, SysEx 1C).
 void uf1SendToScript(const std::vector<unsigned char>& msg);
+void uf1SendEqPoll();   // TEST: Settings uf1-eq-poll
 // One track back / forward (dir -1 / +1) past the tracks hidden in the MixConsole (track-stepping = mixconsole): the
 // UF1 script steps and steps again while the new track is hidden (SysEx 5C), whether or not the UF1 is connected.
 // False if its ports could not be made.
