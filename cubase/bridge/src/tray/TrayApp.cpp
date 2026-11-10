@@ -23,6 +23,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <tlhelp32.h>
 
 #include <chrono>
 #include <cmath>
@@ -309,6 +310,23 @@ void readLog()
     if (old != g_status.uf8 + g_status.uf1 + g_status.uc1 + g_status.cubase) updateIcon();
 }
 
+// While the bridge is stopped, the SSL plug-ins start SSL's own SSL360Core.exe (they look for a Core). It makes MIDI
+// ports of its own, and when the bridge closes it again on its start, Cubase reconnected only the UF8 script
+// (10.11.2026; Reload Scripts fixed it). SSL 360 cannot use the controllers anyway (they are on Rea-Sixty's WinUSB
+// driver), so the app closes it while the bridge is stopped, as the bridge does while it runs.
+void closeSslCore()
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof pe;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+        if (_wcsicmp(pe.szExeFile, L"SSL360Core.exe") != 0) continue;
+        if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID)) { TerminateProcess(h, 0); CloseHandle(h); }
+    }
+    CloseHandle(snap);
+}
+
 // ---------------------------------------------------------------------------------------------- autostart
 
 bool autostartOn()
@@ -387,6 +405,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     case WM_TIMER:
         checkBridge();
         if (g_bridgeRunning) readLog();
+        if (g_paused) { static int n = 0; if (++n % 4 == 0) closeSslCore(); }   // every 2 s
         if (g_expectCubase && g_status.cubase != "not seen yet") g_expectCubase = false;   // it came back
         if (g_expectCubase && g_bridgeRunning && std::chrono::steady_clock::now() > g_expectCubaseBy) {
             g_expectCubase = false;
