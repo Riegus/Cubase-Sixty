@@ -1702,18 +1702,23 @@ function onParameterChange(activeDevice, objectID, tag) {
 		else paintLeds(activeDevice)
 	} catch (e) {}
 }
-da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+// TEST (10.11.2026): Direct Access parameter / object listeners off. a03b82a (smooth V-pots) had none; every build
+// since added some (UC1: the selected track and the whole MixConsole; UF1: the selected track; UF8: its 8 strips).
+// With them off, displays that follow plug-in parameters changed with the mouse stop following.
+var TEST_NO_DA_LISTENERS = true
+log('TEST: Direct Access listeners ' + (TEST_NO_DA_LISTENERS ? 'off' : 'on'))
+if (!TEST_NO_DA_LISTENERS) da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 	am = activeMapping
 	onParameterChange(activeDevice, objectID, tag)
 }
 // Objects added or removed (a plug-in inserted, removed or replaced): look again shortly.
-da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
+if (!TEST_NO_DA_LISTENERS) da.mOnObjectChange = function (activeDevice, activeMapping, objectID) {
 	am = activeMapping
 	++scanStat.objChanges
 	state.rescanAt = Date.now() + 300
 	state.mixScanAt = Date.now() + 500   // a bus comp added to the selected track belongs in the list too
 }
-if (daMix) {
+if (daMix && !TEST_NO_DA_LISTENERS) {
 	daMix.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		am = activeMapping
 		if (!state.cs || !state.cs.objs[objectID]) onParameterChange(activeDevice, objectID, tag)
