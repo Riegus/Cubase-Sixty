@@ -4,20 +4,11 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF1
 
-- **V-pots not smooth: found and being fixed (10.11.2026, branch wip/uf1-vpot-test).** A MIDI Remote value binding
-  on a send level makes Cubase pause ~0.8 s at a time while the level keeps changing (it answered about 1 step in
-  20), whatever the scripts do: skipping their rescans, removing the Helper's 512 per-channel bindings and switching
-  off every Direct Access listener changed nothing. Writing the level with Direct Access (setParameterProcessValue on
-  the send slot) was smooth; even a binding kept only for the display brought the pauses back. A knob left without
-  any binding in a page stopped the whole UF1 script at load ("DukValue is uninitialized"). Now: turns on CC 21-24 to
-  custom values that write the slot, the level read back through Direct Access, the knobs bound to the send's on
-  switch as a placeholder in DAW / SENDS. Checked (10.11.2026, evening): fast turns end on Cubase's value (a jump now and then
-  while turning fast). Left: the DAW view's left-display line ("S1 ...") is not drawn while turning (it came from the
-  level binding; the bridge should draw it from its own position, as it does the SENDS cells); PLUGIN without an SSL
-  plug-in shows no Quick Control names / text (only the bar moves; that code was not changed, so check on cubase
-  whether it is older). Then the test switches out and the same for the UF8's send views.
-  (Bisect note: a03b82a was smoother than today but already lagged a little; the order of later commits did not
-  explain it.)
+- **V-pots not smooth: fixed on wip/uf1-vpot-test (10.11.2026), to be merged after the test checklist.** Cause: a
+  MIDI Remote value binding on a send level makes Cubase pause ~0.8 s at a time while the level keeps changing (it
+  answered about 1 step in 20); the scripts' own work was not it. The UF1's send V-pots now write and read the send
+  slot's level through Direct Access (see cubase-limitations.md). Still to do: the same for the UF8's send views; an
+  occasional jump on very fast turns.
 - **V-pots and some encoders no longer feel smooth** (noticed 9.11.2026). They were smooth on 6.11.2026 (a03b82a,
   SENDS view); the send lag noted since as a Cubase issue is probably the same regression. To find by halving the
   commits since a03b82a. Suspect: the UF1 script reading Cubase's channel EQ (40 parameters) seven times a second on
