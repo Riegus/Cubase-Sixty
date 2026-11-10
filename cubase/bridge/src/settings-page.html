@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cubase-Sixty Settings</title>
+<link rel="icon" id="favicon" href="data:,">
 <style>
   :root {
     --bg: #f4f4f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6;
@@ -116,7 +117,9 @@ async function load() {
     if (!r.ok) throw new Error();
     state = await r.json();
     render();
+    setFavicon(statusLevel(state.status));
   } catch {
+    setFavicon(0);
     document.getElementById("main").innerHTML = '<div class="gone">The bridge is not answering. Is it running? (Tray icon: Restart bridge, then open Settings again.)</div>';
   }
 }
@@ -225,16 +228,32 @@ function render() {
 
 window.addEventListener("hashchange", () => { current = (location.hash || "#devices").slice(1); render(); });
 // The Devices status follows along while the page is open.
+// The tab's icon: the tray icon's mixing surface in the same colours (green: a project open, yellow: the bridge
+// runs but Cubase has no project / has not spoken yet, red: the bridge does not answer).
+function setFavicon(level) {
+  const fill = ["#dc322f", "#f0b41e", "#3cbe50"][level];
+  const rim = ["#6e1918", "#785a0f", "#1e5f28"][level];
+  const slots = [[4.5, 9.5], [8, 5], [11.5, 7.5]].map(([x, y]) =>
+    `<rect x="${x - 0.6}" y="3.5" width="1.2" height="9" rx="0.6" fill="#1f1f1f"/>` +
+    `<rect x="${x - 1.6}" y="${y - 1.1}" width="3.2" height="2.2" rx="0.5" fill="#fff"/>`).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="${rim}"/>` +
+    `<rect x="1.5" y="2" width="13" height="12" rx="1.8" fill="${fill}"/>${slots}</svg>`;
+  document.getElementById("favicon").href = "data:image/svg+xml," + encodeURIComponent(svg);
+}
+function statusLevel(st) { return st && st.cubase === "project open" ? 2 : 1; }
+setFavicon(1);
+// The status follows along while the page is open: the tab's icon always, the Devices card when it shows (only the
+// card is redrawn, so the settings below it keep their focus).
 setInterval(async () => {
-  if (current !== "devices") return;
-  // Only the status card is redrawn (the settings below it keep their focus).
   try {
     const r = await fetch("/api/state?token=" + TOKEN);
-    if (!r.ok) return;
+    if (!r.ok) { setFavicon(0); return; }
     state.status = (await r.json()).status;
+    setFavicon(statusLevel(state.status));
+    if (current !== "devices") return;
     const card = document.getElementById("status");
     if (card) fillStatus(card);
-  } catch {}
+  } catch { setFavicon(0); }
 }, 2000);
 load();
 </script>
