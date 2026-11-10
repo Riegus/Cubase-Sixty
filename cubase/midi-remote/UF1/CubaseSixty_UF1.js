@@ -529,6 +529,7 @@ var stepListed = false   // (the channel list is logged once, when the selected 
 // (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
 function stepChannels() {
 	var list = []
+	var seen = {}
 	var base = stepMix.getBaseObjectID(plugAm)
 	var n = stepMix.getNumberOfChildObjects(plugAm, base)
 	for (var i = 0; i < n && i < 1024; ++i) {
@@ -539,6 +540,8 @@ function stepChannels() {
 		var vis = true, idx = i
 		try { vis = stepMix.isMixerChannelVisible(plugAm, id) } catch (e) {}
 		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
+		if (seen[id]) continue   // (group / FX channels were listed twice, 10.11.2026)
+		seen[id] = true
 		list.push({ id: id, vis: vis, idx: idx })
 	}
 	list.sort(function (a, b) { return a.idx - b.idx })
@@ -585,11 +588,13 @@ function stepTrack(activeDevice, dir) {
 				if (k < 0 || k >= list.length) return   // no visible track that way
 				var extra = stepExtra[cur + ':' + dir] || 0   // a known folder on the way
 				count = Math.abs(k - at) + extra
+				out('[CubaseSixty UF1] step ' + (dir > 0 ? '+' : '-') + ': from #' + cur + ' (list ' + at + (cur === stepLast.id ? ', last target' : ', selected') + ') to #' + list[k].id + ' (list ' + k + '), ' + count + ' trigger(s)' + (extra ? ' incl. ' + extra + ' learned' : ''))
 				stepLast = { id: list[k].id, at: now }
 				stepChan = list[k].id
 				// Checked where it lands, unless it already goes past a known folder.
 				stepPending = extra ? null : { from: cur, to: list[k].id, dir: dir, at: now, fixes: 0 }
 			}
+			if (at < 0) out('[CubaseSixty UF1] step ' + (dir > 0 ? '+' : '-') + ': from #' + cur + ' "' + selectedInfo.title + '" (not in the list), 1 trigger')
 			if (at < 0 && cur >= 0 && !stepListed) {
 				out('[CubaseSixty UF1] track step: "' + selectedInfo.title + '" (object ' + cur + ') is not among the MixConsole\'s channels; hidden tracks are not skipped from it. The channels:')
 				stepListed = true
@@ -598,6 +603,7 @@ function stepTrack(activeDevice, dir) {
 			}
 		} catch (e) { out('[CubaseSixty UF1] track step: ' + e) }
 	}
+	if (count === 1 && !(stepMix)) out('[CubaseSixty UF1] step ' + (dir > 0 ? '+' : '-') + ': no MixConsole list, 1 trigger')
 	var action = trackAction(dir > 0)
 	for (var c = 0; c < count; ++c) action.trigger(plugAm)
 }
