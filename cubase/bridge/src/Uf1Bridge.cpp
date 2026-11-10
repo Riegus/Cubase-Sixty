@@ -219,6 +219,9 @@ std::string sendCellLine(const SendCell& c);
 std::unordered_set<uint8_t> g_shiftUsed;                      // keys pressed with SHIFT, until released
 void setLed(const uf1m::Led& led, bool on);
 void showStripNumber();
+std::string levelTextFor(int pos);
+void valueTemporary(const std::string& t);
+void barTemporary(uint8_t pos, uint8_t style);
 void paintSoftKeys();
 // The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
 void sendVpotPage_(int view)
@@ -502,6 +505,13 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             sendMidi({0xB0, cc, uint8_t((v >> 7) & 0x7F)});
             sendMidi({0xB0, uint8_t(cc + 32), uint8_t(v & 0x7F)});
             if (g_view == kViewSends || g_view == kViewPlugin) paintSendCells(false);
+            // DAW: the send on the left display while turning ("S1 -6.02dB" and its bar), from the bridge's own position
+            // and its level curve. (It came from the send's binding until the levels went through Direct Access.)
+            if (g_view == kViewDaw) {
+                const std::string t = levelTextFor(v);
+                valueTemporary("S" + std::to_string(int(k) + 1 + (g_sends58 ? 4 : 0)) + " " + (t.empty() ? "..." : t));
+                barTemporary(uint8_t(std::lround(v * 100.0 / 16383.0)), 0x02);
+            }
             break;
         }
         if (ev.id == 0) { panTurned(); turnIn(0, ev.delta); turnOut(0, g_stripPan ? "strip pan" : "pan"); }

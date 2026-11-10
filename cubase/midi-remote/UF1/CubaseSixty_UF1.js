@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.4-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.5-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -261,6 +261,7 @@ function attachSendFeedback(surfaceValue, number) {
 	var cell = { name: '', value: '', pos: 0, sent: null }
 	sendCells[number - 1] = cell
 	surfaceValue.mOnTitleChange = function (activeDevice, objectTitle, valueTitle) {
+		if (qcActive) { ++idleStat.qcTitles; idleStat.qcLastTitle = String(valueTitle || objectTitle || '') }
 		title = valueTitle || objectTitle || ''
 		cell.qcTitle = title
 		cell.qcObject = valueTitle ? (objectTitle || '') : ''   // what the Quick Control belongs to (a plug-in's name)
@@ -301,8 +302,8 @@ function attachSendFeedback(surfaceValue, number) {
 	}
 	// Bound callbacks count only for the Quick Controls: in DAW / SENDS the knob is bound to the send's on switch (see
 	// sendDa), and the level is shown from Direct Access.
-	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) { if (qcActive) onDisplay(activeDevice, value, units) }
-	surfaceValue.mOnProcessValueChange = function (activeDevice, value) { if (qcActive) onProcess(activeDevice, value) }
+	surfaceValue.mOnDisplayValueChange = function (activeDevice, value, units) { if (qcActive) { ++idleStat.qcDisplay; onDisplay(activeDevice, value, units) } }
+	surfaceValue.mOnProcessValueChange = function (activeDevice, value) { if (qcActive) { ++idleStat.qcProcess; onProcess(activeDevice, value) } }
 	// Our own references: a callback read back from Cubase's object is Cubase's wrapper, not this function (calling
 	// it gave "DukValue is uninitialized", 10.11.2026).
 	return { process: onProcess, display: onDisplay }
@@ -469,13 +470,15 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	;(function (k, proc, disp) {
 		var cell = sendCells[k]
 		sendDa.show[k] = {
+			// The text goes before the position: the bridge learns its level curve (the dB text for a position, drawn
+			// while turning) from a position that follows its text within 60 ms.
 			level: function (activeDevice, value, text, units, line) {
-				if (line) { proc(activeDevice, value); disp(activeDevice, text, units); return }
-				reportVpotPosition(activeDevice, k, value)
+				if (line) { disp(activeDevice, text, units); proc(activeDevice, value); return }
 				var v = String(text)
 				cell.value = v === '' ? '' : v + (units ? units : (/^-?[0-9.]+$/.test(v) ? 'dB' : ''))
 				cell.pos = Math.max(0, Math.min(100, Math.round(value * 100)))
 				sendCellInfo(activeDevice, k, cell)
+				reportVpotPosition(activeDevice, k, value)
 			},
 			empty: function (activeDevice) { cell.value = ''; cell.pos = 0; sendCellInfo(activeDevice, k, cell) }
 		}
@@ -1629,7 +1632,7 @@ var eqPollAt = 0
 // page (SysEx 5E), and every 10 s the script logs how long the EQ reads took and the longest wait between two idle
 // calls (a long wait = Cubase busy, and the V-pots' values wait too).
 var eqPollOn = true
-var idleStat = { since: 0, last: 0, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0 }
+var idleStat = { since: 0, last: 0, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0, qcDisplay: 0, qcProcess: 0, qcTitles: 0, qcLastTitle: '' }
 function idleStats() {
 	var now = Date.now()
 	var st = idleStat
@@ -1641,8 +1644,9 @@ function idleStats() {
 	out('[CubaseSixty UF1] turn test: ' + st.calls + ' idle calls in ' + (now - st.since) + ' ms, longest wait ' + st.maxGap +
 		' ms; EQ polling ' + (eqPollOn ? 'on: ' + st.eqReads + ' reads, ' + st.eqMs + ' ms in all, longest ' + st.eqMax + ' ms' : 'off') +
 		'; track reports ' + st.titles + (skipSameTrack ? ' (' + st.titlesSkipped + ' skipped)' : '') + '; plug-in scans ' + st.scans +
-		', ' + st.scanMs + ' ms in all, longest ' + st.scanMax + ' ms')
-	idleStat = { since: now, last: now, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0 }
+		', ' + st.scanMs + ' ms in all, longest ' + st.scanMax + ' ms' +
+		(qcActive ? '; Quick Controls: ' + st.qcDisplay + ' display values, ' + st.qcProcess + ' positions, ' + st.qcTitles + ' titles (last "' + st.qcLastTitle + '"), SSL plug-in object ' + plug.obj : ''))
+	idleStat = { since: now, last: now, calls: 0, maxGap: 0, eqReads: 0, eqMs: 0, eqMax: 0, titles: 0, titlesSkipped: 0, scans: 0, scanMs: 0, scanMax: 0, qcDisplay: 0, qcProcess: 0, qcTitles: 0, qcLastTitle: '' }
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	idleStats()

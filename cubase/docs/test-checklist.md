@@ -1,0 +1,62 @@
+# Test checklist
+
+What to check before a branch is merged into `cubase`. Each branch says which sections it touches; those are checked
+in full, the rest with the quick line at the top of each section. Started 10.11.2026, after a change to the UF1's send
+V-pots broke the DAW view's left display line without anyone noticing until testing.
+
+Setup: Breaking Free-02, bridge from the tray app, a track with several sends and an SSL plug-in, a track with only
+Cubase's own strip. Bridge log and script log on.
+
+## Start and connection
+
+Quick: Cubase starts, all surfaces show the project.
+
+- Script console: no errors after a Cubase start (Reload Scripts can show "DukValue is uninitialized" from Cubase).
+- scripts.log: each script's "script loaded"; the UF1's "loaded to the end".
+- Close the project (Hub): "No Project" on the surfaces; reopen: everything back.
+- Restart the bridge from the tray: surfaces "Waiting for Cubase", then back by themselves.
+
+## UF8
+
+Quick: banking, SEL, a fader, a V-pot.
+
+- Bank left / right, Page left / right; banking ends at the first / last track.
+- Follow selection: select a track in Cubase off the strips; the UF8 banks to it.
+- Faders: volume, touch; FLIP; send views (the route keys); SSL Strip Mode (PLUGIN).
+- V-pots: pan; push; the top soft keys (SSL soft keys, Q1 / Q2, pages); Nav Mode (NAV held 1 s), NAV tap.
+- SOLO / CUT / SEL with LEDs; REC / AUTO selection modes.
+- CHANNEL encoder: each mode (hold its push and turn); zoom pad.
+
+## UF1
+
+Quick: each view once, a V-pot in each, the CHANNEL encoder.
+
+- Top: track name, number and colour; the small display's value line (pan at rest).
+- Fader with touch; SOLO / CUT / SEL; pan knob (value line "Pan ...").
+- **DAW view**: V-pots = sends 1-4 (5-8 key: 5-8). While turning, the left display shows "S1 -6.02dB" and the bar.
+  Smooth on fast turns; after stopping, the value matches the MixConsole. Push = send on / off.
+- **SENDS view**: the four cells show the send names and levels at all times; they follow a turn, a mouse change in
+  the MixConsole, a track change, 5-8.
+- **PLUGIN view, SSL plug-in**: its pages on the V-pots and display soft keys, ◀ ▶, the EQ curve.
+- **PLUGIN view, no SSL plug-in**: Quick Controls on the V-pots; their names and values in the cells; "QC1 ..." on
+  the left display while turning.
+- **METER view**: the Overview screen (with an SSL Meter plug-in).
+- CHANNEL encoder steps tracks (MixConsole mode skips folders and hidden tracks); push opens / closes the plug-in
+  window; SHIFT + turn steps the plug-ins.
+- ARROW, BANK (with and without a UF8), jog modes, SCRUB, SHUTTLE, 360°, NAV cross, transport keys with LEDs.
+
+## UC1
+
+Quick: select a track with an SSL strip, turn a knob; the bus comp.
+
+- SSL channel strip: knobs and keys, rings and LEDs, gain reduction meters.
+- Cubase's own strip: the knobs that map, module loading, DYN IN.
+- Bus Comp section, its encoder; magnifier / 360 / secondary encoder push (as set on the Settings page).
+- 7-segment track number; favourites (CS Fav / BC Fav).
+
+## Settings page and tray
+
+Quick: the page opens from the tray; one setting changed shows at once.
+
+- Each section opens; a change is written to settings.txt and logged once.
+- Tray icon colours; menu items; Start with Windows.
