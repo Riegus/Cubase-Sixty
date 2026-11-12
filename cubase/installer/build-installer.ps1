@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File cubase\installer\build-installer.ps1
 #   powershell -ExecutionPolicy Bypass -File cubase\installer\build-installer.ps1 -NoBuild     (use the bridge as built)
 #
-# Needs Inno Setup 6 (https://jrsoftware.org/isdl.php; free) and a configured bridge build (cubase\bridge\build, see
+# Needs Inno Setup 7 or 6 (https://jrsoftware.org/isdl.php; free) and a configured bridge build (cubase\bridge\build, see
 # cubase\bridge\README.md). The version comes from cubase\VERSION.
 
 param([switch]$NoBuild)
@@ -17,11 +17,14 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "cubase\VERSION should be like
 
 $iscc = @(
     (Get-Command ISCC.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source),
+    "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 7\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if (-not $iscc) { throw 'Inno Setup 6 was not found. Install it from https://jrsoftware.org/isdl.php and run this again.' }
+if (-not $iscc) { throw 'Inno Setup (7 or 6) was not found. If it is installed somewhere else, add its folder to PATH. Otherwise install it from https://jrsoftware.org/isdl.php and run this again.' }
 
 if (-not $NoBuild) {
     Write-Host "Building the bridge and the tray app (Release)..."

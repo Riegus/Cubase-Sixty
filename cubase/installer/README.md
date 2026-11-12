@@ -1,6 +1,6 @@
 # The installer
 
-`CubaseSixty-Setup-<version>.exe`, made with [Inno Setup 6](https://jrsoftware.org/isdl.php) (free).
+`CubaseSixty-Setup-<version>.exe`, made with [Inno Setup](https://jrsoftware.org/isdl.php) (free; version 7 or 6).
 
 ```
 powershell -ExecutionPolicy Bypass -File cubase\installer\build-installer.ps1

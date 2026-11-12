@@ -1,4 +1,4 @@
-; Cubase-Sixty installer (Inno Setup 6). Built by build-installer.ps1, which passes the version and the folders:
+; Cubase-Sixty installer (Inno Setup 7 or 6). Built by build-installer.ps1, which passes the version and the folders:
 ;   ISCC /DAppVersion=0.1.0 /DBuildDir=..\bridge\build\Release /DOutDir=..\dist CubaseSixty.iss
 ;
 ; Per user, no administrator rights: the program goes into %LOCALAPPDATA%\Programs\Cubase-Sixty (its settings, favourites
