@@ -123,6 +123,11 @@ std::atomic<int> g_skBank{0};
 std::atomic<int> g_focus{-1};   // bank * 8 + slot of the focused parameter, -1 = none (V-pots on pan)
 // Pan as the script last sent it (shown again when the focus ends), and the focused parameter per strip.
 std::array<uint16_t, 8> g_panPos{};
+// The V-pot send view: each V-pot's send level (0..1, from the script's 0E; -1 = not known) and until when the bridge
+// draws the ring itself. A turn moves the ring at once from here (the way round through Cubase and the script lagged,
+// 12.11.2026); the script's reports are ignored for 0.5 s after a turn and its settled value taken after that.
+std::array<std::atomic<double>, 8> g_selSendVal{};
+std::array<std::atomic<long long>, 8> g_selSendOwnUntil{};
 std::string g_panLine[8];
 std::array<uint16_t, 8> g_focusPos{};
 std::array<uint8_t, 8> g_focusMode{};
@@ -488,7 +493,16 @@ void handleFrame(const uf8frames::Frame& fr)
         const int delta = uf8frames::vpotDelta(d[4]);
         if (delta == 0) break;
         if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
-        else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // strip mode's pan; a send (V-pot send view)
+        else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) {   // strip mode's pan; a send (V-pot send view)
+            sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});
+            if (g_routeSelSends && g_routeSend < 0 && g_selSendVal[s] >= 0) {   // the ring at once (the script steps by 1/100 too)
+                const double v = std::clamp(g_selSendVal[s].load() + delta / 100.0, 0.0, 1.0);
+                g_selSendVal[s] = v;
+                g_selSendOwnUntil[s] = nowMs8() + 500;
+                g_panPos[s] = uf8::vpotPosUnipolar(v);
+                g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
+            }
+        }
         else sendMidi({0xB0, uint8_t(kCcVPot + s), vpotToCc(delta)});
         break;
     }
@@ -914,7 +928,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_panLine[m[5]] = line;
             if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
         } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
-            // A send level 0..127 on the V-pot: a unipolar bar.
+            // A send level 0..127 on the V-pot: a unipolar bar. (Not while the bridge draws a turn itself.)
+            if (nowMs8() < g_selSendOwnUntil[m[5]]) return;
+            g_selSendVal[m[5]] = m[6] / 127.0;
             g_panPos[m[5]] = uf8::vpotPosUnipolar(m[6] / 127.0);
             if (g_focus < 0) g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
         } else if (m.size() >= 10 && m[4] == 0x20 && m[5] < kStrips) {

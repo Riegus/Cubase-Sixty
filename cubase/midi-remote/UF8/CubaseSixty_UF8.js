@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.2-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.3-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -1279,6 +1279,7 @@ function skMessage(activeDevice, m) {
 		var cur = w && w.obj === st.vObj && w.tag === st.vTag && nowT - w.at < 1000 ? w.value : da.getParameterProcessValue(skAm, st.vObj, st.vTag)
 		var next = Math.max(0, Math.min(1, cur + (m[6] - 64) / 100))
 		st.vWanted = { obj: st.vObj, tag: st.vTag, value: next, at: nowT }
+		st.vSettleAt = nowT + 600   // (the bridge draws the ring itself for 0.5 s after a turn: then Cubase's value once)
 		da.setParameterProcessValue(skAm, st.vObj, st.vTag, next)
 		stripPanSend(activeDevice, pi)
 		return
@@ -1346,7 +1347,9 @@ function sendViewPoll(activeDevice) {
 			var w = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
 			var on = st.vOn >= 0 ? st.vDa.getParameterProcessValue(skAm, st.vObj, st.vOn) : 0
 			var txt = daText(st.vDa, st.vObj, st.vTag)
-			if (w !== st.vPolled || on !== st.vOnPolled || txt !== st.vTextPolled) { st.vPolled = w; st.vOnPolled = on; st.vTextPolled = txt; stripPanSend(activeDevice, i) }
+			var settle = st.vSettleAt && Date.now() >= st.vSettleAt
+			if (settle) st.vSettleAt = 0
+			if (settle || w !== st.vPolled || on !== st.vOnPolled || txt !== st.vTextPolled) { st.vPolled = w; st.vOnPolled = on; st.vTextPolled = txt; stripPanSend(activeDevice, i) }
 		}
 	}
 }
