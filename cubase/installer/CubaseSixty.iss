@@ -40,6 +40,8 @@ LicenseFile=..\..\LICENSE
 
 [Tasks]
 Name: "autostart"; Description: "Start Cubase-Sixty with Windows"; GroupDescription: "Start:"
+; Ticked by the code below when a connected controller is not on the driver yet, or none is connected.
+Name: "usbdriver"; Description: "Install the USB driver for the SSL controllers (asks for administrator permission; SSL 360 will no longer see them)"; GroupDescription: "USB driver (have the controllers plugged in and switched on):"; Flags: unchecked
 
 [Files]
 Source: "{#BuildDir}\CubaseSixty.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -47,6 +49,10 @@ Source: "{#BuildDir}\cubase_sixty_bridge.exe"; DestDir: "{app}"; Flags: ignoreve
 Source: "{#BuildDir}\libusb-1.0.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\docs\user-guide.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; The WinUSB driver binding for the controllers (Rea-Sixty's scripts): run by the task below and by the tray app's menu.
+Source: "driver\install-driver.ps1"; DestDir: "{app}\driver"; Flags: ignoreversion
+Source: "driver\uninstall-driver.ps1"; DestDir: "{app}\driver"; Flags: ignoreversion
+Source: "driver\rea_sixty_winusb.inf"; DestDir: "{app}\driver"; Flags: ignoreversion
 ; The MIDI Remote scripts, where Cubase looks for them.
 Source: "..\midi-remote\UF8\CubaseSixty_UF8.js"; DestDir: "{#ScriptsDir}\UF8"; Flags: ignoreversion
 Source: "..\midi-remote\UF1\CubaseSixty_UF1.js"; DestDir: "{#ScriptsDir}\UF1"; Flags: ignoreversion
@@ -63,6 +69,9 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
   ValueData: """{app}\CubaseSixty.exe"""; Tasks: autostart; Flags: uninsdeletevalue
 
 [Run]
+; Elevated (one administrator prompt). The tray app is started after it, so the bridge finds the controllers on the driver.
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\driver\install-driver.ps1"""; \
+  Verb: runas; Flags: shellexec waituntilterminated runhidden; StatusMsg: "Installing the USB driver for the controllers..."; Tasks: usbdriver
 Filename: "{app}\CubaseSixty.exe"; Description: "Start Cubase-Sixty now"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -86,6 +95,39 @@ function VcRuntimeInstalled(): Boolean;
 var installed: Cardinal;
 begin
   Result := RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', installed) and (installed = 1);
+end;
+
+// The USB driver task is ticked when it looks needed: a controller Windows knows that is not on WinUSB, or no
+// controller known at all (a first install). All known ones on WinUSB already: left unticked.
+function ControllerDriver(pid: String; var known: Boolean): Boolean;   // True = on WinUSB
+var names: TArrayOfString; i: Integer; service, key: String;
+begin
+  Result := False;
+  key := 'SYSTEM\CurrentControlSet\Enum\USB\VID_31E9&PID_' + pid;
+  if not RegGetSubkeyNames(HKLM64, key, names) then exit;
+  for i := 0 to GetArrayLength(names) - 1 do begin
+    known := True;
+    if RegQueryStringValue(HKLM64, key + '\' + names[i], 'Service', service) and (CompareText(service, 'WinUSB') = 0) then Result := True;
+  end;
+end;
+
+function UsbDriverNeeded(): Boolean;
+var known, k: Boolean; pids: array[0..2] of String; i: Integer;
+begin
+  pids[0] := '0021'; pids[1] := '0023'; pids[2] := '0025';
+  known := False;
+  Result := False;
+  for i := 0 to 2 do begin
+    k := False;
+    if (not ControllerDriver(pids[i], k)) and k then Result := True;
+    if k then known := True;
+  end;
+  if not known then Result := True;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpSelectTasks) and UsbDriverNeeded() then WizardSelectTasks('usbdriver');
 end;
 
 // A running copy is asked to quit (it stops the bridge, which blanks the surfaces) before files are replaced.

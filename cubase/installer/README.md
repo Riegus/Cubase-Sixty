@@ -24,5 +24,27 @@ What it does (`CubaseSixty.iss`):
 - Uninstall removes the program, the scripts, the logs and the Run entry; it asks before removing `settings.txt` and
   `favourites.txt`.
 
-Not in the installer yet: the WinUSB driver for the controllers (planned as an optional step and a tray menu item,
-ported from Rea-Sixty), and the user guide.
+## The USB driver
+
+The bridge opens the controllers through libusb, which needs them on Windows' WinUSB driver instead of SSL's own
+(SSLBUS). `driver\` holds Rea-Sixty's way of doing that, unchanged but for where the INF comes from:
+
+- `rea_sixty_winusb.inf`: binds the UF8, UC1 and UF1 to WinUSB (a copy of `extension\resources\rea_sixty_winusb.inf`;
+  keep the two the same).
+- `install-driver.ps1`: makes (or reuses) a self-signed certificate "Rea-Sixty Driver Signer", trusts it, signs a
+  catalog for the INF, adds the package to the driver store, force-binds the three device ids, and keeps exactly one
+  copy in the store. The same package and certificate as Rea-Sixty's, so the two share one driver.
+- `uninstall-driver.ps1`: removes every copy and the certificate; the controllers go back to SSL's driver on the
+  next replug (reinstall SSL 360 if not). It takes the controllers away from Rea-Sixty too.
+
+Both need administrator rights (one prompt) and write a log to `%TEMP%`. They are run by:
+
+- the installer's task "Install the USB driver for the SSL controllers", ticked by itself when a controller Windows
+  knows is not on WinUSB, or none is known (a first install);
+- the tray app's **USB driver** sub menu (shown when `driver\` is beside the program): install, or remove. The bridge
+  is stopped meanwhile and started again after; a message says how it went.
+
+After either: unplug and replug the controllers. Only controllers that are plugged in when the install runs are
+moved to the driver.
+
+Not in the installer yet: the user guide.
