@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.5-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.6-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -1273,7 +1273,14 @@ function skMessage(activeDevice, m) {
 	}
 	if (m[4] === 0x2A && m.length >= 9) {   // a V-pot on a send (the V-pot send view): the level itself, from the bridge
 		var ai = m[5]
-		if (ai >= STRIPS || !skStrip[ai].panOn || skStrip[ai].vKind !== 'send' || skStrip[ai].vObj < 0) return
+		if (ai >= STRIPS || !skStrip[ai].panOn || skStrip[ai].vKind !== 'send' || skStrip[ai].vObj < 0) {
+			// (Logged, at most once a second: a level the script could not write.)
+			if (ai < STRIPS && Date.now() - (skStrip[ai].refusedAt || 0) > 1000) {
+				skStrip[ai].refusedAt = Date.now()
+				out('[CubaseSixty] send V-pot ' + (ai + 1) + ': level not written (V-pot on ' + skStrip[ai].vKind + ', send object ' + skStrip[ai].vObj + ', route ' + route.fader + ' / ' + route.vpot + ')')
+			}
+			return
+		}
 		var as = skStrip[ai], av = ((m[6] << 7) | m[7]) / 16383, at = Date.now()
 		as.vWanted = { obj: as.vObj, tag: as.vTag, value: av, at: at }
 		as.vSettleAt = at + 600   // (the bridge draws ring and value itself for 0.5 s after a turn: then Cubase's value once)

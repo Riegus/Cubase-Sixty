@@ -131,7 +131,22 @@ std::array<std::atomic<double>, 8> g_selSendVal{};
 std::array<std::atomic<long long>, 8> g_selSendOwnUntil{};
 std::array<std::atomic<bool>, 8> g_selSendOwnText{};   // the bridge drew the value text of the turn in flight (the curve knew it)
 std::array<std::atomic<bool>, 8> g_selSendHas{};   // the V-pot has a send (the script sent a level text for it)
-std::array<std::string, 8> g_selSendText;   // each V-pot's last level text from the script (MIDI thread only)
+std::array<std::string, 8> g_selSendText;
+// Log (12.11.2026, "the value sometimes stops updating"): per V-pot, one line a second while it turns or the script
+// answers: turns taken / refused (no send known), how the text was drawn, what the script sent.
+struct SelSendLog { std::atomic<int> turns{0}, refused{0}, curve{0}, gap{0}, text{0}, textHidden{0}, pos{0}, posIgnored{0}, last14{0}; };
+std::array<SelSendLog, 8> g_selSendLog;
+void selSendLogFlush()
+{
+    for (int s = 0; s < 8; ++s) {
+        SelSendLog& l = g_selSendLog[size_t(s)];
+        const int turns = l.turns.exchange(0), refused = l.refused.exchange(0);
+        if (!turns && !refused) { l.curve = 0; l.gap = 0; l.text = 0; l.textHidden = 0; l.pos = 0; l.posIgnored = 0; continue; }
+        std::printf("UF8 send V-pot %d: %d turns (last level %d of 16383), %d refused (no send known); text from the curve %d, gap %d; "
+                    "script sent text %d (hidden %d), position %d (ignored %d)\n", s + 1, turns, l.last14.load(), refused,
+                    l.curve.exchange(0), l.gap.exchange(0), l.text.exchange(0), l.textHidden.exchange(0), l.pos.exchange(0), l.posIgnored.exchange(0));
+    }
+}   // each V-pot's last level text from the script (MIDI thread only)
 std::string g_panLine[8];
 std::array<uint16_t, 8> g_focusPos{};
 std::array<uint8_t, 8> g_focusMode{};
@@ -500,7 +515,9 @@ void handleFrame(const uf8frames::Frame& fr)
         else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) {   // strip mode's pan; a send (V-pot send view)
             const bool sends = g_routeSelSends && g_routeSend < 0;
             if (!sends) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});
+            if (sends && !g_selSendHas[s]) ++g_selSendLog[s].refused;
             if (sends && g_selSendHas[s]) {   // (an empty send slot: nothing to turn)
+                ++g_selSendLog[s].turns;
                 // The V-pot send view: the bridge keeps the level, shows it at once and sends the script the level
                 // itself (2A <strip> <msb> <lsb>), not the step: counted on both sides, the two drifted apart and the
                 // settled value came as a small correction (12.11.2026).
@@ -514,6 +531,8 @@ void handleFrame(const uf8frames::Frame& fr)
                 // The value too, from the send level curve (Cubase's own text trails the ring; it follows once settled).
                 std::string t = cs::uf1LevelText(int(std::lround(v * 16383.0)));
                 g_selSendOwnText[s] = !t.empty();   // (a gap in the curve: Cubase's own text shows meanwhile)
+                g_selSendLog[s].last14 = v14;
+                ++(t.empty() ? g_selSendLog[s].gap : g_selSendLog[s].curve);
                 if (!t.empty() && g_focus < 0) {
                     if (const size_t at = t.rfind("dB"); at != std::string::npos && at > 0 && t[at - 1] != ' ') t.insert(at, " ");
                     std::string line = "Send";
@@ -949,10 +968,13 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_panLine[m[5]] = line;
             g_selSendText[m[5]] = v;
             g_selSendHas[m[5]] = !v.empty();
+            ++g_selSendLog[m[5]].text;
+            if (g_selSendOwnText[m[5]] && nowMs8() < g_selSendOwnUntil[m[5]]) ++g_selSendLog[m[5]].textHidden;
             if (g_focus < 0 && !(g_selSendOwnText[m[5]] && nowMs8() < g_selSendOwnUntil[m[5]])) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));   // (not while the bridge draws a turn)
         } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
             // A send level 0..127 on the V-pot: a unipolar bar. (Not while the bridge draws a turn itself.)
-            if (nowMs8() < g_selSendOwnUntil[m[5]]) return;
+            ++g_selSendLog[m[5]].pos;
+            if (nowMs8() < g_selSendOwnUntil[m[5]]) { ++g_selSendLog[m[5]].posIgnored; return; }
             g_selSendVal[m[5]] = m[6] / 127.0;
             if (m.size() >= 10) {   // with the exact position (Cubase's own value, not a turn in flight): teach the curve
                 const int v14 = (int(m[7]) << 7) | int(m[8]);
@@ -1358,6 +1380,7 @@ int main(int argc, char** argv)
         if (cs::stopRequested()) { std::printf("Stop asked for (tray app): blanking the surfaces.\n"); break; }
         cs::uf1Poll();
         cs::uc1Poll();
+        { static int n = 0; if (++n % 5 == 0) selSendLogFlush(); }   // once a second
         uf8Poll();
         cs::sleep::tick(cs::uf1TransportRunning(), [](bool asleep) {
             std::printf("Surfaces %s.\n", asleep ? "asleep (Sleep when idle)" : "awake");
