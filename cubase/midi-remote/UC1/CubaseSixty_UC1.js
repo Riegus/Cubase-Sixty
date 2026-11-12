@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.16.1-dev'
+var SCRIPT_VERSION = '0.16.2-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -692,7 +692,8 @@ function switchOnModuleFor(activeDevice, target, knob, clicks) {
 	if (!missing && stripOn[kind] !== 0) return false
 	if (missing && stripOpt.load !== 0) return false   // (Settings: the knobs do not load a module)
 	if (missing && target.emptySlots.length && STRIP_MODULES[kind].length > 1) {
-		picker = { kind: kind, index: 0, acc: 0, until: Date.now() + 8000, target: target }
+		// (The compressor picker opens on the one DYN IN loads, Settings: a press on DYN IN then confirms that one.)
+		picker = { kind: kind, index: kind === 'comp' ? Math.max(0, STRIP_MODULES.comp.indexOf(dynInModule())) : 0, acc: 0, until: Date.now() + 8000, target: target }
 		showPicker(activeDevice)
 		return true
 	}
