@@ -20,7 +20,7 @@
 AppId={{6F0C1B7E-5A0B-4D0E-9C55-3B1B5C6D60A1}
 AppName=Cubase-Sixty
 AppVersion={#AppVersion}
-AppPublisher=Cubase-Sixty
+AppPublisher=Geir Sveen
 AppPublisherURL=https://github.com/Riegus/Cubase-Sixty
 DefaultDirName={localappdata}\Programs\Cubase-Sixty
 DefaultGroupName=Cubase-Sixty
