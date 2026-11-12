@@ -7,6 +7,7 @@
 //     state (read from cubase\logs\bridge.log), and has Settings (the bridge's Settings page in the browser; also a
 //     click on the icon), Restart bridge, Open logs folder, Start with Windows, Quit.
 //   - Start with Windows: the usual per-user Run entry (HKCU\Software\Microsoft\Windows\CurrentVersion\Run).
+//   - CubaseSixty.exe --quit asks the running copy to quit and waits for it (the installer uses it).
 //   - One instance only. Not a Windows service on purpose (see docs\release-plan.md, step 3).
 //
 // When the bridge is started again, its MIDI ports are made anew; Cubase connects the scripts to them again by
@@ -422,6 +423,18 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
 {
+    // --quit (the installer, before replacing or removing files): asks the running copy to quit, as its menu's Quit
+    // does (the bridge stops and blanks the surfaces), and waits until it has (10 s at most).
+    if (cmdLine && wcsstr(cmdLine, L"--quit")) {
+        if (HWND running = FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr)) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(running, &pid);
+            HANDLE proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            PostMessageW(running, WM_COMMAND, kCmdQuit, 0);
+            if (proc) { WaitForSingleObject(proc, 10000); CloseHandle(proc); }
+        }
+        return 0;
+    }
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\CubaseSixtyTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   // already running
 

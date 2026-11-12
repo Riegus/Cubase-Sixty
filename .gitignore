@@ -100,3 +100,4 @@ cubase/level-curve.txt
 
 # Cubase-Sixty: local dev switch (dev-restart.ps1 uses the loopMIDI ports)
 cubase/tools/use-loopmidi.txt
+cubase/dist/

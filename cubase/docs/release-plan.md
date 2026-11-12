@@ -70,5 +70,9 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - An installer: the built bridge (with `libusb-1.0.dll`), the scripts into Cubase's MIDI Remote folder, the default
   settings, autostart, an uninstaller; a check for loopMIDI (its driver makes the ports) with a pointer to it.
 - Release defaults: the script log off, a version number shown at start.
+- 12.11.2026, started (wip/installer): an Inno Setup installer (`cubase\installer`, per user, no administrator
+  rights; see its README), `cubase\VERSION`, `CubaseSixty.exe --quit`. Decided: Inno Setup; the WinUSB driver install
+  built in (ported from Rea-Sixty: an optional installer step and a tray menu item). Next: the driver step, the
+  release defaults, the user guide.
 - A user guide: what each key does on each surface, the setup steps that stay manual (the Mackie Control device for
   scrubbing, SSL 360 not running), with links to the known issues and the Cubase limitations.
