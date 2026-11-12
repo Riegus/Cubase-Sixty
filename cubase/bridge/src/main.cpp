@@ -38,6 +38,9 @@
 #include "Uf8Fader.h"
 #include "Uf8Frames.h"
 #include "Uf1Bridge.h"
+#ifndef CS_VERSION
+#define CS_VERSION "dev"
+#endif
 #include "Favourites.h"
 #include "Settings.h"
 #include "Uc1Bridge.h"
@@ -1342,7 +1345,7 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "No MIDI ports could be made (is loopMIDI installed?). Exiting.\n");
         return 1;
     }
-    std::printf("Bridging; Ctrl+C to stop.\n");
+    std::printf("Cubase-Sixty %s. Bridging; Ctrl+C to stop.\n", CS_VERSION);
     if (uf8Ports && !cs::midiPortsAreVirtual()) {
         // Cubase sent the track names and colours when it started, before the bridge was listening, and it only
         // sends changes. If nothing has arrived a couple of seconds after start-up, press bank-next and then

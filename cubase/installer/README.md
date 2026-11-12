@@ -47,4 +47,5 @@ Both need administrator rights (one prompt) and write a log to `%TEMP%`. They ar
 After either: unplug and replug the controllers. Only controllers that are plugged in when the install runs are
 moved to the driver.
 
-Not in the installer yet: the user guide.
+The user guide (`cubase\docs\user-guide.md`) and both licences (Cubase-Sixty's, shown by the installer, and
+Rea-Sixty's) are installed beside the program.

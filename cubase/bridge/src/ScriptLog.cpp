@@ -173,7 +173,7 @@ bool scriptLogSysex(const unsigned char* m, size_t len)
     thread_local auto checked = std::chrono::steady_clock::time_point{};   // (each MIDI thread its own)
     thread_local bool on = true;
     const auto now = std::chrono::steady_clock::now();
-    if (now - checked > std::chrono::seconds(1)) { checked = now; on = settings::get("script-log", "on") != "off"; }
+    if (now - checked > std::chrono::seconds(1)) { checked = now; on = settings::get("script-log", "off") == "on"; }
     if (on) scriptLogLine(source, text);
     return true;
 }

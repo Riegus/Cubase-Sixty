@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(cubase_sixty_bridge CXX)
 
+# The version: cubase/VERSION (also read by the installer). Shown in the bridge's log and on the Settings page.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" CS_VERSION LIMIT_COUNT 1)
+string(STRIP "${CS_VERSION}" CS_VERSION)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+add_compile_definitions(CS_VERSION="${CS_VERSION}")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

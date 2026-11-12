@@ -106,7 +106,7 @@ const std::vector<Def>& defs()
         {"script-log", "Logging", "Script log",
          "The MIDI Remote scripts' lines in cubase\\logs\\scripts.log (what the scripts see and do; useful when something goes wrong).",
          {{"on", "On"}, {"off", "Off"}},
-         "on", true},
+         "off", true},   // (off in a release; dev-restart.ps1 switches it on)
     };
     return d;
 }

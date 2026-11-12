@@ -36,7 +36,8 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=Cubase-Sixty
 UninstallDisplayIcon={app}\CubaseSixty.exe
-LicenseFile=..\..\LICENSE
+; Cubase-Sixty's own licence is shown; Rea-Sixty's (whose code the bridge uses) is installed beside it, as MIT asks.
+LicenseFile=..\LICENSE
 
 [Tasks]
 Name: "autostart"; Description: "Start Cubase-Sixty with Windows"; GroupDescription: "Start:"
@@ -47,8 +48,9 @@ Name: "usbdriver"; Description: "Install the USB driver for the SSL controllers 
 Source: "{#BuildDir}\CubaseSixty.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\cubase_sixty_bridge.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\libusb-1.0.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
-Source: "..\docs\user-guide.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE-Rea-Sixty.txt"; Flags: ignoreversion
+Source: "..\docs\user-guide.md"; DestDir: "{app}"; Flags: ignoreversion
 ; The WinUSB driver binding for the controllers (Rea-Sixty's scripts): run by the task below and by the tray app's menu.
 Source: "driver\install-driver.ps1"; DestDir: "{app}\driver"; Flags: ignoreversion
 Source: "driver\uninstall-driver.ps1"; DestDir: "{app}\driver"; Flags: ignoreversion
