@@ -7,6 +7,10 @@
 //     state (read from cubase\logs\bridge.log), and has Settings (the bridge's Settings page in the browser; also a
 //     click on the icon), Restart bridge, Open logs folder, Start with Windows, Quit.
 //   - Start with Windows: the usual per-user Run entry (HKCU\Software\Microsoft\Windows\CurrentVersion\Run).
+//   - USB driver (a sub menu, when the driver scripts are installed beside the program in driver\): installs or removes
+//     the WinUSB driver binding the bridge needs to open the controllers (Rea-Sixty's scripts, run elevated: one
+//     administrator prompt). The bridge is stopped meanwhile and started again after.
+//   - CubaseSixty.exe --quit asks the running copy to quit and waits for it (the installer uses it).
 //   - One instance only. Not a Windows service on purpose (see docs\release-plan.md, step 3).
 //
 // When the bridge is started again, its MIDI ports are made anew; Cubase connects the scripts to them again by
@@ -21,6 +25,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <objbase.h>
 
 #include <chrono>
 #include <cmath>
@@ -29,6 +34,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -38,7 +44,8 @@ namespace {
 constexpr UINT kTrayMsg = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTimerMs = 500;
-enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings };
+enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdDriverInstall, kCmdDriverRemove, kCmdGuide };
+const UINT kMsgDriverDone = WM_APP + 2;   // wParam: 0 install / 1 remove; lParam: the script's exit code, -1 cancelled, -2 not started
 const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t* kRunValue = L"Cubase-Sixty";
 
@@ -56,6 +63,8 @@ bool g_loopMidi = false;
 // was connected before and has not spoken again within 20 s, the app says to restart Cubase.
 std::chrono::steady_clock::time_point g_expectCubaseBy{};
 bool g_expectCubase = false;
+// The bridge is held stopped (a driver install / removal is running): checkBridge does not start it again.
+bool g_paused = false;
 
 // What bridge.log says.
 struct Status {
@@ -247,7 +256,7 @@ void checkBridge()
     g_bridge = {};
     g_bridgeRunning = false;
     updateIcon();
-    if (g_quitting) return;
+    if (g_quitting || g_paused) return;
     const auto now = std::chrono::steady_clock::now();
     while (!g_restarts.empty() && now - g_restarts.front() > std::chrono::minutes(1)) g_restarts.pop_front();
     if (g_restarts.size() >= 5) {
@@ -304,6 +313,58 @@ void readLog()
     if (old != g_status.uf8 + g_status.uf1 + g_status.uc1 + g_status.cubase) updateIcon();
 }
 
+// ---------------------------------------------------------------------------------------------- USB driver
+
+// The WinUSB driver binding for the UF8 / UC1 / UF1 (driver\install-driver.ps1 and uninstall-driver.ps1 beside the
+// program: Rea-Sixty's scripts). Run elevated on a thread (the administrator prompt and the install take a while);
+// the result comes back as kMsgDriverDone.
+bool g_driverJob = false;
+// The user guide: installed beside the exe; in a development tree it is in cubase\docs.
+fs::path userGuidePath()
+{
+    std::error_code ec;
+    if (fs::exists(g_exeDir / L"user-guide.html", ec)) return g_exeDir / L"user-guide.html";
+    for (fs::path p = g_exeDir; !p.empty() && p != p.parent_path(); p = p.parent_path())
+        if (fs::exists(p / L"docs" / L"user-guide.html", ec)) return p / L"docs" / L"user-guide.html";
+    return {};
+}
+
+bool driverScriptsThere()
+{
+    std::error_code ec;
+    return fs::exists(g_exeDir / L"driver" / L"install-driver.ps1", ec) && fs::exists(g_exeDir / L"driver" / L"rea_sixty_winusb.inf", ec);
+}
+void runDriverScript(bool remove)
+{
+    if (g_driverJob) return;
+    g_driverJob = true;
+    const std::wstring script = (g_exeDir / L"driver" / (remove ? L"uninstall-driver.ps1" : L"install-driver.ps1")).wstring();
+    const HWND wnd = g_wnd;
+    std::thread([script, remove, wnd] {
+        const HRESULT co = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);   // ShellExecuteEx wants an apartment
+        const std::wstring args = L"-NoProfile -ExecutionPolicy Bypass -File \"" + script + L"\"";
+        SHELLEXECUTEINFOW sei{};
+        sei.cbSize = sizeof sei;
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.lpVerb = L"runas";
+        sei.lpFile = L"powershell.exe";
+        sei.lpParameters = args.c_str();
+        sei.nShow = SW_HIDE;
+        LPARAM result = -2;
+        if (!ShellExecuteExW(&sei) || !sei.hProcess) {
+            if (GetLastError() == ERROR_CANCELLED) result = -1;
+        } else {
+            WaitForSingleObject(sei.hProcess, INFINITE);
+            DWORD code = 1;
+            GetExitCodeProcess(sei.hProcess, &code);
+            CloseHandle(sei.hProcess);
+            result = LPARAM(code);
+        }
+        if (SUCCEEDED(co)) CoUninitialize();
+        PostMessageW(wnd, kMsgDriverDone, remove ? 1 : 0, result);
+    }).detach();
+}
+
 // ---------------------------------------------------------------------------------------------- autostart
 
 bool autostartOn()
@@ -346,9 +407,16 @@ void showMenu()
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (g_bridgeRunning && !g_status.settingsUrl.empty() ? 0 : MF_GRAYED), kCmdSettings, L"Settings...");
     SetMenuDefaultItem(m, kCmdSettings, FALSE);
+    if (!userGuidePath().empty()) AppendMenuW(m, MF_STRING, kCmdGuide, L"User guide");
     AppendMenuW(m, MF_STRING, kCmdRestart, g_bridgeRunning ? L"Restart bridge" : L"Start bridge");
     AppendMenuW(m, MF_STRING, kCmdLogs, L"Open logs folder");
     AppendMenuW(m, MF_STRING | (autostartOn() ? MF_CHECKED : 0), kCmdAutostart, L"Start with Windows");
+    if (driverScriptsThere()) {
+        HMENU d = CreatePopupMenu();
+        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdDriverInstall, L"Install the driver for the SSL controllers...");
+        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdDriverRemove, L"Remove it (give the controllers back to SSL 360)...");
+        AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(d), L"USB driver");
+    }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, kCmdQuit, L"Quit (stops the bridge)");
     POINT pt;
@@ -376,6 +444,24 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             else showMenu();
         } else if (LOWORD(lp) == WM_CONTEXTMENU) showMenu();
         return 0;
+    case kMsgDriverDone: {
+        g_driverJob = false;
+        g_paused = false;
+        const bool remove = wp == 1;
+        const long long code = static_cast<long long>(lp);
+        g_gaveUp = false;
+        g_restarts.clear();
+        startBridge();
+        const std::wstring logName = remove ? L"rea_sixty_winusb_uninstall.log" : L"rea_sixty_winusb_install.log";
+        std::wstring text;
+        if (code == 0) text = remove ? L"The driver is removed. Unplug and replug the controllers; reinstall SSL 360 if it does not see them."
+                                     : L"The driver is installed. Unplug and replug the controllers now.";
+        else if (code == -1) text = L"Cancelled at the Windows permission prompt. Nothing was changed.";
+        else if (code == -2) text = L"The script could not be started.";
+        else text = (remove ? L"Removing the driver failed. " : L"Installing the driver failed. ") + std::wstring(L"The reason is in %TEMP%\\") + logName + L".";
+        MessageBoxW(nullptr, text.c_str(), L"Cubase-Sixty: USB driver", MB_OK | (code == 0 ? MB_ICONINFORMATION : MB_ICONWARNING) | MB_SETFOREGROUND);
+        return 0;
+    }
     case WM_TIMER:
         checkBridge();
         if (g_bridgeRunning) readLog();
@@ -396,6 +482,11 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (!g_status.settingsUrl.empty())
                 ShellExecuteW(nullptr, L"open", widen(g_status.settingsUrl).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             break;
+        case kCmdGuide: {
+            const fs::path g = userGuidePath();
+            if (!g.empty()) ShellExecuteW(nullptr, L"open", g.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
         case kCmdLogs:
             fs::create_directories(g_logsDir);
             ShellExecuteW(nullptr, L"open", g_logsDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -403,6 +494,23 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         case kCmdAutostart:
             setAutostart(!autostartOn());
             break;
+        case kCmdDriverInstall:
+        case kCmdDriverRemove: {
+            const bool remove = LOWORD(wp) == kCmdDriverRemove;
+            const wchar_t* text = remove
+                ? L"This removes the WinUSB driver for the SSL UF8, UC1 and UF1, so that SSL 360 can use them again.\n\n"
+                  L"Cubase-Sixty (and Rea-Sixty, which uses the same driver) will no longer see the controllers.\n"
+                  L"Windows asks for administrator permission. Afterwards, unplug and replug the controllers.\n\nGo on?"
+                : L"This installs the WinUSB driver for the SSL UF8, UC1 and UF1, so that Cubase-Sixty can use them.\n\n"
+                  L"Have the controllers plugged in and switched on now. SSL 360 will no longer see them (the USB driver sub menu "
+                  L"gives them back).\nWindows asks for administrator permission. Afterwards, unplug and replug the controllers.\n\nGo on?";
+            if (MessageBoxW(nullptr, text, L"Cubase-Sixty: USB driver", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) break;
+            g_paused = true;   // the bridge lets go of the devices meanwhile, and is not started again until the script is done
+            stopBridge();
+            updateIcon();
+            runDriverScript(remove);
+            break;
+        }
         case kCmdQuit:
             g_quitting = true;
             stopBridge();
@@ -422,6 +530,18 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
 {
+    // --quit (the installer, before replacing or removing files): asks the running copy to quit, as its menu's Quit
+    // does (the bridge stops and blanks the surfaces), and waits until it has (10 s at most).
+    if (cmdLine && wcsstr(cmdLine, L"--quit")) {
+        if (HWND running = FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr)) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(running, &pid);
+            HANDLE proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            PostMessageW(running, WM_COMMAND, kCmdQuit, 0);
+            if (proc) { WaitForSingleObject(proc, 10000); CloseHandle(proc); }
+        }
+        return 0;
+    }
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\CubaseSixtyTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   // already running
 

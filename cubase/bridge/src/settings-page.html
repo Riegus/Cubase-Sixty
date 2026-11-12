@@ -203,10 +203,10 @@ function sectionBody(id) {
     s.append(el("div", { class: "favs" }, strips, buses), save);
   } else if (id === "about") {
     s.append(el("div", { class: "card" },
-      el("h2", {}, "Cubase-Sixty"),
+      el("h2", {}, "Cubase-Sixty " + (state.version || "")),
       el("p", { class: "help" }, "SSL UF8, UF1 and UC1 in Cubase, ported from Rea-Sixty."),
       el("p", { class: "help" }, "Logs: ", el("code", {}, state.paths.logs)),
-      el("p", { class: "help" }, "This page is served by the bridge on this computer only. The settings are kept in ", el("code", {}, "cubase\\settings.txt"), " and ", el("code", {}, "cubase\\favourites.txt"), "; editing those by hand works too.")));
+      el("p", { class: "help" }, "This page is served by the bridge on this computer only. The settings are kept in ", el("code", {}, "settings.txt"), " and ", el("code", {}, "favourites.txt"), " in ", el("code", {}, state.paths.settings || ""), "; editing those by hand works too.")));
   } else {
     const title = sections.find(x => x.id === id).title;
     for (const d of state.settings.filter(d => d.section === title)) s.append(settingCard(d));

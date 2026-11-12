@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(cubase_sixty_bridge CXX)
 
+# The version: cubase/VERSION (also read by the installer). Shown in the bridge's log and on the Settings page.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" CS_VERSION LIMIT_COUNT 1)
+string(STRIP "${CS_VERSION}" CS_VERSION)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+add_compile_definitions(CS_VERSION="${CS_VERSION}")
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -120,7 +126,7 @@ if(WIN32)
     add_executable(cubase_sixty_tray WIN32 src/tray/TrayApp.cpp src/tray/TrayApp.rc)
     set_target_properties(cubase_sixty_tray PROPERTIES OUTPUT_NAME "CubaseSixty")
     target_compile_definitions(cubase_sixty_tray PRIVATE UNICODE _UNICODE NOMINMAX)
-    target_link_libraries(cubase_sixty_tray PRIVATE shell32 user32 gdi32 advapi32)
+    target_link_libraries(cubase_sixty_tray PRIVATE shell32 user32 gdi32 advapi32 ole32)
     if(MSVC)
         target_compile_options(cubase_sixty_tray PRIVATE /utf-8 /permissive-)
     endif()

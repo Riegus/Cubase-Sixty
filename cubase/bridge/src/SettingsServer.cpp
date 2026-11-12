@@ -32,6 +32,10 @@ static const Sock kBad = -1;
 static void closeSock(Sock s) { close(s); }
 #endif
 
+#ifndef CS_VERSION
+#define CS_VERSION "dev"
+#endif
+
 namespace cs { bool netInit(); }   // NetInit.cpp
 
 namespace cs::settingsServer {
@@ -104,7 +108,7 @@ std::string state()
     }
     o += "],\"favourites\":{\"strips\":" + jsonList(favourites::list(0)) + ",\"busComps\":" + jsonList(favourites::list(1)) +
          ",\"knownStrips\":" + jsonList(favourites::known(0)) + ",\"knownBusComps\":" + jsonList(favourites::known(1)) + "}";
-    o += ",\"paths\":{\"logs\":" + json(g_logsDir) + "}}";
+    o += ",\"paths\":{\"logs\":" + json(g_logsDir) + ",\"settings\":" + json(settings::dir().string()) + "},\"version\":" + json(CS_VERSION) + "}";
     return o;
 }
 
