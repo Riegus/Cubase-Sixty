@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.16.0-dev'
+var SCRIPT_VERSION = '0.16.1-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -596,7 +596,9 @@ try {
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
 		page.makeValueBinding(k.mSurfaceValue, hostValue)
 		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-			if (stripOn[kind] !== value) log('strip ' + kind + ' on switch: ' + value)
+			// A change also means the module may have been loaded or removed in Cubase (which reports no object change
+			// for that: the knobs' rings stayed lit after the compressor was removed, 12.11.2026): look at the track again.
+			if (stripOn[kind] !== value) { log('strip ' + kind + ' on switch: ' + value); state.rescanAt = Date.now() + 300 }
 			stripOn[kind] = value
 		}
 	}
