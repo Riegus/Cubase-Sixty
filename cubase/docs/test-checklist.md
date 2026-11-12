@@ -63,3 +63,13 @@ Quick: the page opens from the tray; one setting changed shows at once.
 
 - Each section opens; a change is written to settings.txt and logged once.
 - Tray icon colours; menu items; Start with Windows.
+
+## Installer and user guide
+
+Quick: the installer builds and installs over the previous version; the tray's User guide item opens the guide.
+
+- `build-installer.ps1` builds; the licence page shows Cubase-Sixty's licence; publisher "Geir Sveen".
+- Install with Cubase-Sixty running (it is stopped and started again); Settings > About shows the version.
+- The USB driver task is ticked only when needed; tray menu USB driver > Install / Remove.
+- Uninstall: the program and scripts are gone; it asks about settings and favourites.
+- A change to a control: user-guide.md updated, `make-user-guide.py` run, both committed.

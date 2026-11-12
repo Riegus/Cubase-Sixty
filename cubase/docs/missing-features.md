@@ -37,7 +37,7 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 ## UC1
 
 - **Favourites**: stepping with the CHANNEL encoder (CS Fav / BC Fav) and carrying the settings are done; missing are
-  sets, the Settings page (now a text file), A/B (copy to favourite N), "own settings" (each favourite's last
+  sets, A/B (copy to favourite N), "own settings" (each favourite's last
   settings), the Focused Domain cycle, the favourite soft-key banks, several tracks at once, the bypass state kept.
 - **FX Learn**: non-SSL plug-ins mapped onto the UC1 (and the UF1 layer), with knob travel / curves, stepped
   parameters, a multi-instance picker.
@@ -64,9 +64,8 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 
 ## General
 
-- **A settings window** (see the [settings wishlist](settings-wishlist.md)).
-- **Installer / packaging.**
-- Brightness and sleep settings for the surfaces.
+- The rest of the [settings wishlist](settings-wishlist.md) (the Settings page, brightness and sleep are done).
+- The installer and the [user guide](user-guide.md) are done (12.11.2026); publishing a release is not.
 
 ## REAPER only (probably not ported)
 

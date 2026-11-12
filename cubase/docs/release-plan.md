@@ -75,6 +75,9 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   built in (ported from Rea-Sixty: an optional installer step and a tray menu item). Then (12.11.2026): the driver step (installer
   task and the tray app's USB driver sub menu; tested), the release defaults (the script log off unless switched on,
   the version in the bridge's log and on the Settings page's About), the [user guide](user-guide.md) (first
-  version, to be read against the hardware).
+  version). 13.11.2026: the guide rewritten to explain how to work with each surface (to be read against the
+  hardware), and an HTML version in the Settings page's design (`cubase\tools\make-user-guide.py` makes
+  `docs\user-guide.html` from the Markdown; installed, and opened from the tray menu's User guide item and the
+  Start menu). READMEs and missing-features.md brought up to date first (value line 2 s, favourites 0.8 s).
 - A user guide: what each key does on each surface, the setup steps that stay manual (the Mackie Control device for
   scrubbing, SSL 360 not running), with links to the known issues and the Cubase limitations.
