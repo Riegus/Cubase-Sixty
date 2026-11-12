@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.8-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.9-test (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -90,6 +90,8 @@ panel(852, 128, 43, 20); panel(899, 128, 43, 20); panel(946, 128, 39, 20)
 surface.makeBlindPanel(px(886), px(168), px(64), px(64))
 panel(852, 244, 44, 22); panel(898, 244, 44, 22); panel(944, 244, 41, 22)
 
+var TEST_NO_SEND_BINDINGS = true
+out('[CubaseSixty] TEST: bindings on send slots ' + (TEST_NO_SEND_BINDINGS ? 'left out' : 'made'))
 var STRIPS = 8
 var strips = []
 
@@ -244,13 +246,23 @@ for (var i = 0; i < STRIPS; ++i) {
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(vpotVol)
 	// (Send levels go through Direct Access, see "Send views" below: the send's on switch is only a placeholder, a
 	// control needs a binding in every sub page.)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mOn).setSubPage(vpotSends)
+	// TEST (12.11.2026): no binding on any send slot at all (TEST_NO_SEND_BINDINGS), to see whether Cubase's stall while a
+	// send level changes quickly comes from having anything bound to the send. Placeholders then: the V-pot on the
+	// track's pan, the fader on its volume (neither is moved from the surface in a send view: the bridge sends 2A / 25),
+	// CUT on the track's mute.
+	if (TEST_NO_SEND_BINDINGS) page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(vpotSends)
+	else page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mOn).setSubPage(vpotSends)
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderVol)
 	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderPan)
 	for (var sn = 0; sn < 8; ++sn) {
 		var sendSlot = channel.mSends.getByIndex(sn)
-		page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mOn).setSubPage(faderSend[sn])   // (placeholder: see "Send views")
-		page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(faderSend[sn])
+		if (TEST_NO_SEND_BINDINGS) {
+			page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mVolume).setValueTakeOverModeJump().setSubPage(faderSend[sn])
+			page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderSend[sn])
+		} else {
+			page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mOn).setSubPage(faderSend[sn])   // (placeholder: see "Send views")
+			page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(faderSend[sn])
+		}
 		;(function (index, n) {
 			sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
 				sendTitles[index][n] = title || ''

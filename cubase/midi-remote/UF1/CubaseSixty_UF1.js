@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.8-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.9-test (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -370,6 +370,7 @@ var quickControls = null
 try { quickControls = page.mHostAccess.mFocusedQuickControls } catch (e) { out('[CubaseSixty UF1] Quick Controls not available: ' + e) }
 
 var selectedChannel = page.mHostAccess.mTrackSelection.mMixerChannel
+var TEST_NO_SEND_BINDINGS = true
 // Send levels go to Cubase through Direct Access, not through MIDI Remote value bindings (10.11.2026): with a
 // binding on a send level Cubase paused ~0.8 s at a time while it kept changing (answering about 1 step in 20); a
 // write with setParameterProcessValue on the send slot's level was smooth. A binding on the level only for the display
@@ -496,14 +497,17 @@ for (var sendIndex = 0; sendIndex < 4; ++sendIndex) {
 	for (var bk = 0; bk < banks.length; ++bk) {
 		try {
 			var send = selectedChannel.mSends.getByIndex(banks[bk].index)
-			page.makeValueBinding(sendKnob.mSurfaceValue, send.mOn).setSubPage(banks[bk].subPage)   // (a placeholder: see sendDa)
+			// TEST (12.11.2026, with the UF8 script): no binding on any send slot; the knob's placeholder on the track's pan
+			// (not moved from here: the bridge sends the turns on CC 21-24), the push not bound (it does nothing meanwhile).
+			if (TEST_NO_SEND_BINDINGS) page.makeValueBinding(sendKnob.mSurfaceValue, selectedChannel.mValue.mPan).setSubPage(banks[bk].subPage)
+			else page.makeValueBinding(sendKnob.mSurfaceValue, send.mOn).setSubPage(banks[bk].subPage)   // (a placeholder: see sendDa)
 			;(function (slot) {
 				send.mOnTitleChange = function (activeDevice, activeMapping, name) {
 					sendNames[slot] = name || ''
 					if (!qcActive && slot >= sendOffset && slot < sendOffset + 4) refreshCellNames(activeDevice)
 				}
 			})(banks[bk].index)
-			page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
+			if (!TEST_NO_SEND_BINDINGS) page.makeValueBinding(sendPush.mSurfaceValue, send.mOn).setTypeToggle().setSubPage(banks[bk].subPage)
 		} catch (e) {
 			out('[CubaseSixty UF1] send ' + (banks[bk].index + 1) + ' could not be bound: ' + e)
 		}
