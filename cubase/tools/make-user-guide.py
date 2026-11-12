@@ -17,45 +17,82 @@ SRC = ROOT / "docs" / "user-guide.md"
 OUT = ROOT / "docs" / "user-guide.html"
 GITHUB = "https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/"
 
+# The Settings page's colours and layout (bridge/src/settings-page.html): keep the two alike.
 CSS = """
-:root { --bg:#fbfbfa; --fg:#1d2126; --mut:#5b6470; --line:#dcdfe3; --card:#fff; --acc:#0a7d5a; --head:#f1f3f4; --code:#eceef0; }
+:root {
+  --bg: #f4f4f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6;
+  --accent: #2f7d4f; --accent-ink: #ffffff; --rail: #ebebe6; --focus: #2f7d4f55;
+}
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#16181b; --fg:#e4e6e9; --mut:#9aa3ad; --line:#30353b; --card:#1d2024; --acc:#4fd1a5; --head:#24282d; --code:#262a2f; }
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92; --line: #33332f;
+    --accent: #5cc285; --accent-ink: #0d1f14; --rail: #1a1a18; --focus: #5cc28566;
+  }
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 16px; }
-body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
-.wrap { display:flex; max-width:1240px; margin:0 auto; }
-nav { flex:0 0 250px; position:sticky; top:0; align-self:flex-start; height:100vh; overflow-y:auto; padding:28px 12px 28px 20px;
-      border-right:1px solid var(--line); font-size:14px; }
-nav .ver { color:var(--mut); font-size:12px; margin-bottom:14px; }
-nav ul { list-style:none; margin:0; padding:0; }
-nav ul ul { padding-left:14px; margin-bottom:6px; }
-nav ul ul ul a { font-size:13px; }
-nav li { margin:2px 0; }
-nav a { color:var(--mut); text-decoration:none; display:block; padding:1px 6px; border-radius:4px; }
-nav > .toc > ul > li > a { display:none; }
-nav > .toc > ul > li > ul { padding-left:0; }
-nav > .toc > ul > li > ul > li > a { color:var(--fg); font-weight:600; margin-top:6px; }
-nav a:hover { color:var(--acc); background:var(--head); }
-main { flex:1; min-width:0; padding:28px 40px 80px; max-width:900px; }
-h1 { font-size:34px; margin:0 0 12px; letter-spacing:-.01em; }
-h2 { font-size:25px; margin:44px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--acc); }
-h3 { font-size:18px; margin:30px 0 8px; }
-a { color:var(--acc); }
-hr { border:0; border-top:1px solid var(--line); margin:40px 0; }
-code { background:var(--code); padding:1px 5px; border-radius:4px; font:14px Consolas, "Cascadia Mono", monospace; }
-.tbl { overflow-x:auto; margin:14px 0; }
-table { border-collapse:collapse; width:100%; background:var(--card); font-size:15px; }
-th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
-th { background:var(--head); font-weight:600; }
-td:first-child { white-space:nowrap; }
-li { margin:4px 0; }
-@media (max-width: 860px) {
-  .wrap { display:block; } nav { display:none; } main { padding:20px 16px 60px; }
-  td:first-child { white-space:normal; }
+html { scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 "Segoe UI", system-ui, sans-serif; }
+.app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+nav { background: var(--rail); border-right: 1px solid var(--line); padding: 20px 12px; position: sticky; top: 0;
+      height: 100vh; overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 2px; font-weight: 600; letter-spacing: .2px; }
+.brand svg { flex: none; }
+.ver { color: var(--muted); font-size: 12px; padding: 0 8px 16px 40px; }
+nav ul { list-style: none; margin: 0; padding: 0; }
+nav li { margin: 0; }
+nav a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+nav a:hover { background: var(--line); }
+nav a.on { background: var(--accent); color: var(--accent-ink); }
+nav > .toc > ul > li > a { display: none; }
+nav ul ul ul { display: none; margin: 2px 0 6px; }
+nav li.open > ul { display: block; }
+nav ul ul ul a { padding: 4px 10px 4px 22px; font-size: 13px; color: var(--muted); }
+nav ul ul ul a.on { background: var(--line); color: var(--ink); }
+main { padding: 28px 36px 80px; max-width: 900px; min-width: 0; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h1 + p { color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; margin: 16px 0; }
+.card > :last-child { margin-bottom: 0; }
+h2 { font-size: 18px; margin: 0 0 8px; }
+h3 { font-size: 15px; margin: 22px 0 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 24px; }
+li { margin: 4px 0; }
+a { color: var(--accent); }
+main a:focus-visible, nav a:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+hr { display: none; }
+code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font: 13px Consolas, monospace; }
+.tbl { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 12px; text-align: left; vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { background: var(--bg); color: var(--muted); font-weight: 600; font-size: 13px; }
+td:first-child { white-space: nowrap; font-weight: 600; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; } nav { display: none; } main { padding: 20px 16px 60px; }
+  td:first-child { white-space: normal; }
 }
-@media print { nav { display:none; } main { max-width:none; padding:0; } body { background:#fff; color:#000; } }
+@media print { nav { display: none; } .app { display: block; } .card { border: 0; padding: 0; } }
+"""
+
+BRAND = """<svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="var(--accent)"/><g fill="#1e1e1e"><rect x="3.9" y="3.5" width="1.2" height="9" rx=".6"/><rect x="7.4" y="3.5" width="1.2" height="9" rx=".6"/><rect x="10.9" y="3.5" width="1.2" height="9" rx=".6"/></g><g fill="#fff"><rect x="2.9" y="8.4" width="3.2" height="2.2" rx=".5"/><rect x="6.4" y="3.9" width="3.2" height="2.2" rx=".5"/><rect x="9.9" y="6.4" width="3.2" height="2.2" rx=".5"/></g></svg>"""
+
+# Marks the section being read in the rail, and opens its sub list.
+SCRIPT = """
+(function () {
+  var links = {}, heads = [].slice.call(document.querySelectorAll("main h2, main h3"));
+  [].forEach.call(document.querySelectorAll("nav a"), function (a) { links[decodeURIComponent(a.getAttribute("href").slice(1))] = a; });
+  function mark() {
+    var cur = null, sec = null;
+    heads.forEach(function (h) { if (h.getBoundingClientRect().top < 90) { cur = h; if (h.tagName === "H2") sec = h; } });
+    if (!cur) { cur = sec = heads[0]; }
+    [].forEach.call(document.querySelectorAll("nav a.on"), function (a) { a.classList.remove("on"); });
+    [].forEach.call(document.querySelectorAll("nav li.open"), function (l) { l.classList.remove("open"); });
+    if (sec && links[sec.id]) { links[sec.id].classList.add("on"); links[sec.id].parentNode.classList.add("open"); }
+    if (cur !== sec && links[cur.id]) links[cur.id].classList.add("on");
+  }
+  addEventListener("scroll", mark, { passive: true }); mark();
+})();
 """
 
 
@@ -69,6 +106,9 @@ def main():
     body = md.convert(text)
     # Links to the other docs go to GitHub (they are not installed).
     body = re.sub(r'href="(?!https?:|#)([\w\-]+\.md)', lambda m: 'href="' + GITHUB + m.group(1), body)
+    # Each chapter (h2 and what follows) in a card, as the Settings page's items.
+    parts = re.split(r"(?=<h2 )", body)
+    body = parts[0] + "".join('<div class="card">' + p + "</div>" for p in parts[1:])
     body = body.replace("<table>", '<div class="tbl"><table>').replace("</table>", "</table></div>")
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -79,12 +119,13 @@ def main():
 <style>{CSS}</style>
 </head>
 <body>
-<div class="wrap">
-<nav><div class="ver">Cubase-Sixty {version}</div>{md.toc}</nav>
+<div class="app">
+<nav><div class="brand">{BRAND} Cubase-Sixty</div><div class="ver">User guide · {version}</div>{md.toc}</nav>
 <main>
 {body}
 </main>
 </div>
+<script>{SCRIPT}</script>
 </body>
 </html>
 """

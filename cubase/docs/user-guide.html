@@ -5,49 +5,65 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cubase-Sixty user guide</title>
 <style>
-:root { --bg:#fbfbfa; --fg:#1d2126; --mut:#5b6470; --line:#dcdfe3; --card:#fff; --acc:#0a7d5a; --head:#f1f3f4; --code:#eceef0; }
+:root {
+  --bg: #f4f4f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #dcdcd6;
+  --accent: #2f7d4f; --accent-ink: #ffffff; --rail: #ebebe6; --focus: #2f7d4f55;
+}
 @media (prefers-color-scheme: dark) {
-  :root { --bg:#16181b; --fg:#e4e6e9; --mut:#9aa3ad; --line:#30353b; --card:#1d2024; --acc:#4fd1a5; --head:#24282d; --code:#262a2f; }
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecece6; --muted: #9a9a92; --line: #33332f;
+    --accent: #5cc285; --accent-ink: #0d1f14; --rail: #1a1a18; --focus: #5cc28566;
+  }
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; scroll-padding-top: 16px; }
-body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 "Segoe UI", system-ui, -apple-system, sans-serif; }
-.wrap { display:flex; max-width:1240px; margin:0 auto; }
-nav { flex:0 0 250px; position:sticky; top:0; align-self:flex-start; height:100vh; overflow-y:auto; padding:28px 12px 28px 20px;
-      border-right:1px solid var(--line); font-size:14px; }
-nav .ver { color:var(--mut); font-size:12px; margin-bottom:14px; }
-nav ul { list-style:none; margin:0; padding:0; }
-nav ul ul { padding-left:14px; margin-bottom:6px; }
-nav ul ul ul a { font-size:13px; }
-nav li { margin:2px 0; }
-nav a { color:var(--mut); text-decoration:none; display:block; padding:1px 6px; border-radius:4px; }
-nav > .toc > ul > li > a { display:none; }
-nav > .toc > ul > li > ul { padding-left:0; }
-nav > .toc > ul > li > ul > li > a { color:var(--fg); font-weight:600; margin-top:6px; }
-nav a:hover { color:var(--acc); background:var(--head); }
-main { flex:1; min-width:0; padding:28px 40px 80px; max-width:900px; }
-h1 { font-size:34px; margin:0 0 12px; letter-spacing:-.01em; }
-h2 { font-size:25px; margin:44px 0 12px; padding-bottom:6px; border-bottom:2px solid var(--acc); }
-h3 { font-size:18px; margin:30px 0 8px; }
-a { color:var(--acc); }
-hr { border:0; border-top:1px solid var(--line); margin:40px 0; }
-code { background:var(--code); padding:1px 5px; border-radius:4px; font:14px Consolas, "Cascadia Mono", monospace; }
-.tbl { overflow-x:auto; margin:14px 0; }
-table { border-collapse:collapse; width:100%; background:var(--card); font-size:15px; }
-th, td { border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top; }
-th { background:var(--head); font-weight:600; }
-td:first-child { white-space:nowrap; }
-li { margin:4px 0; }
-@media (max-width: 860px) {
-  .wrap { display:block; } nav { display:none; } main { padding:20px 16px 60px; }
-  td:first-child { white-space:normal; }
+html { scroll-padding-top: 16px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 "Segoe UI", system-ui, sans-serif; }
+.app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+nav { background: var(--rail); border-right: 1px solid var(--line); padding: 20px 12px; position: sticky; top: 0;
+      height: 100vh; overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 2px; font-weight: 600; letter-spacing: .2px; }
+.brand svg { flex: none; }
+.ver { color: var(--muted); font-size: 12px; padding: 0 8px 16px 40px; }
+nav ul { list-style: none; margin: 0; padding: 0; }
+nav li { margin: 0; }
+nav a { display: block; padding: 7px 10px; border-radius: 6px; color: var(--ink); text-decoration: none; }
+nav a:hover { background: var(--line); }
+nav a.on { background: var(--accent); color: var(--accent-ink); }
+nav > .toc > ul > li > a { display: none; }
+nav ul ul ul { display: none; margin: 2px 0 6px; }
+nav li.open > ul { display: block; }
+nav ul ul ul a { padding: 4px 10px 4px 22px; font-size: 13px; color: var(--muted); }
+nav ul ul ul a.on { background: var(--line); color: var(--ink); }
+main { padding: 28px 36px 80px; max-width: 900px; min-width: 0; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+h1 + p { color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; margin: 16px 0; }
+.card > :last-child { margin-bottom: 0; }
+h2 { font-size: 18px; margin: 0 0 8px; }
+h3 { font-size: 15px; margin: 22px 0 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+p { margin: 0 0 12px; }
+ul, ol { margin: 0 0 12px; padding-left: 24px; }
+li { margin: 4px 0; }
+a { color: var(--accent); }
+main a:focus-visible, nav a:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+hr { display: none; }
+code { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font: 13px Consolas, monospace; }
+.tbl { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { border-bottom: 1px solid var(--line); padding: 7px 12px; text-align: left; vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { background: var(--bg); color: var(--muted); font-weight: 600; font-size: 13px; }
+td:first-child { white-space: nowrap; font-weight: 600; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; } nav { display: none; } main { padding: 20px 16px 60px; }
+  td:first-child { white-space: normal; }
 }
-@media print { nav { display:none; } main { max-width:none; padding:0; } body { background:#fff; color:#000; } }
+@media print { nav { display: none; } .app { display: block; } .card { border: 0; padding: 0; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-<nav><div class="ver">Cubase-Sixty 0.1.0</div><div class="toc">
+<div class="app">
+<nav><div class="brand"><svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="var(--accent)"/><g fill="#1e1e1e"><rect x="3.9" y="3.5" width="1.2" height="9" rx=".6"/><rect x="7.4" y="3.5" width="1.2" height="9" rx=".6"/><rect x="10.9" y="3.5" width="1.2" height="9" rx=".6"/></g><g fill="#fff"><rect x="2.9" y="8.4" width="3.2" height="2.2" rx=".5"/><rect x="6.4" y="3.9" width="3.2" height="2.2" rx=".5"/><rect x="9.9" y="6.4" width="3.2" height="2.2" rx=".5"/></g></svg> Cubase-Sixty</div><div class="ver">User guide · 0.1.0</div><div class="toc">
 <ul>
 <li><a href="#cubase-sixty-user-guide">Cubase-Sixty user guide</a><ul>
 <li><a href="#what-you-need">What you need</a></li>
@@ -103,7 +119,7 @@ li { margin:4px 0; }
 makes them work in REAPER: the mixer on faders, V-pots and displays, the SSL plug-ins of your tracks on the UC1's
 knobs, without SSL 360. Any one of the three surfaces is enough; they work alone and together.</p>
 <p>Tested with Cubase 15 Pro on Windows 11.</p>
-<h2 id="what-you-need">What you need</h2>
+<div class="card"><h2 id="what-you-need">What you need</h2>
 <ul>
 <li>Windows 10 or 11 (64 bit) and Cubase with MIDI Remote and Direct Access (developed and tested on Cubase 15 Pro;
   older versions are untested).</li>
@@ -114,7 +130,7 @@ knobs, without SSL 360. Any one of the three surfaces is enough; they work alone
   <a href="#going-back-to-ssl-360">Going back to SSL 360</a>). The SSL plug-ins themselves work as always, and you do not need
   SSL 360 for them.</li>
 </ul>
-<h2 id="installing">Installing</h2>
+</div><div class="card"><h2 id="installing">Installing</h2>
 <ol>
 <li>Plug the controllers in and switch them on.</li>
 <li>Run <code>CubaseSixty-Setup-&lt;version&gt;.exe</code>. Windows may show "Windows protected your PC", because the installer is not
@@ -133,7 +149,7 @@ knobs, without SSL 360. Any one of the three surfaces is enough; they work alone
 "Waiting for Cubase".</p>
 <p>What is installed where: the program in <code>%LOCALAPPDATA%\Programs\Cubase-Sixty</code> (with your settings, favourites and
 logs beside it), four MIDI Remote scripts in <code>Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty</code>.</p>
-<h2 id="setting-up-cubase-once">Setting up Cubase (once)</h2>
+</div><div class="card"><h2 id="setting-up-cubase-once">Setting up Cubase (once)</h2>
 <p>Start Cubase with Cubase-Sixty running. Cubase finds the scripts and the ports by itself: <em>Studio &gt; MIDI Remote
 Manager</em> lists CubaseSixty - UF8, UF1, UC1 and Helper (the Helper has no hardware; it keeps lists for the others).
 Open a project and the controllers come alive. Then two things in <em>Studio &gt; Studio Setup</em>:</p>
@@ -146,7 +162,7 @@ Open a project and the controllers come alive. Then two things in <em>Studio &gt
    it and set <strong>MIDI Input</strong> to <code>Cubase-Sixty MCU to Cubase</code> and <strong>MIDI Output</strong> to <code>Cubase-Sixty MCU from Cubase</code>,
    then <strong>Apply</strong>. Nothing else uses this device.</li>
 </ol>
-<h2 id="every-day">Every day</h2>
+</div><div class="card"><h2 id="every-day">Every day</h2>
 <p>Cubase-Sixty runs in the tray, whether Cubase is open or not. The icon's colour says how things are:</p>
 <div class="tbl"><table>
 <thead>
@@ -181,7 +197,7 @@ Open a project and the controllers come alive. Then two things in <em>Studio &gt
 <li>With <em>Sleep when idle</em> set (Settings &gt; Devices), the surfaces go dark after that time without a touch while the
   transport is stopped. The first touch wakes them and does nothing else.</li>
 </ul>
-<h2 id="how-the-surfaces-think">How the surfaces think</h2>
+</div><div class="card"><h2 id="how-the-surfaces-think">How the surfaces think</h2>
 <p>A few ideas that make the rest easier:</p>
 <ul>
 <li><strong>The selected track</strong> is the centre. The UF1 and the UC1 always work on it, and the UF8 moves its eight strips
@@ -197,7 +213,7 @@ Open a project and the controllers come alive. Then two things in <em>Studio &gt
   can trail the controller for a moment.</li>
 </ul>
 <hr />
-<h2 id="uf8">UF8</h2>
+</div><div class="card"><h2 id="uf8">UF8</h2>
 <p>Eight strips on a bank of the MixConsole's channels.</p>
 <h3 id="the-strips">The strips</h3>
 <div class="tbl"><table>
@@ -399,7 +415,7 @@ letting go keeps the one shown.</p>
 the selected event, like a double-click.</p>
 <p><strong>FOOT 1 / 2</strong>: foot switches play and record.</p>
 <hr />
-<h2 id="uf1">UF1</h2>
+</div><div class="card"><h2 id="uf1">UF1</h2>
 <p>One strip for the <strong>selected track</strong>, a large display with four V-pots, transport and a jog wheel.</p>
 <h3 id="the-strip">The strip</h3>
 <div class="tbl"><table>
@@ -541,7 +557,7 @@ the jog</strong> to pick it:</p>
 <li><strong>FOOT 1 / 2</strong>: foot switches.</li>
 </ul>
 <hr />
-<h2 id="uc1">UC1</h2>
+</div><div class="card"><h2 id="uc1">UC1</h2>
 <p>The UC1 is your channel strip and bus compressor in hardware. The left and right thirds work the <strong>channel strip of
 the selected track</strong>, the middle top a <strong>bus compressor</strong>, and the middle bottom gets you around.</p>
 <h3 id="on-an-ssl-channel-strip">On an SSL channel strip</h3>
@@ -661,7 +677,7 @@ strip, the plug-in window, Channel Settings, the MixConsole, bypass, or nothing.
   the one shown, BACK or CONFIRM closes.</li>
 </ul>
 <hr />
-<h2 id="favourites">Favourites</h2>
+</div><div class="card"><h2 id="favourites">Favourites</h2>
 <p>Up to eight channel strips and eight bus compressors that you swap between by turning an encoder: compare a 4K E
 against a 4K G on a vocal without opening a menu.</p>
 <ul>
@@ -673,7 +689,7 @@ against a 4K G on a vocal without opening a menu.</p>
   favourite goes into the first free insert slot.</li>
 <li>CS swaps the strip the UC1 is on; BC swaps the Bus Comp section's compressor. This needs a UC1.</li>
 </ul>
-<h2 id="using-them-together">Using them together</h2>
+</div><div class="card"><h2 id="using-them-together">Using them together</h2>
 <ul>
 <li><strong>Selection ties everything together.</strong> SEL on the UF8, the channel encoder on any surface, or a mouse click: the
   UF1's strip, the UC1's channel strip and the UF8's bank all go to that track.</li>
@@ -686,7 +702,7 @@ against a 4K G on a vocal without opening a menu.</p>
   is what the send views, Nav Mode and the AUTO mode are for.</li>
 </ul>
 <hr />
-<h2 id="settings">Settings</h2>
+</div><div class="card"><h2 id="settings">Settings</h2>
 <p>Click the tray icon. The page opens in your browser; it is served by Cubase-Sixty on this computer only. A change
 is saved and takes effect at once.</p>
 <div class="tbl"><table>
@@ -732,7 +748,7 @@ is saved and takes effect at once.</p>
 </tbody>
 </table></div>
 <p>"Project window" track stepping only works while Cubase's Project window has the focus: click in it first.</p>
-<h2 id="going-back-to-ssl-360">Going back to SSL 360</h2>
+</div><div class="card"><h2 id="going-back-to-ssl-360">Going back to SSL 360</h2>
 <p>SSL 360 uses SSL's own USB driver for the controllers; Cubase-Sixty (like Rea-Sixty) needs Windows' WinUSB driver.
 A controller can only be on one of them, so the two programs cannot share the controllers, and quitting Cubase-Sixty
 is not enough.</p>
@@ -746,7 +762,7 @@ is not enough.</p>
 Cubase-Sixty see the controllers (one at a time: quit the one before starting the other).</p>
 <p>While Cubase-Sixty runs it closes SSL 360's background program (SSL360Core.exe) whenever it appears, because the two
 compete for the SSL plug-ins' meters.</p>
-<h2 id="when-something-is-wrong">When something is wrong</h2>
+</div><div class="card"><h2 id="when-something-is-wrong">When something is wrong</h2>
 <div class="tbl"><table>
 <thead>
 <tr>
@@ -795,7 +811,7 @@ compete for the SSL plug-ins' meters.</p>
 </table></div>
 <p>For a report: switch on the script log (Settings &gt; Logging), reproduce the problem, and send the files from the logs
 folder (tray menu <strong>Open logs folder</strong>) with what you did and what you expected.</p>
-<h2 id="what-is-different-from-rea-sixty-and-ssl-360">What is different from Rea-Sixty and SSL 360</h2>
+</div><div class="card"><h2 id="what-is-different-from-rea-sixty-and-ssl-360">What is different from Rea-Sixty and SSL 360</h2>
 <p>Cubase gives controllers less than REAPER does, so some things are missing or different:</p>
 <ul>
 <li>A track's <strong>colour</strong> reaches the displays when the track is next selected or banked in, not the moment you change it.</li>
@@ -809,12 +825,28 @@ folder (tray menu <strong>Open logs folder</strong>) with what you did and what 
 <p>The full lists: <a href="https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md">known issues</a>,
 <a href="https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md">what Cubase does not allow</a>,
 <a href="https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/missing-features.md">what Rea-Sixty has that Cubase-Sixty does not</a>.</p>
-<h2 id="uninstalling">Uninstalling</h2>
+</div><div class="card"><h2 id="uninstalling">Uninstalling</h2>
 <p>Windows <em>Settings &gt; Apps &gt; Installed apps &gt; Cubase-Sixty &gt; Uninstall</em>. It stops Cubase-Sixty, removes the program
 and the scripts, and asks whether to remove your settings and favourites too.</p>
 <p>The USB driver stays (Rea-Sixty may be using it). To give the controllers back to SSL 360, remove the driver from
-the tray menu <strong>before</strong> uninstalling, or run SSL 360's installer afterwards.</p>
+the tray menu <strong>before</strong> uninstalling, or run SSL 360's installer afterwards.</p></div>
 </main>
 </div>
+<script>
+(function () {
+  var links = {}, heads = [].slice.call(document.querySelectorAll("main h2, main h3"));
+  [].forEach.call(document.querySelectorAll("nav a"), function (a) { links[decodeURIComponent(a.getAttribute("href").slice(1))] = a; });
+  function mark() {
+    var cur = null, sec = null;
+    heads.forEach(function (h) { if (h.getBoundingClientRect().top < 90) { cur = h; if (h.tagName === "H2") sec = h; } });
+    if (!cur) { cur = sec = heads[0]; }
+    [].forEach.call(document.querySelectorAll("nav a.on"), function (a) { a.classList.remove("on"); });
+    [].forEach.call(document.querySelectorAll("nav li.open"), function (l) { l.classList.remove("open"); });
+    if (sec && links[sec.id]) { links[sec.id].classList.add("on"); links[sec.id].parentNode.classList.add("open"); }
+    if (cur !== sec && links[cur.id]) links[cur.id].classList.add("on");
+  }
+  addEventListener("scroll", mark, { passive: true }); mark();
+})();
+</script>
 </body>
 </html>
