@@ -60,8 +60,9 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   display brightness, sleep when idle), Behaviour (track stepping, touch selects the track, the UF1's view at start,
   the UC1 secondary encoder at start, the UC1 knob step), UC1 keys (magnifier, 360, encoder push), Display (long
   track names, the UC1's 7-segment zeros), Favourites (eight per domain), Logging (script log), About.
-- Left (the [settings wishlist](settings-wishlist.md)): the UC1 options for Cubase's own channel strip (modules,
-  DYN IN's compressor, bell keys, F.ATT, the Bus Comp section's start), ROUTING order 10, favourite sets / copy
+- 12.11.2026: UC1 on Cubase's strip (loading the gate / compressor, DYN IN's compressor, the Bus Comp section's
+  start).
+- Left (the [settings wishlist](settings-wishlist.md)): F.ATT as a fast-attack switch, ROUTING order 10, favourite sets / copy
   settings, the Rea-Sixty candidates (soft-key bank at start, Identify, Sleep now, a second UF8, metering).
 
 ## 5. Installer and documentation

@@ -139,6 +139,20 @@ void sendMidi(std::vector<unsigned char> m)
 void sysex(std::initializer_list<unsigned char> body);
 // The keys' jobs (Settings: UC1 keys) to the script: SysEx 4F <0 magnifier / 1 360 / 2 push> <job>, jobs in the
 // script's KEY_JOBS order.
+// Settings: the UC1 on Cubase's own strip. 5E <loading 0 knobs and keys / 1 keys / 2 never> <DYN IN's compressor
+// 0 standard / 1 tube / 2 vintage / 3 the last picked> <Bus Comp section at start 0 output / 1 the selected track's>.
+void sendStripOptions()
+{
+    const auto pick = [](const char* key, const char* def, std::initializer_list<const char*> values) {
+        const std::string v = settings::get(key, def);
+        uint8_t i = 0, at = 0;
+        for (const char* c : values) { if (v == c) at = i; ++i; }
+        return at;
+    };
+    sysex({0x5E, pick("uc1-strip-load", "knobs-keys", {"knobs-keys", "keys", "never"}),
+           pick("uc1-dyn-in-comp", "standard", {"standard", "tube", "vintage", "last"}),
+           pick("uc1-bus-comp-start", "output", {"output", "selected"})});
+}
 void sendKeyJobs()
 {
     static const char* kJobs[] = {"next-strip", "prev-strip", "window", "channel-settings", "mixconsole", "bypass", "nothing"};
@@ -671,6 +685,7 @@ void onSysex(const std::vector<unsigned char>& m)
         for (auto& f : favourites::messages()) sendMidi(std::move(f));
         sendKnobStep();
         sendKeyJobs();
+        sendStripOptions();
         const std::string job = settings::get("uc1-encoder2", "bus-comp");
         const uint8_t mode = job == "strips" ? 1 : job == "cs-fav" ? 2 : job == "bc-fav" ? 3 : 0;
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x4C, mode, 0xF7});
@@ -1281,6 +1296,7 @@ void uc1ApplyBrightness()
 }
 void uc1RedrawSevenSeg() { if (g_open) paintSevenSeg(); }
 void uc1SendKnobStep() { sendKnobStep(); }
+void uc1SendStripOptions() { sendStripOptions(); }
 void uc1SendKeyJobs() { sendKeyJobs(); }
 void uc1RedrawNames() { if (g_open && !menuOn()) paintCentre(); }
 void uc1SendFavourites() { for (auto& f : favourites::messages()) sendMidi(std::move(f)); }

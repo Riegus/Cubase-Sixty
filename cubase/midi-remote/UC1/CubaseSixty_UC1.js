@@ -44,7 +44,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-var SCRIPT_VERSION = '0.15.2-dev'
+var SCRIPT_VERSION = '0.16.2-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -596,7 +596,9 @@ try {
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToControlChange(0, cc)
 		page.makeValueBinding(k.mSurfaceValue, hostValue)
 		k.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-			if (stripOn[kind] !== value) log('strip ' + kind + ' on switch: ' + value)
+			// A change also means the module may have been loaded or removed in Cubase (which reports no object change
+			// for that: the knobs' rings stayed lit after the compressor was removed, 12.11.2026): look at the track again.
+			if (stripOn[kind] !== value) { log('strip ' + kind + ' on switch: ' + value); state.rescanAt = Date.now() + 300 }
 			stripOn[kind] = value
 		}
 	}
@@ -650,8 +652,19 @@ function closePicker(activeDevice, why) {
 	if (why) readout(activeDevice, ZONE_CS, why, '')
 }
 
+// Settings (SysEx 5E, "UC1 on Cubase's strip"): load 0 = the knobs and keys load a missing gate / compressor, 1 = the
+// keys only, 2 = never; comp = the compressor DYN IN loads (index into STRIP_MODULES.comp, 3 = the last one picked);
+// bc 1 = the Bus Comp section starts on the selected track's bus comp.
+var stripOpt = { load: 0, comp: 0, bc: 0, lastComp: '' }
+function dynInModule() {
+	var list = STRIP_MODULES.comp
+	if (stripOpt.comp < 3) return list[stripOpt.comp] || list[0]
+	for (var i = 0; i < list.length; ++i) if (list[i].name === stripOpt.lastComp) return list[i]
+	return list[0]
+}
 var dynPressedAt = 0
 function openCompPicker(activeDevice, target) {
+	if (stripOpt.load === 2 && target && target.noComp) return   // (never load: the picker only changes a loaded one)
 	var list = STRIP_MODULES.comp
 	var index = 0
 	for (var i = 0; i < list.length; ++i) if (list[i].name === target.compTitle) index = i
@@ -677,8 +690,10 @@ function switchOnModuleFor(activeDevice, target, knob, clicks) {
 		return true
 	}
 	if (!missing && stripOn[kind] !== 0) return false
+	if (missing && stripOpt.load !== 0) return false   // (Settings: the knobs do not load a module)
 	if (missing && target.emptySlots.length && STRIP_MODULES[kind].length > 1) {
-		picker = { kind: kind, index: 0, acc: 0, until: Date.now() + 8000, target: target }
+		// (The compressor picker opens on the one DYN IN loads, Settings: a press on DYN IN then confirms that one.)
+		picker = { kind: kind, index: kind === 'comp' ? Math.max(0, STRIP_MODULES.comp.indexOf(dynInModule())) : 0, acc: 0, until: Date.now() + 8000, target: target }
 		showPicker(activeDevice)
 		return true
 	}
@@ -1006,6 +1021,8 @@ function scanMixer(activeDevice) {
 function anchorIndex() {
 	var list = state.bcList
 	for (var i = 0; i < list.length; ++i) if (list[i].obj === state.bcAnchor) return i
+	// Not picked yet. Settings: the selected track's bus comp, when it has one; else the one on an output channel.
+	if (stripOpt.bc === 1 && state.bcSelected) for (var s = 0; s < list.length; ++s) if (list[s].obj === state.bcSelected.obj) return s
 	for (var j = 0; j < list.length; ++j) if (list[j].output) return j
 	return list.length ? 0 : -1
 }
@@ -1468,6 +1485,7 @@ function onButton(activeDevice, id) {
 			picker = null
 			var chosen = STRIP_MODULES[p.kind][p.index]
 			var tgt = state.cs && state.cs.emptySlots ? state.cs : p.target
+			if (p.kind === 'comp') stripOpt.lastComp = chosen.name
 			if (p.replaceSlot && chosen.name === tgt.compTitle) { readout(activeDevice, ZONE_CS, chosen.short || chosen.name, 'KEPT'); return }
 			loadModule(activeDevice, tgt, p.kind, chosen, p.replaceSlot)
 			return
@@ -1476,12 +1494,12 @@ function onButton(activeDevice, id) {
 	}
 	if (id === B.Back) { extOpen(activeDevice); return }   // EXT FUNCS
 	// DYN IN on Cubase's strip without a compressor: load the Standard Compressor straight away.
-	if (id === B.DynIn && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
-		loadModule(activeDevice, state.cs, 'comp', STRIP_MODULES.comp[0])
+	if (id === B.DynIn && stripOpt.load !== 2 && state.cs && state.cs.emptySlots && state.cs.noComp && state.cs.emptySlots.length) {
+		loadModule(activeDevice, state.cs, 'comp', dynInModule())
 		return
 	}
 	// EXP on Cubase's strip without a gate: load the Noise Gate (as DYN IN loads a compressor).
-	if (id === B.Expand && state.cs && state.cs.emptySlots && state.cs.noGate && state.cs.emptySlots.length) {
+	if (id === B.Expand && stripOpt.load !== 2 && state.cs && state.cs.emptySlots && state.cs.noGate && state.cs.emptySlots.length) {
 		loadModule(activeDevice, state.cs, 'gate', STRIP_MODULES.gate[0])
 		return
 	}
@@ -1660,6 +1678,13 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	// after a pause), which must not undo a job picked with the push.
 	if (cmd === 0x4F && message.length >= 8) {   // Settings: UC1 keys
 		if (message[5] <= 2 && KEY_JOBS[message[6]]) { keyJob[message[5]] = KEY_JOBS[message[6]]; log('key ' + ['magnifier', '360', 'encoder push'][message[5]] + ': ' + keyJob[message[5]]) }
+		return
+	}
+	if (cmd === 0x5E && message.length >= 9) {   // Settings: the UC1 on Cubase's strip
+		stripOpt.load = Math.min(2, message[5]); stripOpt.comp = Math.min(3, message[6]); stripOpt.bc = message[7] ? 1 : 0
+		log('Cubase strip options: loading ' + ['knobs and keys', 'keys only', 'never'][stripOpt.load] + ', DYN IN loads ' + (stripOpt.comp < 3 ? STRIP_MODULES.comp[stripOpt.comp].name : 'the last one picked') +
+			', Bus Comp section starts on ' + (stripOpt.bc ? 'the selected track\'s' : 'an output channel\'s'))
+		try { showBcNames(activeDevice); paintAll(activeDevice) } catch (e) {}
 		return
 	}
 	if (cmd === 0x4E) { knobDiv = [128, 64, 32][message[5]] || 64; log('knob step: 1/' + knobDiv); return }   // Settings: UC1 knob steps
