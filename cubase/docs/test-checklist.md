@@ -4,6 +4,9 @@ What to check before a branch is merged into `cubase`. Each branch says which se
 in full, the rest with the quick line at the top of each section. Started 10.11.2026, after a change to the UF1's send
 V-pots broke the DAW view's left display line without anyone noticing until testing.
 
+A branch that changes how a button, knob or fader behaves also updates [control-feel.md](control-feel.md) (and
+[banking.md](banking.md) for banking / track stepping) before it is merged.
+
 Setup: Breaking Free-02, bridge from the tray app, a track with several sends and an SSL plug-in, a track with only
 Cubase's own strip. Bridge log and script log on.
 
