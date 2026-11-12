@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.7-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.8-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -1230,11 +1230,15 @@ function stripPanSend(activeDevice, index) {
 			if (text && u) text += ' ' + u
 			// (While turning: the value just written, Cubase's own comes a moment later.)
 			var ww = st.vWanted
-			var pv = ww && ww.obj === st.vObj && ww.tag === st.vTag && Date.now() - ww.at < 400 ? ww.value : st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
+			var read = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
+			var pv = ww && ww.obj === st.vObj && ww.tag === st.vTag && Date.now() - ww.at < 400 ? ww.value : read
 			pos = Math.max(0, Math.min(127, Math.round(pv * 127)))
 			// Cubase's own value: with its exact position, from which the bridge learns the level curve (it draws the
 			// value text itself while turning).
-			if (!(ww && pv === ww.value && Date.now() - ww.at < 400)) { var p14 = Math.round(Math.max(0, Math.min(1, pv)) * 16383); exact = [(p14 >> 7) & 0x7F, p14 & 0x7F] }
+			// Always Cubase's own value, read with the text above (a matching pair, also in the middle of a turn: the
+			// curve fills quickly, and its text then needs no correction when the turn ends).
+			var p14 = Math.round(Math.max(0, Math.min(1, read)) * 16383)
+			exact = [(p14 >> 7) & 0x7F, p14 & 0x7F]
 		}
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(text), [0xF7]))
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos], exact || [], [0xF7]))
@@ -1244,7 +1248,12 @@ function stripPanSend(activeDevice, index) {
 	if (st.vTag === st.panTag) stripPanShow[index](activeDevice, text2, st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag))
 	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text2), [0xF7]))
 }
-function stripModeUpdateAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i) }
+function stripModeUpdateAll(activeDevice) {
+	var t0 = Date.now()
+	for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i)
+	++sendStat.scans
+	sendStat.scanMs += Date.now() - t0
+}
 function stripFaderSend(activeDevice, index) {
 	var st = skStrip[index]
 	var v = st.fObj < 0 ? 0 : Math.round(Math.max(0, Math.min(1, skDa[index].getParameterProcessValue(skAm, st.fObj, st.fTag))) * 16383)
@@ -1284,7 +1293,10 @@ function skMessage(activeDevice, m) {
 		var as = skStrip[ai], av = ((m[6] << 7) | m[7]) / 16383, at = Date.now()
 		as.vWanted = { obj: as.vObj, tag: as.vTag, value: av, at: at }
 		as.vSettleAt = at + 600   // (the bridge draws ring and value itself for 0.5 s after a turn: then Cubase's value once)
+		var w0 = Date.now()
 		as.vDa.setParameterProcessValue(skAm, as.vObj, as.vTag, av)
+		++sendStat.writes
+		sendStat.writeMs += Date.now() - w0
 		return
 	}
 	if (m[4] === 0x28 && m.length >= 8) {   // a V-pot turn on the script's target (64 = no change)
@@ -1354,7 +1366,19 @@ page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping
 // The send views' levels read about nine times a second (each idle tick) and sent when changed: Cubase reports a
 // Direct Access change only when an edit ends (a mouse drag showed only at the release), and right after a write the
 // text was not updated yet (10.11.2026).
+// Log (12.11.2026, the MixConsole lagging behind the send V-pots): once a second while levels are written, how many
+// writes and how long they took, how many idle ticks Cubase gave, how many re-targetings (scans) ran and their time.
+var sendStat = { at: 0, writes: 0, writeMs: 0, idles: 0, scans: 0, scanMs: 0, sent: 0 }
+function sendStatTick() {
+	var now = Date.now()
+	++sendStat.idles
+	if (now - sendStat.at < 1000) return
+	if (sendStat.writes) out('[CubaseSixty] send V-pots: ' + sendStat.writes + ' writes (' + sendStat.writeMs + ' ms), ' + sendStat.idles + ' idle ticks, ' +
+		sendStat.scans + ' re-targetings (' + sendStat.scanMs + ' ms), ' + sendStat.sent + ' reports sent')
+	sendStat = { at: now, writes: 0, writeMs: 0, idles: 0, scans: 0, scanMs: 0, sent: 0 }
+}
 function sendViewPoll(activeDevice) {
+	sendStatTick()
 	for (var i = 0; i < STRIPS; ++i) {
 		var st = skStrip[i]
 		if (!st) continue
@@ -1368,7 +1392,7 @@ function sendViewPoll(activeDevice) {
 			var txt = daText(st.vDa, st.vObj, st.vTag)
 			var settle = st.vSettleAt && Date.now() >= st.vSettleAt
 			if (settle) st.vSettleAt = 0
-			if (settle || w !== st.vPolled || on !== st.vOnPolled || txt !== st.vTextPolled) { st.vPolled = w; st.vOnPolled = on; st.vTextPolled = txt; stripPanSend(activeDevice, i) }
+			if (settle || w !== st.vPolled || on !== st.vOnPolled || txt !== st.vTextPolled) { st.vPolled = w; st.vOnPolled = on; st.vTextPolled = txt; ++sendStat.sent; stripPanSend(activeDevice, i) }
 		}
 	}
 }

@@ -974,13 +974,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
         } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
             // A send level 0..127 on the V-pot: a unipolar bar. (Not while the bridge draws a turn itself.)
             ++g_selSendLog[m[5]].pos;
+            // Cubase's own level with its text (sent just before): teach the curve, also during a turn.
+            const int v14 = m.size() >= 10 ? (int(m[7]) << 7) | int(m[8]) : -1;
+            if (v14 >= 0) cs::uf1LearnLevel(v14, g_selSendText[m[5]]);
             if (nowMs8() < g_selSendOwnUntil[m[5]]) { ++g_selSendLog[m[5]].posIgnored; return; }
-            g_selSendVal[m[5]] = m[6] / 127.0;
-            if (m.size() >= 10) {   // with the exact position (Cubase's own value, not a turn in flight): teach the curve
-                const int v14 = (int(m[7]) << 7) | int(m[8]);
-                g_selSendVal[m[5]] = v14 / 16383.0;
-                cs::uf1LearnLevel(v14, g_selSendText[m[5]]);
-            }
+            g_selSendVal[m[5]] = v14 >= 0 ? v14 / 16383.0 : m[6] / 127.0;
             g_panPos[m[5]] = uf8::vpotPosUnipolar(m[6] / 127.0);
             if (g_focus < 0) g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
         } else if (m.size() >= 10 && m[4] == 0x20 && m[5] < kStrips) {
