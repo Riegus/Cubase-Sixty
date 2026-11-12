@@ -1898,6 +1898,18 @@ void uf1SetStripNumber(int n)
 }
 
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
+// The send level curve (the dB text for a 14-bit position), shared with the UF8's V-pot send view: it draws its value
+// text from it while turning, and teaches it Cubase's settled values.
+std::string uf1LevelText(int pos14) { return levelTextFor(pos14); }
+void uf1LearnLevel(int pos14, const std::string& text)
+{
+    std::string t;
+    for (char c : text) if (c != ' ') t += c;
+    double db = 0;
+    if (!parseDb(t, db)) return;
+    std::lock_guard<std::mutex> lk(g_levelMx);
+    g_levelText[pos14] = t;
+}
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
 bool helperSend(const std::vector<unsigned char>& msg);   // main.cpp

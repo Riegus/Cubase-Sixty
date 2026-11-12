@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.3-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.4-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -1223,7 +1223,7 @@ function stripFaderShow(activeDevice, index) {
 function stripPanSend(activeDevice, index) {
 	var st = skStrip[index]
 	if (st.vKind === 'send') {
-		var text = '', pos = 0
+		var text = '', pos = 0, exact = null
 		if (st.vObj >= 0) {
 			text = daText(st.vDa, st.vObj, st.vTag)
 			var u = daUnits(st.vDa, st.vObj, st.vTag)
@@ -1232,9 +1232,12 @@ function stripPanSend(activeDevice, index) {
 			var ww = st.vWanted
 			var pv = ww && ww.obj === st.vObj && ww.tag === st.vTag && Date.now() - ww.at < 400 ? ww.value : st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
 			pos = Math.max(0, Math.min(127, Math.round(pv * 127)))
+			// Cubase's own value: with its exact position, from which the bridge learns the level curve (it draws the
+			// value text itself while turning).
+			if (!(ww && pv === ww.value && Date.now() - ww.at < 400)) { var p14 = Math.round(Math.max(0, Math.min(1, pv)) * 16383); exact = [(p14 >> 7) & 0x7F, p14 & 0x7F] }
 		}
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(text), [0xF7]))
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos, 0xF7]))
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos], exact || [], [0xF7]))
 		return
 	}
 	var text2 = daText(st.vDa, st.vObj, st.vTag)
