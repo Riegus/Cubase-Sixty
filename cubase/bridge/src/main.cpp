@@ -129,6 +129,7 @@ std::array<uint16_t, 8> g_panPos{};
 // 12.11.2026); the script's reports are ignored for 0.5 s after a turn and its settled value taken after that.
 std::array<std::atomic<double>, 8> g_selSendVal{};
 std::array<std::atomic<long long>, 8> g_selSendOwnUntil{};
+std::array<std::atomic<bool>, 8> g_selSendOwnText{};   // the bridge drew the value text of the turn in flight (the curve knew it)
 std::array<std::string, 8> g_selSendText;   // each V-pot's last level text from the script (MIDI thread only)
 std::string g_panLine[8];
 std::array<uint16_t, 8> g_focusPos{};
@@ -505,6 +506,7 @@ void handleFrame(const uf8frames::Frame& fr)
                 g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
                 // The value too, from the send level curve (Cubase's own text trails the ring; it follows once settled).
                 std::string t = cs::uf1LevelText(int(std::lround(v * 16383.0)));
+                g_selSendOwnText[s] = !t.empty();   // (a gap in the curve: Cubase's own text shows meanwhile)
                 if (!t.empty() && g_focus < 0) {
                     if (const size_t at = t.rfind("dB"); at != std::string::npos && at > 0 && t[at - 1] != ' ') t.insert(at, " ");
                     std::string line = "Send";
@@ -939,7 +941,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             line += v;
             g_panLine[m[5]] = line;
             g_selSendText[m[5]] = v;
-            if (g_focus < 0 && nowMs8() >= g_selSendOwnUntil[m[5]]) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));   // (not while the bridge draws a turn)
+            if (g_focus < 0 && !(g_selSendOwnText[m[5]] && nowMs8() < g_selSendOwnUntil[m[5]])) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));   // (not while the bridge draws a turn)
         } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
             // A send level 0..127 on the V-pot: a unipolar bar. (Not while the bridge draws a turn itself.)
             if (nowMs8() < g_selSendOwnUntil[m[5]]) return;
