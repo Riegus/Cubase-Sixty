@@ -44,7 +44,7 @@ namespace {
 constexpr UINT kTrayMsg = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTimerMs = 500;
-enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdDriverInstall, kCmdDriverRemove };
+enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdDriverInstall, kCmdDriverRemove, kCmdGuide };
 const UINT kMsgDriverDone = WM_APP + 2;   // wParam: 0 install / 1 remove; lParam: the script's exit code, -1 cancelled, -2 not started
 const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t* kRunValue = L"Cubase-Sixty";
@@ -319,6 +319,16 @@ void readLog()
 // program: Rea-Sixty's scripts). Run elevated on a thread (the administrator prompt and the install take a while);
 // the result comes back as kMsgDriverDone.
 bool g_driverJob = false;
+// The user guide: installed beside the exe; in a development tree it is in cubase\docs.
+fs::path userGuidePath()
+{
+    std::error_code ec;
+    if (fs::exists(g_exeDir / L"user-guide.html", ec)) return g_exeDir / L"user-guide.html";
+    for (fs::path p = g_exeDir; !p.empty() && p != p.parent_path(); p = p.parent_path())
+        if (fs::exists(p / L"docs" / L"user-guide.html", ec)) return p / L"docs" / L"user-guide.html";
+    return {};
+}
+
 bool driverScriptsThere()
 {
     std::error_code ec;
@@ -397,6 +407,7 @@ void showMenu()
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING | (g_bridgeRunning && !g_status.settingsUrl.empty() ? 0 : MF_GRAYED), kCmdSettings, L"Settings...");
     SetMenuDefaultItem(m, kCmdSettings, FALSE);
+    if (!userGuidePath().empty()) AppendMenuW(m, MF_STRING, kCmdGuide, L"User guide");
     AppendMenuW(m, MF_STRING, kCmdRestart, g_bridgeRunning ? L"Restart bridge" : L"Start bridge");
     AppendMenuW(m, MF_STRING, kCmdLogs, L"Open logs folder");
     AppendMenuW(m, MF_STRING | (autostartOn() ? MF_CHECKED : 0), kCmdAutostart, L"Start with Windows");
@@ -471,6 +482,11 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             if (!g_status.settingsUrl.empty())
                 ShellExecuteW(nullptr, L"open", widen(g_status.settingsUrl).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             break;
+        case kCmdGuide: {
+            const fs::path g = userGuidePath();
+            if (!g.empty()) ShellExecuteW(nullptr, L"open", g.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
         case kCmdLogs:
             fs::create_directories(g_logsDir);
             ShellExecuteW(nullptr, L"open", g_logsDir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);

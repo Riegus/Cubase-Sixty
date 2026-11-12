@@ -51,6 +51,7 @@ Source: "{#BuildDir}\libusb-1.0.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE-Rea-Sixty.txt"; Flags: ignoreversion
 Source: "..\docs\user-guide.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\docs\user-guide.html"; DestDir: "{app}"; Flags: ignoreversion
 ; The WinUSB driver binding for the controllers (Rea-Sixty's scripts): run by the task below and by the tray app's menu.
 Source: "driver\install-driver.ps1"; DestDir: "{app}\driver"; Flags: ignoreversion
 Source: "driver\uninstall-driver.ps1"; DestDir: "{app}\driver"; Flags: ignoreversion
@@ -63,6 +64,7 @@ Source: "..\midi-remote\Helper\CubaseSixty_Helper.js"; DestDir: "{#ScriptsDir}\H
 
 [Icons]
 Name: "{group}\Cubase-Sixty"; Filename: "{app}\CubaseSixty.exe"
+Name: "{group}\Cubase-Sixty user guide"; Filename: "{app}\user-guide.html"
 Name: "{group}\Uninstall Cubase-Sixty"; Filename: "{uninstallexe}"
 
 [Registry]

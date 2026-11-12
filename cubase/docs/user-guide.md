@@ -1,44 +1,64 @@
 # Cubase-Sixty user guide
 
-Cubase-Sixty makes the SSL UF8, UF1 and UC1 work in Cubase the way [Rea-Sixty](../../README.md) makes them work in
-REAPER: faders, V-pots and displays for the mixer, the UC1 on the SSL plug-ins of the selected track, without SSL 360.
-Any one of the three surfaces is enough; they work alone and together.
+Cubase-Sixty makes the SSL UF8, UF1 and UC1 work in Cubase the way [Rea-Sixty](https://github.com/Riegus/Cubase-Sixty#readme)
+makes them work in REAPER: the mixer on faders, V-pots and displays, the SSL plug-ins of your tracks on the UC1's
+knobs, without SSL 360. Any one of the three surfaces is enough; they work alone and together.
 
 Tested with Cubase 15 Pro on Windows 11.
+
+**Getting started**
 
 - [What you need](#what-you-need)
 - [Installing](#installing)
 - [Setting up Cubase (once)](#setting-up-cubase-once)
 - [Every day](#every-day)
-- [UF8](#uf8)
-- [UF1](#uf1)
-- [UC1](#uc1)
+- [How the surfaces think](#how-the-surfaces-think)
+
+**Using the surfaces**
+
+- [UF8](#uf8): [the strips](#the-strips), [moving around](#moving-around), [what SEL does](#what-sel-does-norm-rec-auto),
+  [the top soft keys](#the-top-soft-keys-your-ssl-channel-strips), [sends](#sends-on-the-uf8), [FLIP and SSL Strip Mode](#flip-and-ssl-strip-mode),
+  [the CHANNEL encoder](#the-channel-encoder), [markers](#markers-and-nav-mode), [automation](#automation), [zoom](#zoom-and-the-editor)
+- [UF1](#uf1): [the strip](#the-strip), [getting around](#getting-around), [the four views](#the-four-views),
+  [transport and time](#transport-and-time), [jog wheel](#the-jog-wheel-and-the-nav-cross), [quick keys](#quick-keys-and-shift)
+- [UC1](#uc1): [SSL channel strips](#on-an-ssl-channel-strip), [Cubase's own strip](#on-cubases-own-channel-strip),
+  [the Bus Comp section](#the-bus-comp-section), [the middle](#the-middle-screen-encoders-and-keys),
+  [presets, routing, EXT FUNCS](#presets-routing-and-ext-funcs)
+- [Favourites](#favourites)
+- [Using them together](#using-them-together)
+
+**Reference**
+
 - [Settings](#settings)
 - [Going back to SSL 360](#going-back-to-ssl-360)
 - [When something is wrong](#when-something-is-wrong)
+- [What is different from Rea-Sixty and SSL 360](#what-is-different-from-rea-sixty-and-ssl-360)
 - [Uninstalling](#uninstalling)
+
+---
 
 ## What you need
 
-- Windows 10 or 11 (64 bit) and Cubase 13 or later with MIDI Remote (developed on Cubase 15 Pro).
+- Windows 10 or 11 (64 bit) and Cubase with MIDI Remote and Direct Access (developed and tested on Cubase 15 Pro;
+  older versions are untested).
 - An SSL UF8, UF1 or UC1, connected by USB.
 - **A virtual MIDI driver** (teVirtualMIDI). It comes with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
   (free) and with SSL 360. Cubase-Sixty makes its own MIDI ports with it; you do not create any ports in loopMIDI.
 - **SSL 360 not running.** SSL 360 and Cubase-Sixty cannot use the controllers at the same time (see
-  [Going back to SSL 360](#going-back-to-ssl-360)). The SSL plug-ins themselves work as always.
+  [Going back to SSL 360](#going-back-to-ssl-360)). The SSL plug-ins themselves work as always, and you do not need
+  SSL 360 for them.
 
 ## Installing
 
 1. Plug the controllers in and switch them on.
 2. Run `CubaseSixty-Setup-<version>.exe`. Windows may show "Windows protected your PC", because the installer is not
-   signed: choose **More info**, then **Run anyway**. It installs for your user account and needs no administrator
-   rights by itself.
+   signed: choose **More info**, then **Run anyway**. It installs for your user account only.
 3. On the options page:
-   - **Start Cubase-Sixty with Windows**: leave it ticked unless you want to start it by hand.
-   - **Install the USB driver for the SSL controllers**: ticked by itself when it is needed. It asks for
-     administrator permission once. This moves the controllers from SSL's own USB driver to Windows' WinUSB driver,
-     which Cubase-Sixty needs; from then on SSL 360 does not see them.
-4. When the installer has finished, **unplug and replug the controllers** if the driver was installed.
+    - **Start Cubase-Sixty with Windows**: leave it ticked unless you want to start it by hand.
+    - **Install the USB driver for the SSL controllers**: ticked by itself when it is needed. It asks for
+      administrator permission once. This moves the controllers from SSL's own USB driver to Windows' WinUSB driver,
+      which Cubase-Sixty needs; from then on SSL 360 does not see them.
+4. If the driver was installed: **unplug and replug the controllers** when the installer has finished.
 5. If the installer says the virtual MIDI driver is missing, install loopMIDI and start Cubase-Sixty again.
 
 Cubase-Sixty now sits in the notification area (the tray) as a small mixing-surface icon, and the controllers show
@@ -71,119 +91,363 @@ Cubase-Sixty runs in the tray, whether Cubase is open or not. The icon's colour 
 | Yellow | Running; Cubase is not open, has no project, or has not connected yet. |
 | Red | The bridge (the part that talks to the controllers) is not running. |
 
-- **Click the icon** for the Settings page (in your browser); **right-click** for the menu: Settings, Restart bridge,
-  Open logs folder, Start with Windows, USB driver, Quit.
-- Controllers can be plugged in and unplugged at any time.
+- **Click the icon** for the Settings page (in your browser); **right-click** for the menu: Settings, User guide,
+  Restart bridge, Open logs folder, Start with Windows, USB driver, Quit.
+- Start order does not matter, and controllers can be plugged in and unplugged at any time.
 - Closing a project blanks the displays; the faders stay where they are.
 - After **Restart bridge**, Cubase finds it again by itself within some seconds. If the controllers stay on "Waiting
   for Cubase" for long, restart Cubase.
-- After a script update, or if a surface behaves oddly after Cubase's own *Reload Scripts*, restart Cubase.
+- After Cubase's own *Reload Scripts*, a surface can behave oddly: restart Cubase.
+- With *Sleep when idle* set (Settings > Devices), the surfaces go dark after that time without a touch while the
+  transport is stopped. The first touch wakes them and does nothing else.
+
+## How the surfaces think
+
+A few ideas that make the rest easier:
+
+- **The selected track** is the centre. The UF1 and the UC1 always work on it, and the UF8 moves its eight strips
+  so that it is among them. Select a track anywhere (Project window, MixConsole, a surface) and all three follow.
+- **The MixConsole decides what a track list is.** The UF8's strips, the track numbers on the displays and the
+  channel encoders go by the MixConsole's channels in its order. A channel hidden in the MixConsole is skipped, and
+  folder tracks (which have no channel) are skipped too. (Stepping can be set to follow the Project window instead.)
+- **An SSL plug-in on a track is found by itself.** If a track has an SSL Channel Strip 2, a 4K B / E / G or a 360
+  Link strip in its inserts, the UC1's knobs, the UF8's soft keys and the UF1's PLUGIN view are on it as soon as the
+  track is selected. No learning, no assigning. On a track without one, the UC1 works Cubase's own channel strip.
+- **The controller shows your hand first.** When you turn a knob, the ring and the value follow your hand at once
+  and Cubase catches up; when you stop, the value Cubase ended on is shown. On fast turns the MixConsole on screen
+  can trail the controller for a moment.
+
+---
 
 ## UF8
 
-Eight strips on a bank of the MixConsole's channels (in MixConsole order, hidden channels left out). The UF8 follows
-the track selection: select a track anywhere in Cubase and the UF8 banks to it.
+Eight strips on a bank of the MixConsole's channels.
 
-### Each strip
+### The strips
 
 | Control | What it does |
 |---------|--------------|
-| Fader | Volume, with touch (Touch automation works). In dB on the display. |
-| V-pot | Pan; value and bar on the strip's display. Push: opens / closes the channel editor. |
-| SEL | Selects the track. In REC mode it arms the track, in AUTO mode it switches the track's automation Write (lit red when armed / writing). |
+| Fader | The track's volume, with touch: Touch and Latch automation write while your finger is on it. |
+| Display | Track name and colour, the level in dB, a stereo meter, and a value line (pan, or what the V-pot is on). |
+| V-pot | Pan, with a position bar on the display. **Push: opens / closes the track's channel editor.** |
 | SOLO, CUT | Solo and mute. |
-| Top soft key | SSL's soft keys: a parameter of the track's SSL channel strip (see below). |
-| Display | Track name and colour, level, stereo meter. |
+| SEL | Selects the track (see [What SEL does](#what-sel-does-norm-rec-auto) for the other two modes). |
+| Top soft key | A control of the track's SSL channel strip (see [The top soft keys](#the-top-soft-keys-your-ssl-channel-strips)). |
 
-### Left side
+Touching a fader can also select its track (Settings > Behaviour).
 
-| Keys | What they do |
-|------|--------------|
-| V-POT, 1–5 | The six pages of the top soft keys (the SSL channel strip's parameters). |
-| Q1 / Q2 | Q2 puts the bus compressor's parameters on the soft keys (two pages), Q1 goes back to the channel strip. |
-| A top soft key | Puts its parameter on all eight V-pots, each for its own track's SSL channel strip, until pressed again. |
-| PAGE ◂ ▸ | Moves the strips by one channel. |
-| CHANNEL | Home: faders on volume, V-pots on pan. |
-| PLUGIN | SSL Strip Mode: each fader on its track's SSL channel strip fader (tracks without one keep volume). |
-| FLIP | Tap: swaps faders and V-pots. Hold (about half a second): the **selected track's sends 1–8 on the V-pots** (turn = level, push = on / off); hold again to leave. |
-| SEND / PLUGIN 1–8 | **Send N of every track on the faders** (CUT switches the send on / off; a track without that send has its fader at the bottom). Press again to leave. |
-| READ, WRITE | Automation Read / Write of the selected track. |
-| OFF, TRIM, LATCH, TOUCH | Cubase's automation mode (OFF = Cross-Over). |
-| FOOT 1 / 2 | Foot switches: play, record. |
+### Moving around
 
-### Right side
+- **BANK ◂ ▸** moves the strips by eight tracks. Bank right stops when the last track is on strip 8, so you never
+  see a half-empty bank at the end.
+- **PAGE ◂ ▸** moves by one track.
+- **The UF8 follows the selection.** Select a track that is not on the strips, with the mouse or from another
+  surface, and the UF8 banks to it. A far jump takes a moment (Cubase can only bank step by step); the UF8 waits and
+  shows the result in one go. At start-up it goes to the selected track too.
+- **CHANNEL** is "home": faders on volume, V-pots on pan, whatever view you were in.
 
-| Keys | What they do |
-|------|--------------|
-| NORM / REC / AUTO | What SEL does (select / arm / automation Write). |
-| BANK ◂ ▸ | Moves the strips by eight. Bank right stops with the last track on strip 8. |
-| CHANNEL encoder | Turn: previous / next track. **Hold its push and turn** to give it another job: Channel Select, Nudge, Markers, Bank by 1, CS Fav / BC Fav (steps through your favourite channel strips / bus comps, see Settings). |
-| NAV | Tap: the encoder moves between markers (lit); tap again for tracks. **Hold 1 s: Nav Mode**: the top soft keys jump to markers 1–8 (in the Q1 view: cycle markers 1–8). |
-| NUDGE | The encoder nudges the cursor. |
-| Cursor pad | Zoom in / out, vertical zoom; centre opens / closes the editor of the selected event. |
+### What SEL does: NORM, REC, AUTO
+
+The NORM, REC and AUTO keys choose what the SEL keys do. The mode's key is lit.
+
+| Mode | SEL does | SEL lights |
+|------|----------|-----------|
+| **NORM** | Selects the track. | The selected track. |
+| **REC** | Arms / disarms the track for recording. | Dim red: can be armed. Red: armed. Dark: this strip cannot record (group, FX, VCA, output). |
+| **AUTO** | Switches the track's automation **Write** on / off. | Red while the track is writing. |
+
+### The top soft keys: your SSL channel strips
+
+The row of keys above the displays reaches the **SSL channel strip plug-in on each track** (Channel Strip 2, 4K B /
+E / G, 360 Link). Each strip's display shows what its key is.
+
+1. **Pick a page** with the **V-POT** and **1–5** keys. The page's key is lit.
+
+   | Page | The eight keys |
+   |------|----------------|
+   | V-POT | BYPASS, IN TRIM, PHASE, PRE, MIC/DRV, –, IMP IN, IMP |
+   | 1 | WIDTH, –, –, A/B, HPF, LPF, EQ, EQ TYPE |
+   | 2 | LF FREQ, LF GAIN, LF TYPE, –, LMF FREQ, LMF GAIN, LMF Q, – |
+   | 3 | HMF FREQ, HMF GAIN, HMF Q, –, –, HF FREQ, HF GAIN, HF TYPE |
+   | 4 | DYNAMICS, COMP MIX, COMP RATIO, COMP THR, COMP REL, COMP F.ATK, PEAK/RMS, – |
+   | 5 | GATE REL, GATE THR, GATE RANGE, GATE HOLD, GATE F.ATK, GATE/EXP, HQ MODE, OUT TRIM |
+
+2. **Press a key** (say HMF GAIN). That control is now on **all eight V-pots**, one per track: each V-pot turns the
+   HMF gain of *its own* track's SSL channel strip, and each display shows that track's value. The key is lit.
+   A switch (EQ in / out, PHASE …) is toggled by turning or pushing; a push puts a gain back to the centre.
+3. **Press the same key again** to give the V-pots back to pan.
+
+This is how you set the same control across a group of tracks without opening a single plug-in window: bank to the
+drums, press COMP THR, and you have eight compressor thresholds under your fingers.
+
+A strip whose track has no SSL channel strip shows "-" and its V-pot does nothing while a key is active. A/B and
+HQ MODE are shown but cannot be reached from Cubase.
+
+**Q1 / Q2**: Q2 puts the **bus compressor's** controls on the soft keys instead (page V-POT: THR,
+ATTACK, RELEASE, RATIO, S/C HPF, MIX, EXT S/C, BUS COMP; page 1: OUTGAIN), for tracks that have an SSL Bus Compressor 2.
+Q1 goes back to the channel strip.
+
+### Sends on the UF8
+
+Two views, both left with the same key that entered them (or with CHANNEL):
+
+- **One send across all tracks, on the faders.** Press one of the eight **SEND / PLUGIN** keys: the
+  faders are now send N of each track. Use it to build a headphone mix or to ride a reverb send across a bank.
+  The displays keep the track names and show the send level in dB; **CUT switches the send on / off**. A track that
+  does not have that send has its fader at the bottom and no value. The V-pots stay on pan.
+- **All sends of the selected track, on the V-pots.** **Hold FLIP** for about half a second (it lights): the eight
+  V-pots are sends 1–8 of the selected track, the displays show where each goes and its level. **Push a V-pot** to
+  switch that send on / off. The faders stay on volume. Select another track and the V-pots show its sends.
+
+### FLIP and SSL Strip Mode
+
+- **FLIP** (a tap) swaps faders and V-pots: pan on the faders, volume on the V-pots. Tap again to swap back.
+- **PLUGIN** is **SSL Strip Mode**: each fader moves the *fader inside the track's SSL channel strip*
+  (its output level) instead of the track's volume, and the V-pot its pan. Use it when you mix "inside" the SSL
+  strips and want the track faders left alone. Tracks without an SSL strip keep volume and pan. Press PLUGIN again
+  to leave.
+
+### The CHANNEL encoder
+
+The CHANNEL encoder has several jobs. **Hold its push and turn** to choose: the displays list the jobs, and
+letting go keeps the one shown.
+
+| Job | A turn does |
+|-----|-------------|
+| Channel Select (the start job) | Selects the previous / next track. |
+| Nudge | Moves the project cursor by Cubase's nudge value. The **NUDGE** key switches to this and back. |
+| Markers | Jumps to the previous / next marker. The **NAV** key (a tap) switches to this and back. |
+| Bank by 1 | Moves the strips one track at a time. |
+| CS Fav / BC Fav | Steps through your favourite channel strips / bus comps (see [Favourites](#favourites)). |
+
+### Markers and Nav Mode
+
+- **Tap NAV**: the CHANNEL encoder steps through markers (NAV lit). Tap again for tracks.
+- **Hold NAV for a second**: **Nav Mode**. The eight top soft keys now jump straight to **markers 1–8**; the last
+  one pressed stays lit. With **Q1** they recall **cycle markers 1–8** instead (the cursor goes to the start of the
+  cycle); **Q2** is back to markers. Hold NAV again to leave. Cubase does not tell controllers the markers' names,
+  so the keys go by number.
+
+### Automation
+
+- **READ** and **WRITE** switch Read / Write on the **selected track**.
+- **OFF, TRIM, LATCH, TOUCH** choose Cubase's global automation mode (OFF is Cross-Over; TRIM is a switch that
+  combines with the others). Cubase does not tell controllers which mode is active, so the lit key is the last one
+  you pressed on a surface; a mode changed with the mouse is not shown.
+- To write automation on several tracks: AUTO mode (above), press SEL on each track to arm Write, then ride the faders.
+
+### Zoom and the editor
+
+The cursor pad zooms: ◂ ▸ horizontally, ▴ ▾ vertically. The centre key opens / closes the editor of
+the selected event, like a double-click.
+
+**FOOT 1 / 2**: foot switches play and record.
+
+---
 
 ## UF1
 
-One strip on the **selected track**, a big display, and transport.
+One strip for the **selected track**, a large display with four V-pots, transport and a jog wheel.
+
+### The strip
 
 | Control | What it does |
 |---------|--------------|
-| Fader, SOLO, CUT, SEL | The selected track's volume (with touch), solo, mute. |
+| Fader | The selected track's volume, with touch. |
+| SOLO, CUT | Solo and mute. SEL shows the track's colour; bright while its channel editor is open. |
 | Knob above the fader | Pan. |
-| Small display | Track name, number and colour, level, meter, and a value line: pan, or the send / Quick Control being turned. |
-| MODE (hold) + a display soft key | The view: DAW, SENDS, PLUGIN or METER (the start view is a setting). |
-| CHANNEL encoder, ARROW | Previous / next track (folders and hidden tracks are skipped; a setting). Encoder push: opens / closes the plug-in window of the PLUGIN view, or the channel editor. SHIFT + turn: the track's next / previous SSL plug-in. |
-| BANK | Banks the UF8; without a UF8, moves the selection by eight tracks. |
-| 5–8 | V-pots on sends 5–8 (Quick Controls 5–8 in PLUGIN). |
-| MASTER | The strip on the main output. |
+| Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
+| MASTER | Puts the strip on the main output instead of the selected track. Press again to return. |
 | FLIP | Swaps the fader and the pan knob. |
-| Transport keys | Rewind, forward, stop, play, record, cycle, click, with their LEDs. |
-| SHIFT + transport soft keys / Cycle / Click | Automation Read, Write, Cross-Over, Trim, Latch, Touch. |
-| Jog wheel | Moves the cursor; its modes (Playhead, Items, Envelope, Range, Fades) nudge, navigate and change fades. SHIFT: markers. SHIFT + ARROW: bar steps. |
-| SCRUB | Scrubbing (needs the Mackie Control device, see setup). SHIFT + SCRUB: shuttle. |
-| NAV cross | Zoom; centre opens / closes the editor. |
-| 360° | Swaps the two time formats. |
-| BYPASS | Bypasses all inserts of the track. |
-| FOOT 1 / 2 | Foot switches. |
+| BYPASS | Bypasses all inserts of the track (dim: inserts active; bright: all bypassed; off: no inserts). Press again to restore. |
 
-### The views
+### Getting around
 
-- **DAW** and **SENDS**: the four V-pots are the selected track's sends 1–4 (5–8 with the 5–8 key): turn = level,
-  push = on / off. SENDS shows all four sends' names, levels and bars above the V-pots at all times; DAW shows the
-  send on the small display while you turn it.
-- **PLUGIN**: the track's SSL plug-in in pages, as in Rea-Sixty: V-pots, display soft keys and ◀ ▶ on its controls,
-  the EQ curve in the graph. Without an SSL plug-in: Cubase's **Quick Controls** 1–4 (5–8) of the focused plug-in
-  window, or of the track. Only assigned Quick Controls do anything; an empty one shows `QC1 -`.
-- **METER**: the SSL Meter / Meter Pro plug-in's overview, when the track has one.
+- **CHANNEL encoder** and **ARROW ◂ ▸**: previous / next track. Folder tracks and tracks hidden in the MixConsole
+  are skipped (Settings > Behaviour changes this).
+- **Encoder push**: opens / closes a window: in the PLUGIN view the plug-in's window, otherwise the channel editor.
+- **SHIFT + turn**: the next / previous SSL plug-in on the track, for the PLUGIN view (after the last one: Quick
+  Controls).
+- **BANK ◂ ▸**: banks the UF8. Without a UF8 it moves the selection by eight tracks.
+- **SHIFT + ARROW**: the cursor one bar back / forward.
+
+### The four views
+
+**Hold MODE**: the four keys under the big display show PLUGIN, DAW, METER and SENDS. Press one and let go. Which
+view the UF1 starts in is a setting.
+
+**DAW** — the everyday view. The V-pots are the selected track's **sends 1–4**: turn for the level, push to switch
+the send on / off. The **5–8** key puts them on sends 5–8. The small display shows the send and its level while you
+turn.
+
+**SENDS** — the same four sends, but the big display shows all four at all times: where each goes, its level, and a
+bar. They follow the mouse and automation too.
+
+**PLUGIN** — the track's SSL plug-in, laid out as on SSL's own UF1 pages.
+
+- The header shows the plug-in and the page ("2/8"). **◀ ▶** (the two outer keys under the display) turn the pages.
+- Each page puts four of the plug-in's controls on the **V-pots** and four of its switches on the **display soft
+  keys** (lit while on). A V-pot push puts a gain or trim back to the centre.
+- The graph shows the **EQ curve** of the channel strip (flat while its EQ is out).
+- On a track without an SSL channel strip but with a Bus Compressor 2, the pages are the compressor's.
+- On a track **without any SSL plug-in**, the V-pots are Cubase's **Quick Controls 1–4** (5–8 with the 5–8 key): of
+  the plug-in whose window has the focus, or of the track itself. Only Quick Controls that have a parameter assigned
+  do anything (assign them in the plug-in window or the track's Inspector); an empty one shows `QC1 -`. The graph
+  then shows Cubase's own channel EQ.
+- **SHIFT + 5–8** opens the **preset browser** for the SSL plug-in: SSL's preset library. V-pot 4 scrolls, its push
+  loads the preset; soft key 3 goes back.
+
+**METER** — the big display becomes the SSL **Meter / Meter Pro** plug-in of the selected track: goniometer, peak and
+RMS bars with holds. Soft key 2 resets the holds. Put a Meter on the Stereo Out and it shows whatever you select;
+"NO METER" means no Meter plug-in was found.
+
+### Transport and time
+
+- **Transport keys**: rewind, forward, stop, play, record, **cycle** and **click**, each with its LED.
+- The **time display** shows the project position in Cubase's primary format. **360°** swaps it with the secondary
+  format (bars and beats ↔ time, as set in Cubase's transport).
+- **SCRUB** (a tap) switches scrubbing on; the jog then scrubs audio. This needs the Mackie Control device from the
+  setup. **SHIFT + SCRUB** is **shuttle**: each jog step changes the play speed (1/8× … 8×, and backwards); leaving
+  stops playback. The SCRUB LED is white for scrub, orange for shuttle.
+
+### The jog wheel and the NAV cross
+
+The jog wheel and the cross beside it work as a pair, and what they act on is the **jog mode**. **Hold SCRUB and turn
+the jog** to pick it:
+
+| Mode | The jog | The cross |
+|------|---------|-----------|
+| **Scrub** | Scrubs audio (the same as a tap on SCRUB). | Zoom. |
+| **Playhead** (the start mode) | Moves the cursor by Cubase's nudge value (the Project window's nudge setting). | Zoom: ◂ ▸ horizontal, ▴ ▾ vertical. Centre: opens / closes the editor. |
+| **Items** | Moves the selected events. | ◂ ▸ previous / next event, ▴ ▾ the track above / below (SHIFT adds to the selection). Centre: zoom to the selection and back. |
+| **Envelope** | Moves the selected automation points in time. | ◂ ▸ previous / next point (SHIFT adds), ▴ ▾ another lane. Centre: the jog on the play cursor and back. |
+| **Range** | Moves what is aimed at. | ◂ ▸ aim at the left / right edge of the range selection, centre at the whole range. |
+| **Fades** | Makes the aimed fade longer / shorter. | ◂ ▸ aim at the fade-in / fade-out of the selected events. Centre: the cross walks the events instead, and back. |
+
+**SHIFT + jog** steps through markers in any mode.
+
+### Quick keys and SHIFT
+
+- **Key 1: Solo Clear** — clears every solo in the project. It is lit, and the display says SOLO ACTIVE, while
+  anything is soloed.
+- **Key 2: FINE** — the V-pots move a quarter as far per click (sends, Quick Controls, plug-in controls).
+- **SHIFT + a key** is automation: **◀ Read** and **▶ Write** for the selected track; **Cycle** Cross-Over,
+  **Click** Trim, **key 1** Latch and **key 2** Touch as the global mode.
+- **SSL Strip Mode**: on the PLUGIN view's first page, soft key 4 (PLUG-IN) puts the fader on the SSL channel
+  strip's own fader and the pan knob on its pan, as PLUGIN does on the UF8.
+- **FOOT 1 / 2**: foot switches.
+
+---
 
 ## UC1
 
-The UC1 works the **selected track's channel strip** and one **bus compressor**.
+The UC1 is your channel strip and bus compressor in hardware. The left and right thirds work the **channel strip of
+the selected track**, the middle top a **bus compressor**, and the middle bottom gets you around.
 
-- **With an SSL channel strip on the track** (Channel Strip 2, 4K B / E / G, 360 Link): the Channel Strip knobs and
-  keys are the plug-in's, the rings and LEDs follow it (also when you use the mouse, or automation), and the Dyn / Gate
-  LED rows show its gain reduction.
-- **Without one**: the knobs work **Cubase's own channel strip**: input filters, the four EQ bands (the bell keys
-  switch the outer bands between shelf and bell), gate and compressor. Reaching for a gate or compressor that is not
-  loaded loads it: EXP or a Gate knob loads the Noise Gate; a short press on DYN IN loads a compressor; a Dyn knob,
-  or DYN IN held, opens the compressor picker (turn to choose Standard / Tube / Vintage, DYN IN to load). F.ATT
-  switches the section's Release knob to attack and back. All of this can be changed in Settings.
-- **Bus Comp section**: a Bus Compressor 2 (or 360 Link Bus Compressor) anywhere in the project. The **Bus Comp
-  encoder** steps through the project's bus comps; the large name row shows which one (and its neighbours). It stays
-  on that one while you select other tracks. The needle shows its gain reduction.
+### On an SSL channel strip
+
+Select a track with an SSL Channel Strip 2, 4K B, 4K E, 4K G or 360 Link strip, and every knob and key on the UC1 is
+that plug-in's: filters, the four EQ bands with their bell / type / IN keys, the compressor and gate with F.ATK,
+PEAK, DYN IN and EXP, S/C LISTEN, input and output trim, polarity.
+
+- The **rings and LEDs** show the plug-in's settings, and follow when you use the mouse or automation plays.
+- The **Dyn and Gate LED rows** show the strip's gain reduction as it happens.
+- The **screen** shows the track's name and colour, the plug-in (the model field), and the name and value of what
+  you are turning.
+- **CHANNEL IN** is the plug-in's own bypass. **FINE** makes the knobs finer.
+- **Several SSL strips on one track?** The **magnifier** key steps to the next one (in insert order, then Cubase's
+  own strip); the name row shows previous / current / next for a moment. The choice is remembered per track.
+
+### On Cubase's own channel strip
+
+A track without an SSL strip is not a dead end: the same knobs work **Cubase's channel strip**, so every track in
+the project has an EQ, a gate and a compressor under your hands.
+
+| UC1 section | Works |
+|-------------|-------|
+| Input trim, HPF, LPF | Cubase's Pre section: gain, low cut, high cut. A cut filter switches on when you turn it and off at the end of its range. |
+| The four EQ bands | Cubase's channel EQ, bands 1–4: gain, frequency, Q. Turning a band's knob switches the band on. The **bell keys** switch the outer bands between shelf and bell. **EQ IN** is the EQ's bypass. |
+| Compressor | The strip's compressor module: threshold, ratio, release. **DYN IN** is its bypass. With the Tube or Vintage Compressor, the Ratio knob is Input Gain and the Threshold knob Output Gain (those have no threshold or ratio). |
+| Gate | The strip's Noise Gate: threshold, range, release, hold. **EXP** is its bypass. |
+| F.ATK (either one) | Switches that section's **Release knob to Attack** (lit) and back; the UC1 has no attack knobs. The choice stays as you change tracks. |
+
+**Loading a module by reaching for it.** If the track's strip has no gate or compressor yet:
+
+- **EXP**, or turning a Gate knob, loads the **Noise Gate**.
+- A short press on **DYN IN** loads a compressor (the Standard Compressor, unless Settings says otherwise).
+- Turning a Dyn knob, or **holding DYN IN**, opens the **compressor picker** on the screen: turn a Dyn knob to choose Standard,
+  Tube or Vintage, press DYN IN (or CONFIRM) to load it, BACK to cancel. Holding DYN IN on a track that has a
+  compressor swaps it for another type.
+- A module that is loaded but switched off is switched on by its knobs.
+
+Settings > *UC1 on Cubase's strip* decides whether knobs, only keys, or nothing loads modules, and which compressor
+DYN IN loads.
+
+### The Bus Comp section
+
+The seven knobs and **BUS COMP IN** in the middle work an SSL **Bus Compressor 2** (or 360 Link Bus Compressor)
+**anywhere in the project** — not necessarily on the selected track. Typically that is the one on your mix bus, and
+it stays there while you select and work on other tracks. The needle meter shows its gain reduction.
+
+- **Choosing which one**: turn the **secondary encoder** (right of the screen; this is its start job). It steps
+  through every bus compressor in the project; the large name row shows the track it is on, with its neighbours.
+- Until you pick one, the section is on the bus comp of an output channel if there is one, else the first in the
+  project (Settings can make it the selected track's).
+
+### The middle: screen, encoders and keys
 
 | Control | What it does |
 |---------|--------------|
-| CHANNEL encoder | Previous / next track. |
-| SOLO, CUT, Ø | The track's solo, mute and polarity. Solo Clear clears all solos. |
-| Channel IN / Bus Comp IN | The strip's / the bus comp's bypass. |
-| FINE | Finer knob steps. |
-| Magnifier | The next channel strip on the track, when it has several (a setting). |
-| 360° | Opens / closes the strip's plug-in window (a setting). |
-| Secondary encoder | Hold its push and turn to choose its job; a short push opens the window of the plug-in it is on (a setting). |
-| PRESETS | SSL's preset library for the channel strip or the bus comp: the Bus Comp encoder moves, CONFIRM opens / loads, BACK goes up. |
-| ROUTING | The SSL strip's routing order; the Bus Comp encoder steps through the ten orders. |
-| Display | Track name and colour, the plug-in, the value being turned; the 7-segment shows the track's MixConsole number. |
+| **CHANNEL encoder** (left of the screen) | Previous / next track. |
+| **Secondary encoder** (right of the screen) | Its job is shown when you **hold its push and turn**: the Bus Comp section through the project's bus comps (start job), the track's channel strips (like the magnifier), CS favourites, BC favourites. A **short push** opens / closes the window of the plug-in it is on (a bus comp's only when it is on the selected track). |
+| SOLO, CUT, Ø | The selected track's solo, mute and polarity. **Solo Clear** clears every solo. |
+| Magnifier | The next channel strip on the track. |
+| 360° | Opens / closes the channel strip's plug-in window. |
+| 7-segment display | The track's number in the MixConsole. |
+
+What the magnifier, 360° and the secondary encoder's push do can be changed (Settings > UC1 keys): next / previous
+strip, the plug-in window, Channel Settings, the MixConsole, bypass, or nothing.
+
+### Presets, routing and EXT FUNCS
+
+- **PRESETS** opens SSL's preset library (the same presets SSL 360 uses). First choose CHANNEL STRIP or BUS COMP (the
+  secondary encoder flips, CONFIRM enters), then folders and presets: the encoder moves, **CONFIRM** opens a folder or
+  loads the preset, **BACK** goes up and out. The plug-in's controls take the preset's values; the preset *name* in
+  the plug-in's own window does not change (Cubase lets a controller set controls, not the plug-in's saved state).
+- **ROUTING** changes the order of the SSL strip's sections (filters, EQ, dynamics). The secondary encoder steps
+  through the ten orders and the screen draws each; BACK, CONFIRM or ROUTING closes.
+- **BACK on the main screen: EXT FUNCS** — the channel strip's controls that have no knob of their own: Mix, Pan,
+  Width, Output Trim, Auto Makeup and others, by model. The encoder scrolls the list, its push switches to adjusting
+  the one shown, BACK or CONFIRM closes.
+
+---
+
+## Favourites
+
+Up to eight channel strips and eight bus compressors that you swap between by turning an encoder: compare a 4K E
+against a 4K G on a vocal without opening a menu.
+
+- Choose them in **Settings > Favourites**.
+- **Step through them** with the UF8's CHANNEL encoder in *CS Fav* / *BC Fav* mode, or the UC1's secondary encoder
+  in its favourites jobs. The UC1's name row shows previous / current / next.
+- A moment after you stop, the plug-in on the track is **replaced** by the favourite shown, and the settings the two
+  have in common are carried across by value (an HMF at 2.5 kHz stays at 2.5 kHz). On a track without one, the
+  favourite goes into the first free insert slot.
+- CS swaps the strip the UC1 is on; BC swaps the Bus Comp section's compressor. This needs a UC1.
+
+## Using them together
+
+- **Selection ties everything together.** SEL on the UF8, the channel encoder on any surface, or a mouse click: the
+  UF1's strip, the UC1's channel strip and the UF8's bank all go to that track.
+- **UF8 + UC1**: bank and balance on the UF8, press SEL, and the track's channel strip is on the UC1. The UF8's top
+  soft keys spread one strip control across eight tracks; the UC1 gives you one track's whole strip.
+- **UF1 + UF8**: the UF1's BANK keys bank the UF8, so the right hand never leaves the transport.
+- **UF1 + UC1**: the UF1's SHIFT + encoder and the UC1's magnifier pick the same channel strip, so the PLUGIN view
+  and the UC1 always show the same plug-in.
+- **UF8 alone**: every send, the SSL strips through the soft keys, markers and automation are all reachable; that
+  is what the send views, Nav Mode and the AUTO mode are for.
+
+---
 
 ## Settings
 
@@ -192,12 +456,12 @@ is saved and takes effect at once.
 
 | Section | What is there |
 |---------|---------------|
-| Devices | Which surfaces and whether Cubase is connected; key / LED and display brightness; sleep when idle. |
+| Devices | Which surfaces are connected and whether Cubase is; key / LED and display brightness; sleep when idle. |
 | Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
 | UC1 keys | What the magnifier, 360° and secondary encoder push do. |
 | UC1 on Cubase's strip | Whether the knobs / keys load a missing gate or compressor; which compressor DYN IN loads; which bus comp the Bus Comp section starts on. |
 | Display | How long track names are shortened; the UC1's 7-segment leading zeros. |
-| Favourites | Eight channel strips and eight bus comps for the CS Fav / BC Fav encoder modes. |
+| Favourites | Eight channel strips and eight bus comps. |
 | Logging | The script log (off by default; switch it on when reporting a problem). |
 | About | The version, and where the logs and settings files are. |
 
@@ -218,7 +482,7 @@ Each asks for administrator permission once. Rea-Sixty uses the same driver: wit
 Cubase-Sixty see the controllers (one at a time: quit the one before starting the other).
 
 While Cubase-Sixty runs it closes SSL 360's background program (SSL360Core.exe) whenever it appears, because the two
-compete for the SSL plug-ins' gain reduction meters.
+compete for the SSL plug-ins' meters.
 
 ## When something is wrong
 
@@ -228,22 +492,30 @@ compete for the SSL plug-ins' gain reduction meters.
 | "Waiting for Cubase" although a project is open | Restart Cubase with Cubase-Sixty running. In *Studio > MIDI Remote Manager* the four CubaseSixty devices should be listed and active. |
 | Red icon | Right-click > **Start bridge**. If it will not stay up: the virtual MIDI driver may be missing (install loopMIDI), or ports with the names `Cubase-Sixty ...` exist in loopMIDI (delete them there). |
 | An instrument plays when you touch a control | "In 'All MIDI Inputs'" is ticked for a Cubase-Sixty port (see setup). |
-| SCRUB does nothing | The Mackie Control device is missing (see setup). |
+| SCRUB only nudges | The Mackie Control device is missing (see setup). |
+| The UC1's knobs do nothing on a track | The track has neither an SSL strip nor Cubase's strip reachable (an instrument return, for example), or loading modules is set to "never". |
+| A top soft key on the UF8 shows "-" | That track has no SSL channel strip. |
 | A surface is odd after *Reload Scripts* | Restart Cubase; a reload does not always set the scripts up fully. |
 | Stepping to a track lands somewhere else | "Project window" stepping needs the Project window focused; the default (MixConsole) does not. |
 
 For a report: switch on the script log (Settings > Logging), reproduce the problem, and send the files from the logs
 folder (tray menu **Open logs folder**) with what you did and what you expected.
 
-Known issues and limits:
+## What is different from Rea-Sixty and SSL 360
 
-- [Known issues](known-issues.md)
-- [What Cubase does not allow](cubase-limitations.md)
-- [What Rea-Sixty has that Cubase-Sixty does not](missing-features.md)
+Cubase gives controllers less than REAPER does, so some things are missing or different:
 
-Some of them in short: a track's colour reaches the displays when the track is next selected or banked in, not the
-moment it is changed; on fast turns of a send the MixConsole trails the controller a little and then lands on the
-same value; a preset loaded from the UC1 sets the plug-in's controls but not the preset name in its window.
+- A track's **colour** reaches the displays when the track is next selected or banked in, not the moment you change it.
+- The **automation mode** keys light the last mode pressed on a surface; Cubase does not report the mode.
+- **Markers** are reached by number; their names are not shown.
+- On fast turns of a **send**, the MixConsole trails the controller for a moment and then lands on the same value.
+- A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
+- The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there.
+- The METER view has the Overview screen only.
+
+The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),
+[what Cubase does not allow](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md),
+[what Rea-Sixty has that Cubase-Sixty does not](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/missing-features.md).
 
 ## Uninstalling
 
