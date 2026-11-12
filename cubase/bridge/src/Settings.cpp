@@ -218,6 +218,7 @@ bool set(const std::string& key, const std::string& value, std::string* why)
     return true;
 }
 
+std::filesystem::path dir() { return g_path.parent_path(); }
 Stepping trackStepping()
 {
     const std::string v = lower(get("track-stepping", "mixconsole"));

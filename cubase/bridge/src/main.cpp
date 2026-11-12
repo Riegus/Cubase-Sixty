@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <map>
@@ -123,6 +124,30 @@ std::atomic<int> g_skBank{0};
 std::atomic<int> g_focus{-1};   // bank * 8 + slot of the focused parameter, -1 = none (V-pots on pan)
 // Pan as the script last sent it (shown again when the focus ends), and the focused parameter per strip.
 std::array<uint16_t, 8> g_panPos{};
+// The V-pot send view: each V-pot's send level (0..1, from the script's 0E; -1 = not known) and until when the bridge
+// draws the ring itself. A turn moves the ring at once from here (the way round through Cubase and the script lagged,
+// 12.11.2026); the script's reports are ignored for 0.5 s after a turn and its settled value taken after that.
+std::array<std::atomic<double>, 8> g_selSendVal{};
+std::array<std::atomic<long long>, 8> g_selSendOwnUntil{};
+std::array<std::atomic<bool>, 8> g_selSendOwnText{};   // the bridge drew the value text of the turn in flight (the curve knew it)
+std::array<std::atomic<bool>, 8> g_selSendHas{};   // the V-pot has a send (the script sent a level text for it)
+std::array<std::string, 8> g_selSendText;
+// With --trace (made 12.11.2026 for "the value sometimes stops updating"): per V-pot, one line a second while it turns
+// or the script answers: turns taken / refused (no send known), how the text was drawn, what the script sent.
+struct SelSendLog { std::atomic<int> turns{0}, refused{0}, curve{0}, gap{0}, text{0}, textHidden{0}, pos{0}, posIgnored{0}, last14{0}; };
+std::array<SelSendLog, 8> g_selSendLog;
+void selSendLogFlush()
+{
+    for (int s = 0; s < 8; ++s) {
+        SelSendLog& l = g_selSendLog[size_t(s)];
+        const int turns = l.turns.exchange(0), refused = l.refused.exchange(0);
+        if (!turns && !refused && !l.text && !l.pos) continue;   // (the script's answers count in a quiet second too)
+        if (!g_trace8) { l.curve = 0; l.gap = 0; l.text = 0; l.textHidden = 0; l.pos = 0; l.posIgnored = 0; continue; }
+        std::printf("UF8 send V-pot %d: %d turns (last level %d of 16383), %d refused (no send known); text from the curve %d, gap %d; "
+                    "script sent text %d (hidden %d), position %d (ignored %d)\n", s + 1, turns, l.last14.load(), refused,
+                    l.curve.exchange(0), l.gap.exchange(0), l.text.exchange(0), l.textHidden.exchange(0), l.pos.exchange(0), l.posIgnored.exchange(0));
+    }
+}   // each V-pot's last level text from the script (MIDI thread only)
 std::string g_panLine[8];
 std::array<uint16_t, 8> g_focusPos{};
 std::array<uint8_t, 8> g_focusMode{};
@@ -259,7 +284,8 @@ void handleFrame(const uf8frames::Frame& fr)
         const auto r = uf8fader::read(pb14, (d[4] & 0x80) != 0, /*grabValid=*/false);
         if (!r.usable) return;
         const uint16_t v = pbToMidi14(r.pbOut);
-        if (g_stripFader[s]) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
+        // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
+        if (g_stripFader[s] || g_routeSend >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
         // Echo the hand position so the motor does not jump back on release.
         g_dev.send(uf8fader::echo(s, r.pbOut));
@@ -412,7 +438,9 @@ void handleFrame(const uf8frames::Frame& fr)
             paintVpots();
             break;
         }
-        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && g_stripPan[d[3] - 0x08]) {   // strip mode: centre the strip's pan
+        // Strip mode: centre the strip's pan; the V-pot send view: the selected track's send on / off (always the script's
+        // way there: the V-pot's binding is a placeholder on the send's on switch).
+        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && (g_stripPan[d[3] - 0x08] || (g_routeSelSends && g_routeSend < 0))) {
             if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x29, uint8_t(d[3] - 0x08), 0xF7});
             break;
         }
@@ -485,7 +513,55 @@ void handleFrame(const uf8frames::Frame& fr)
         const int delta = uf8frames::vpotDelta(d[4]);
         if (delta == 0) break;
         if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
-        else if (g_stripPan[s]) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // strip mode: the strip's pan
+        else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) {   // strip mode's pan; a send (V-pot send view)
+            const bool sends = g_routeSelSends && g_routeSend < 0;
+            if (!sends) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});
+            if (sends && !g_selSendHas[s]) ++g_selSendLog[s].refused;
+            if (sends && g_selSendHas[s]) {   // (an empty send slot: nothing to turn)
+                ++g_selSendLog[s].turns;
+                // The V-pot send view: the bridge keeps the level, shows it at once and sends the script the level
+                // itself (2A <strip> <msb> <lsb>), not the step: counted on both sides, the two drifted apart and the
+                // settled value came as a small correction (12.11.2026).
+                const double v = std::clamp(g_selSendVal[s].load() + delta / 100.0, 0.0, 1.0);
+                const int v14 = int(std::lround(v * 16383.0));
+                // At most one level every 60 ms, the last one always: at 30-40 a second Cubase gave the script 2 idle
+                // ticks a second instead of 10 and the MixConsole trailed; up to about 20 it kept up (12.11.2026).
+                {
+                    static std::array<std::atomic<long long>, 8> lastTx{};
+                    static std::array<std::atomic<int>, 8> pending{};   // level + 1 waiting to go, 0 = none
+                    const auto tx = [](uint8_t strip, int level) {
+                        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2A, strip, uint8_t((level >> 7) & 0x7F), uint8_t(level & 0x7F), 0xF7});
+                    };
+                    const long long now = nowMs8(), since = now - lastTx[s];
+                    if (since >= 60 && pending[s] == 0) { lastTx[s] = now; tx(s, v14); }
+                    else if (pending[s].exchange(v14 + 1) == 0) {
+                        std::thread([s, since, tx] {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(std::max<long long>(1, 60 - since)));
+                            lastTx[s] = nowMs8();
+                            const int p = pending[s].exchange(0);
+                            if (p > 0) tx(s, p - 1);
+                        }).detach();
+                    }
+                }
+                g_selSendVal[s] = v;
+                g_selSendOwnUntil[s] = nowMs8() + 500;
+                g_panPos[s] = uf8::vpotPosUnipolar(v);
+                g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
+                // The value too, from the send level curve (Cubase's own text trails the ring; it follows once settled).
+                std::string t = cs::uf1LevelText(int(std::lround(v * 16383.0)));
+                g_selSendOwnText[s] = !t.empty();   // (a gap in the curve: Cubase's own text shows meanwhile)
+                g_selSendLog[s].last14 = v14;
+                ++(t.empty() ? g_selSendLog[s].gap : g_selSendLog[s].curve);
+                if (!t.empty() && g_focus < 0) {
+                    if (const size_t at = t.rfind("dB"); at != std::string::npos && at > 0 && t[at - 1] != ' ') t.insert(at, " ");
+                    std::string line = "Send";
+                    if (t.size() > 14) t.resize(14);
+                    line.append(19 - line.size() - t.size(), ' ');
+                    line += t;
+                    g_dev.send(uf8::buildValueLine(s, line));
+                }
+            }
+        }
         else sendMidi({0xB0, uint8_t(kCcVPot + s), vpotToCc(delta)});
         break;
     }
@@ -661,10 +737,10 @@ void uf8NoProject()
     for (int s = 0; s < kStrips; ++s) {
         std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
         std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
-        std::vector<unsigned char> fader{uint8_t(0xE0 | s), 0, 0};
+        // The faders stay where they are (all eight motors running to the bottom at once was loud, 10.11.2026);
+        // the dark displays and LEDs show that nothing is connected.
         onMidiIn(name);
         onMidiIn(colour);
-        onMidiIn(fader);
         g_panLine[s].clear();
         g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
     }
@@ -909,9 +985,20 @@ void onMidiIn(std::vector<unsigned char>& msg)
             line.append(19 - line.size() - v.size(), ' ');
             line += v;
             g_panLine[m[5]] = line;
-            if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+            g_selSendText[m[5]] = v;
+            g_selSendHas[m[5]] = !v.empty();
+            ++g_selSendLog[m[5]].text;
+            if (g_selSendOwnText[m[5]] && nowMs8() < g_selSendOwnUntil[m[5]]) ++g_selSendLog[m[5]].textHidden;
+            if (g_focus < 0 && !(g_selSendOwnText[m[5]] && nowMs8() < g_selSendOwnUntil[m[5]])) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));   // (not while the bridge draws a turn)
         } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
-            // A send level 0..127 on the V-pot: a unipolar bar.
+            // A send level 0..127 on the V-pot: a unipolar bar. (Not while the bridge draws a turn itself.)
+            ++g_selSendLog[m[5]].pos;
+            // Cubase's own level with its text (sent just before) teaches the curve, but only once a turn has settled:
+            // learnt in the middle of a turn the pairs did not match and the text jumped back and forth (12.11.2026).
+            const int v14 = m.size() >= 10 ? (int(m[7]) << 7) | int(m[8]) : -1;
+            if (nowMs8() < g_selSendOwnUntil[m[5]]) { ++g_selSendLog[m[5]].posIgnored; return; }
+            if (v14 >= 0) cs::uf1LearnLevel(v14, g_selSendText[m[5]]);
+            g_selSendVal[m[5]] = v14 >= 0 ? v14 / 16383.0 : m[6] / 127.0;
             g_panPos[m[5]] = uf8::vpotPosUnipolar(m[6] / 127.0);
             if (g_focus < 0) g_dev.send(uf8::buildVPotReadoutBar(g_panPos));
         } else if (m.size() >= 10 && m[4] == 0x20 && m[5] < kStrips) {
@@ -972,6 +1059,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
         const int s = m[0] & 0x0F;
         if (s >= kStrips) return;
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
+        // A fader send view: the faders are the script's (27, the send levels through Direct Access); what Cubase sends
+        // here is a placeholder binding and must not move the motors, nor be kept as the volume.
+        if (g_routeSend >= 0) return;
         g_volPb[s] = v;
         if (g_touched[s] || g_stripFader[s]) return;   // hand wins; strip mode: the strip's fader drives it
         driveFader(s, v);
@@ -1308,6 +1398,7 @@ int main(int argc, char** argv)
         if (cs::stopRequested()) { std::printf("Stop asked for (tray app): blanking the surfaces.\n"); break; }
         cs::uf1Poll();
         cs::uc1Poll();
+        { static int n = 0; if (++n % 5 == 0) selSendLogFlush(); }   // once a second
         uf8Poll();
         cs::sleep::tick(cs::uf1TransportRunning(), [](bool asleep) {
             std::printf("Surfaces %s.\n", asleep ? "asleep (Sleep when idle)" : "awake");

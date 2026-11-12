@@ -7,6 +7,7 @@
 //
 
 #include "Uf1Bridge.h"
+#include <fstream>
 #include "Uf1Text.h"
 #include "Names.h"
 #include "Brightness.h"
@@ -812,9 +813,45 @@ bool parseDb(const std::string& t, double& db)
     db = std::strtod(t.c_str(), &end);
     return end != t.c_str() && std::string(end).rfind("dB", 0) == 0;
 }
+// The curve is kept in cubase\level-curve.txt (position <tab> text), so it is known from the first turn after a
+// restart: with few points the text between them is rough and Cubase's exact value came as a correction when a turn
+// ended (12.11.2026). Read at the first use, written by levelCurveSave (from uf1Poll) when it has grown.
+bool g_levelLoaded = false, g_levelDirty = false;
+void levelCurveLoad()   // (g_levelMx held)
+{
+    if (g_levelLoaded) return;
+    g_levelLoaded = true;
+    std::ifstream in(settings::dir() / "level-curve.txt");
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t tab = line.find('\t');
+        if (tab == std::string::npos) continue;
+        const int pos = std::atoi(line.substr(0, tab).c_str());
+        std::string text = line.substr(tab + 1);
+        if (!text.empty() && text.back() == '\r') text.pop_back();
+        double db = 0;
+        if (pos >= 0 && pos <= 16383 && parseDb(text, db)) g_levelText[pos] = text;
+    }
+    if (!g_levelText.empty()) std::printf("Send level curve: %zu points read\n", g_levelText.size());
+}
+void levelCurveSave()
+{
+    static long long last = 0;
+    std::map<int, std::string> copy;
+    {
+        std::lock_guard<std::mutex> lk(g_levelMx);
+        if (!g_levelDirty || nowMs() - last < 10000) return;
+        g_levelDirty = false;
+        last = nowMs();
+        copy = g_levelText;
+    }
+    std::ofstream out(settings::dir() / "level-curve.txt", std::ios::trunc);
+    for (const auto& kv : copy) out << kv.first << '\t' << kv.second << '\n';
+}
 std::string levelTextFor(int pos)
 {
     std::lock_guard<std::mutex> lk(g_levelMx);
+    levelCurveLoad();
     if (g_levelText.empty()) return {};
     auto hi = g_levelText.lower_bound(pos);
     if (hi != g_levelText.end() && hi->first == pos) return hi->second;
@@ -1337,13 +1374,12 @@ void uf1NoProject(const char* label = "No Proj.")
     name.push_back(0xF7);
     std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
     std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
-    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0}, fader{0xE0, 0, 0};
+    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0};   // (the fader stays where it is, as on the UF8)
     onMidiIn(name);
     onMidiIn(colour);
     onMidiIn(level);
     onMidiIn(meterL);
     onMidiIn(meterR);
-    onMidiIn(fader);
     for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
     std::vector<unsigned char> time{0xF0, 0x7D, 0x52, 0x36, 0x0D, ' ', 0xF7};
     onMidiIn(time);
@@ -1450,7 +1486,9 @@ void onSysex(const std::vector<unsigned char>& m)
             double db = 0;
             if (g_view != kViewPlugin && nowMs() - g_lastCubaseTextMs[k] < 60 && parseDb(g_lastCubaseText[k], db)) {
                 std::lock_guard<std::mutex> lk(g_levelMx);
+                levelCurveLoad();
                 g_levelText[v] = g_lastCubaseText[k];
+                g_levelDirty = true;
             }
         }
         turnAnswer(int(k) + 1);
@@ -1849,6 +1887,7 @@ void uf1RedrawName()
 void uf1Poll()
 {
     turnReport();
+    levelCurveSave();
     if (g_open) {
         if (!g_dev.needsReopen()) return;
         std::fprintf(stderr, "The UF1 stopped answering or was unplugged (%s); looking for it again.\n", g_dev.lastError().c_str());
@@ -1899,6 +1938,20 @@ void uf1SetStripNumber(int n)
 }
 
 void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
+// The send level curve (the dB text for a 14-bit position), shared with the UF8's V-pot send view: it draws its value
+// text from it while turning, and teaches it Cubase's settled values.
+std::string uf1LevelText(int pos14) { return levelTextFor(pos14); }
+void uf1LearnLevel(int pos14, const std::string& text)
+{
+    std::string t;
+    for (char c : text) if (c != ' ') t += c;
+    double db = 0;
+    if (!parseDb(t, db)) return;
+    std::lock_guard<std::mutex> lk(g_levelMx);
+    levelCurveLoad();
+    g_levelText[pos14] = t;
+    g_levelDirty = true;
+}
 
 // The UF1 script does the stepping whether or not the UF1 itself is connected (its ports are always there).
 bool helperSend(const std::vector<unsigned char>& msg);   // main.cpp

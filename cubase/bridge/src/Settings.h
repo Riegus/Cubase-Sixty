@@ -4,6 +4,7 @@
 // "key = value", '#' comments. Read again whenever the file has changed, so an edit needs no restart.
 //
 
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,8 @@ std::string get(const std::string& key, const std::string& fallback);
 //   mixconsole (default) = the ones the MixConsole shows (the UF1 script steps on past hidden ones)
 //   project = the ones the Project window shows (Cubase's Navigate Up / Down)
 //   all     = every track (Select Track: Prev / Next)
+// The folder settings.txt is in (cubase\): other small files the bridge keeps live beside it.
+std::filesystem::path dir();
 enum class Stepping { MixConsole, Project, All };
 Stepping trackStepping();
 inline bool projectStepping() { return trackStepping() == Stepping::Project; }

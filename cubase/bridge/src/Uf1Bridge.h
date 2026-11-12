@@ -38,6 +38,8 @@ void uf1SetSoloActive(bool on);
 // A SysEx message for the UF1 script (passed on from the UF8 script: which of several same-named tracks is
 // selected, SysEx 1C).
 void uf1SendToScript(const std::vector<unsigned char>& msg);
+std::string uf1LevelText(int pos14);                          // "" where the curve is not known
+void uf1LearnLevel(int pos14, const std::string& text);       // Cubase's text for a position ("-6.02 dB")
 // One track back / forward (dir -1 / +1) past the tracks hidden in the MixConsole (track-stepping = mixconsole): the
 // UF1 script steps and steps again while the new track is hidden (SysEx 5C), whether or not the UF1 is connected.
 // False if its ports could not be made.
