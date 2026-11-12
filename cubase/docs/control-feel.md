@@ -16,8 +16,11 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
    it once (after the bridge's 0.5 s, or it would be thrown away). Display and next turn then start from the truth.
 4. **Count quick turns from what you last wrote, not from what Cubase says.** Read back at once, Cubase still gives
    the old value, and steps are lost. Keep the value last written for 1 s and add to that.
-5. **Send levels never through a MIDI Remote value binding.** See below.
-6. **Measure before changing.** Every fix here came from a log of what really happened per turn; the guesses made
+5. **One side counts.** If the bridge draws a turn itself, it sends the script the resulting value, not the step:
+   with both sides adding steps the two drift apart, and the settled value arrives as a small correction (UF8 V-pot
+   send view, 12.11.2026: SysEx 2A carries the level).
+6. **Send levels never through a MIDI Remote value binding.** See below.
+7. **Measure before changing.** Every fix here came from a log of what really happened per turn; the guesses made
    before measuring were wrong (see "What did not help").
 
 ## Send levels (10.–12.11.2026)
