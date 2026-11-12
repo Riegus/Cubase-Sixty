@@ -20,6 +20,13 @@ entry in `defs()` in `bridge/src/Settings.cpp` (the page and the file follow).
 
 ## UC1
 
+Done (12.11.2026, the Settings page's "UC1 on Cubase's strip" section): loading the gate and compressor (from the
+knobs and keys / the keys only / never), the compressor DYN IN loads (Standard / Tube / Vintage / the last one
+picked since Cubase started), and what the Bus Comp section is on before one is picked (an output channel's / the
+selected track's). Still open below: "not when the track already has a gate / compressor plug-in", the last picked
+compressor kept across Cubase starts, F.ATT as a fast-attack switch, the Bus Comp choice kept per project, the
+Tube / Vintage knobs, ROUTING order 10.
+
 - **Loading Cubase's strip modules.** Now: on a track without an SSL channel strip, a Gate knob or EXP loads the Noise
   Gate, DYN IN loads the Standard Compressor, a Dyn knob (or DYN IN held) opens the compressor picker; also when the
   track has a Bus Compressor 2 or another maker's gate / compressor in its inserts. Choices: as now; not when the track
