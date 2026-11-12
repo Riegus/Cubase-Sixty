@@ -141,7 +141,7 @@ void selSendLogFlush()
     for (int s = 0; s < 8; ++s) {
         SelSendLog& l = g_selSendLog[size_t(s)];
         const int turns = l.turns.exchange(0), refused = l.refused.exchange(0);
-        if (!turns && !refused) { l.curve = 0; l.gap = 0; l.text = 0; l.textHidden = 0; l.pos = 0; l.posIgnored = 0; continue; }
+        if (!turns && !refused && !l.text && !l.pos) continue;   // (the script's answers count in a quiet second too)
         std::printf("UF8 send V-pot %d: %d turns (last level %d of 16383), %d refused (no send known); text from the curve %d, gap %d; "
                     "script sent text %d (hidden %d), position %d (ignored %d)\n", s + 1, turns, l.last14.load(), refused,
                     l.curve.exchange(0), l.gap.exchange(0), l.text.exchange(0), l.textHidden.exchange(0), l.pos.exchange(0), l.posIgnored.exchange(0));

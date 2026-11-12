@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.6-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.7-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -939,7 +939,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
-	if (m[4] >= 0x21 && m[4] <= 0x29) {
+	if (m[4] >= 0x21 && m[4] <= 0x2A) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
