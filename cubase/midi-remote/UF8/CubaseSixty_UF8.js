@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.15.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.15.2-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -1228,7 +1228,10 @@ function stripPanSend(activeDevice, index) {
 			text = daText(st.vDa, st.vObj, st.vTag)
 			var u = daUnits(st.vDa, st.vObj, st.vTag)
 			if (text && u) text += ' ' + u
-			pos = Math.max(0, Math.min(127, Math.round(st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag) * 127)))
+			// (While turning: the value just written, Cubase's own comes a moment later.)
+			var ww = st.vWanted
+			var pv = ww && ww.obj === st.vObj && ww.tag === st.vTag && Date.now() - ww.at < 400 ? ww.value : st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
+			pos = Math.max(0, Math.min(127, Math.round(pv * 127)))
 		}
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(text), [0xF7]))
 		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos, 0xF7]))
@@ -1269,9 +1272,15 @@ function skMessage(activeDevice, m) {
 		var pi = m[5]
 		if (pi >= STRIPS || !skStrip[pi].panOn || skStrip[pi].vObj < 0) return
 		var st = skStrip[pi], da = st.vDa
-		var cur = da.getParameterProcessValue(skAm, st.vObj, st.vTag)
-		da.setParameterProcessValue(skAm, st.vObj, st.vTag, Math.max(0, Math.min(1, cur + (m[6] - 64) / 100)))
-		if (st.vKind !== 'send') stripPanSend(activeDevice, pi)   // (a send: shown by the poll)
+		// Quick turns count from the value last written (for 1 s): read back at once, Cubase still gives the old value
+		// and steps were lost (the V-pot send view lagged, 12.11.2026). The ring is drawn from it at once too.
+		var nowT = Date.now()
+		var w = st.vWanted
+		var cur = w && w.obj === st.vObj && w.tag === st.vTag && nowT - w.at < 1000 ? w.value : da.getParameterProcessValue(skAm, st.vObj, st.vTag)
+		var next = Math.max(0, Math.min(1, cur + (m[6] - 64) / 100))
+		st.vWanted = { obj: st.vObj, tag: st.vTag, value: next, at: nowT }
+		da.setParameterProcessValue(skAm, st.vObj, st.vTag, next)
+		stripPanSend(activeDevice, pi)
 		return
 	}
 	if (m[4] === 0x29 && m.length >= 7) {   // V-pot push: centre the plug-in's pan; on a send: the send on / off
@@ -1336,7 +1345,8 @@ function sendViewPoll(activeDevice) {
 		if (st.panOn && st.vKind === 'send' && st.vObj >= 0) {
 			var w = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
 			var on = st.vOn >= 0 ? st.vDa.getParameterProcessValue(skAm, st.vObj, st.vOn) : 0
-			if (w !== st.vPolled || on !== st.vOnPolled) { st.vPolled = w; st.vOnPolled = on; stripPanSend(activeDevice, i) }
+			var txt = daText(st.vDa, st.vObj, st.vTag)
+			if (w !== st.vPolled || on !== st.vOnPolled || txt !== st.vTextPolled) { st.vPolled = w; st.vOnPolled = on; st.vTextPolled = txt; stripPanSend(activeDevice, i) }
 		}
 	}
 }
