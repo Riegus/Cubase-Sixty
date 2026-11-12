@@ -126,3 +126,16 @@ All tried against the send-level lag, with no measurable change, before the bind
 - EQ graph polling off (it does nothing on a track with an SSL strip);
 - disconnecting the Mackie Control device;
 - halving old commits: a03b82a was smoother but not smooth, and the order of later commits explained nothing.
+
+## What did not help (12.11.2026): the MixConsole trailing on fast send turns
+
+While a send level changes quickly, Cubase lets the scripts run about twice a second instead of ten times (the same
+stall as with the binding, milder), and the MixConsole trails the hand; it ends on the right value. The surfaces do
+not show it, since the bridge draws the turn. Not the cause, by measurement:
+
+- how long the Direct Access writes take (0-4 ms a second in all);
+- how many there are (the same stall at 5-13 writes a second as at 30-40; the 60 ms limit is kept anyway);
+- having anything bound to a send slot (a build with no binding on any send, UF8 and UF1 scripts: no change).
+
+Taken as a Cubase limit. Not tried: sending the level as a controller instead of SysEx (the UF1 does, and feels the
+same), and whether dragging a send with the mouse stalls the scripts in the same way.

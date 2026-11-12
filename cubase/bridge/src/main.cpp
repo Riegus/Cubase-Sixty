@@ -132,8 +132,8 @@ std::array<std::atomic<long long>, 8> g_selSendOwnUntil{};
 std::array<std::atomic<bool>, 8> g_selSendOwnText{};   // the bridge drew the value text of the turn in flight (the curve knew it)
 std::array<std::atomic<bool>, 8> g_selSendHas{};   // the V-pot has a send (the script sent a level text for it)
 std::array<std::string, 8> g_selSendText;
-// Log (12.11.2026, "the value sometimes stops updating"): per V-pot, one line a second while it turns or the script
-// answers: turns taken / refused (no send known), how the text was drawn, what the script sent.
+// With --trace (made 12.11.2026 for "the value sometimes stops updating"): per V-pot, one line a second while it turns
+// or the script answers: turns taken / refused (no send known), how the text was drawn, what the script sent.
 struct SelSendLog { std::atomic<int> turns{0}, refused{0}, curve{0}, gap{0}, text{0}, textHidden{0}, pos{0}, posIgnored{0}, last14{0}; };
 std::array<SelSendLog, 8> g_selSendLog;
 void selSendLogFlush()
@@ -142,6 +142,7 @@ void selSendLogFlush()
         SelSendLog& l = g_selSendLog[size_t(s)];
         const int turns = l.turns.exchange(0), refused = l.refused.exchange(0);
         if (!turns && !refused && !l.text && !l.pos) continue;   // (the script's answers count in a quiet second too)
+        if (!g_trace8) { l.curve = 0; l.gap = 0; l.text = 0; l.textHidden = 0; l.pos = 0; l.posIgnored = 0; continue; }
         std::printf("UF8 send V-pot %d: %d turns (last level %d of 16383), %d refused (no send known); text from the curve %d, gap %d; "
                     "script sent text %d (hidden %d), position %d (ignored %d)\n", s + 1, turns, l.last14.load(), refused,
                     l.curve.exchange(0), l.gap.exchange(0), l.text.exchange(0), l.textHidden.exchange(0), l.pos.exchange(0), l.posIgnored.exchange(0));
