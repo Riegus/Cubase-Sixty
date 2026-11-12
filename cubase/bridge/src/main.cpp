@@ -523,7 +523,25 @@ void handleFrame(const uf8frames::Frame& fr)
                 // settled value came as a small correction (12.11.2026).
                 const double v = std::clamp(g_selSendVal[s].load() + delta / 100.0, 0.0, 1.0);
                 const int v14 = int(std::lround(v * 16383.0));
-                sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2A, s, uint8_t((v14 >> 7) & 0x7F), uint8_t(v14 & 0x7F), 0xF7});
+                // At most one level every 60 ms, the last one always: at 30-40 a second Cubase gave the script 2 idle
+                // ticks a second instead of 10 and the MixConsole trailed; up to about 20 it kept up (12.11.2026).
+                {
+                    static std::array<std::atomic<long long>, 8> lastTx{};
+                    static std::array<std::atomic<int>, 8> pending{};   // level + 1 waiting to go, 0 = none
+                    const auto tx = [](uint8_t strip, int level) {
+                        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2A, strip, uint8_t((level >> 7) & 0x7F), uint8_t(level & 0x7F), 0xF7});
+                    };
+                    const long long now = nowMs8(), since = now - lastTx[s];
+                    if (since >= 60 && pending[s] == 0) { lastTx[s] = now; tx(s, v14); }
+                    else if (pending[s].exchange(v14 + 1) == 0) {
+                        std::thread([s, since, tx] {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(std::max<long long>(1, 60 - since)));
+                            lastTx[s] = nowMs8();
+                            const int p = pending[s].exchange(0);
+                            if (p > 0) tx(s, p - 1);
+                        }).detach();
+                    }
+                }
                 g_selSendVal[s] = v;
                 g_selSendOwnUntil[s] = nowMs8() + 500;
                 g_panPos[s] = uf8::vpotPosUnipolar(v);
@@ -974,10 +992,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
         } else if (m.size() >= 8 && m[4] == 0x0E && m[5] < kStrips) {
             // A send level 0..127 on the V-pot: a unipolar bar. (Not while the bridge draws a turn itself.)
             ++g_selSendLog[m[5]].pos;
-            // Cubase's own level with its text (sent just before): teach the curve, also during a turn.
+            // Cubase's own level with its text (sent just before) teaches the curve, but only once a turn has settled:
+            // learnt in the middle of a turn the pairs did not match and the text jumped back and forth (12.11.2026).
             const int v14 = m.size() >= 10 ? (int(m[7]) << 7) | int(m[8]) : -1;
-            if (v14 >= 0) cs::uf1LearnLevel(v14, g_selSendText[m[5]]);
             if (nowMs8() < g_selSendOwnUntil[m[5]]) { ++g_selSendLog[m[5]].posIgnored; return; }
+            if (v14 >= 0) cs::uf1LearnLevel(v14, g_selSendText[m[5]]);
             g_selSendVal[m[5]] = v14 >= 0 ? v14 / 16383.0 : m[6] / 127.0;
             g_panPos[m[5]] = uf8::vpotPosUnipolar(m[6] / 127.0);
             if (g_focus < 0) g_dev.send(uf8::buildVPotReadoutBar(g_panPos));

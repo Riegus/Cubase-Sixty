@@ -23,6 +23,13 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
 7. **Measure before changing.** Every fix here came from a log of what really happened per turn; the guesses made
    before measuring were wrong (see "What did not help").
 
+8. **Do not write faster than Cubase keeps up.** Direct Access writes at 30–40 a second (a fast V-pot turn, one
+   write per step) left the script 2 idle ticks a second instead of 10, and the MixConsole trailed; up to about 20 a
+   second it kept up. The bridge sends at most one level every 60 ms, and always the last one (12.11.2026).
+9. **Every new SysEx command must be in the script's dispatch range.** The UF8 script passes 21–2A to the strip /
+   soft-key handler; 2A was first added outside it and dropped without a word: nothing reached Cubase while the
+   bridge's own drawing made it look alive.
+
 ## Send levels (10.–12.11.2026)
 
 - **The cause of the lag.** With a MIDI Remote value binding on a send level, Cubase pauses ~0.8 s at a time while
@@ -50,6 +57,11 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   first, then the position); on the UF8 the script sends the exact position only with Cubase's own value (0E with
   msb / lsb), never with a turn in flight.
 - Where the curve has a gap, Cubase's own text shows (never "...").
+- Learning in the middle of a turn was tried on the UF8 (the value and text read together each idle tick): the pairs
+  did not match and the text jumped back and forth. Settled values only.
+- The curve is kept in `cubase\level-curve.txt` and read at the first use, so it is known from the first turn after
+  a restart: with few points the text between them is rough, and Cubase's exact value then shows as a small
+  correction when the turn ends.
 - The UF1's temporary value line goes back to pan 2 s after the last step (3 s felt too long), and a read-back must
   not restart that timer or move the bar.
 - The UF1's value line is laid out as on the UF8: label left, value right-aligned (Rea-Sixty's `uf1ValueLine`).
