@@ -332,9 +332,19 @@ bar. They follow the mouse and automation too.
 - **SHIFT + 5–8** opens the **preset browser** for the SSL plug-in: SSL's preset library. V-pot 4 scrolls, its push
   loads the preset; soft key 3 goes back.
 
-**METER** — the big display becomes the SSL **Meter / Meter Pro** plug-in of the selected track: goniometer, peak and
-RMS bars with holds. Soft key 2 resets the holds. Put a Meter on the Stereo Out and it shows whatever you select;
-"NO METER" means no Meter plug-in was found.
+**METER** — the big display becomes the SSL **Meter / Meter Pro** plug-in of the selected track. **Soft key 1**
+steps through its screens; its label shows the one you are on:
+
+- **OVERVIEW**: goniometer, peak and RMS bars with holds, and the numbers.
+- **ANALOGUE**: two VU needles with their max needles, and the VU numbers.
+- **RTA**: the 31-band spectrum with holds.
+- **LOUDNESS** (Meter Pro only): the loudness history and the Integrated, Short-Term, True Peak and Short-Term Max
+  readouts.
+
+Soft key 2 (RESET) resets the holds (on LOUDNESS, the loudness measurement too). Put a Meter on the Stereo Out and
+it shows whatever you select; "NO METER" means no Meter plug-in was found. The screens use the Meter's default
+settings (VU, -18 dBFS reference, RTA scale 0 to -120 dB, loudness range -18 to +9 LU); changing them in the plug-in
+does not change the UF1's drawing yet.
 
 ### Transport and time
 
@@ -549,7 +559,8 @@ Cubase gives controllers less than REAPER does, so some things are missing or di
 - A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
 - The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there. On the UF8,
   **Q3** and **LAYER 1–3** do nothing.
-- The METER view has the Overview screen only.
+- In the METER view the V-pots, FINE, PRESETS and the Loudness PLAY key do nothing yet, and the screens are drawn
+  with the Meter's default settings.
 
 The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),
 [what Cubase does not allow](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md),

@@ -106,6 +106,7 @@ bool g_modeHeld = false;     // MODE held: the four display soft keys show the v
 // sends shown in the display's V-pot cells).
 enum { kViewPlugin = 0, kViewDaw = 1, kViewMeter = 2, kViewSends = 3 };
 std::atomic<int> g_view{kViewDaw};
+std::atomic<int> g_meterScreen{0};       // METER: 0 Overview, 1 Analogue, 2 RTA, 3 Loudness (soft key 1 steps)
 std::atomic<bool> g_meterReset{false};   // METER: the RESET soft key was pressed (the cycle thread takes it)
 std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LED note from the script)
 // PLUGIN view: the SSL plug-in on the selected track, as the script reports it (SysEx 50). While one is there, the
@@ -600,9 +601,15 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 0x19 && ev.id <= 0x1C) {
-            // METER, without MODE: soft key 2 = RESET (the peak holds and overload marks). FINE and PRESETS: later.
+            // METER, without MODE: soft key 1 = the next screen (Overview, Analogue, RTA, and Loudness with a Meter
+            // Pro), soft key 2 = RESET (the peak holds and overload marks). FINE and PRESETS: later.
             if (g_presetsOpen && !g_modeHeld) { if (ev.pressed && ev.id == 0x1B) g_presetsOpen = false; break; }   // 3 = Navigate Back
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1A) { g_meterReset = true; break; }
+            if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x19) {
+                g_meterScreen = (g_meterScreen + 1) % uf1meter::screenCount();
+                std::printf("UF1 METER screen: %s\n", uf1meter::screenName(g_meterScreen));
+                break;
+            }
             // PLUGIN with an SSL plug-in, without MODE: the plug-in's switches on this page.
             if (ev.pressed && !g_modeHeld && plugActive()) { plugEvent(2, uint8_t(ev.id - 0x19), 0); break; }
             if (!ev.pressed || !g_modeHeld) break;
@@ -773,7 +780,8 @@ void paintSoftKeys()
 {
     if (!g_open) return;
     static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
-    static const char* const kMeterKeys[4] = {"OVERVIEW", "RESET", "FINE", "PRESETS"};   // the METER view's own keys
+    const char* const kMeterKeys[4] = {uf1meter::screenName(g_meterScreen), "RESET",
+                                       g_meterScreen == 3 ? "PLAY" : "FINE", "PRESETS"};   // the METER view's own keys
     const bool meter = g_view == kViewMeter;
     const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen && !g_noProject;
     const bool browser = g_presetsOpen && !g_modeHeld;
@@ -1007,6 +1015,7 @@ void startIdleCycle()
     std::thread([] {
         auto slot = std::chrono::steady_clock::now();
         bool inMeter = false, inBrowser = false;
+        int shownScreen = -1;   // the METER screen whose entry was sent
         long long flashUntil = 0;
         std::string label;
         while (g_open) {
@@ -1025,15 +1034,22 @@ void startIdleCycle()
             }
             // View changes are made here, between two cycles: the entry frames must not land inside one.
             const bool wantMeter = g_view == kViewMeter;
-            if (wantMeter != inMeter) {
+            // Loudness only while a Meter Pro streams it.
+            if (g_meterScreen == 3 && sslcore::meterInstanceCount() > 0 && !sslcore::meterProAvailable()) g_meterScreen = 0;
+            const int screen = g_meterScreen;
+            bool screenOpened = false;
+            if (wantMeter != inMeter || (inMeter && screen != shownScreen)) {
                 inMeter = wantMeter;
                 if (inMeter) {
                     ensureSslCore();
-                    uf1meter::sendOverviewEntry(g_dev);
+                    uf1meter::sendEntry(g_dev, screen);
+                    shownScreen = screen;
+                    screenOpened = true;
                     paintSoftKeys();   // the meter keys' labels (or the picker, while MODE is still held)
                     label.clear();
-                    if (g_trace) std::printf("UF1: METER view (Overview)\n");
+                    if (g_trace) std::printf("UF1: METER view (%s)\n", uf1meter::screenName(screen));
                 } else {
+                    shownScreen = -1;
                     restoreChannelView();
                 }
             }
@@ -1051,7 +1067,11 @@ void startIdleCycle()
                     c.insert(c.end(), l.begin(), l.end());
                     g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, c));
                 }
-                uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
+                if (screen == 0)
+                    uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
+                else
+                    uf1meter::buildOther(screen, p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(),
+                                         reset, screenOpened);
             } else {
                 // The EQ graph, every third cycle (~120 ms): a turned EQ knob redraws about as fast as SSL 360's.
                 static int eqTick = 0;
