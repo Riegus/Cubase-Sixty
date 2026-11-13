@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.0-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.1-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -1507,7 +1507,7 @@ var METER_PAGES = [
 	 [mv(52, 2, 'Save'), MV0, MV0]]]
 // The settings the bridge draws the screens with (Uf1Meter.cpp setSetting).
 var METER_DRAW_ROWS = [6, 8, 9, 10, 22, 23, 36, 47, 48, 50, 51]
-var meter = { active: false, screen: 0, page: 0, fine: false, index: 0, name: '', obj: -1, title: '', tags: {},
+var meter = { da: null, active: false, screen: 0, page: 0, fine: false, index: 0, name: '', obj: -1, title: '', tags: {},
 	findAt: 0, reportAt: 0, sentSlots: ['', '', '', ''], sentRows: {}, missing: {}, logged: '' }
 
 function meterSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
@@ -1534,69 +1534,82 @@ function meterOnSysex(activeDevice, m) {
 	if (m[4] === 0x62) {   // 62 01: Loudness PLAY (Play / Pause)
 		var tag = meterTag(50)
 		if (meter.obj < 0 || tag === undefined) return
-		var v = stepMix.getParameterProcessValue(plugAm, meter.obj, tag)
-		stepMix.setParameterProcessValue(plugAm, meter.obj, tag, v >= 0.5 ? 0 : 1)
+		var v = meter.da.getParameterProcessValue(plugAm, meter.obj, tag)
+		meter.da.setParameterProcessValue(plugAm, meter.obj, tag, v >= 0.5 ? 0 : 1)
 		meter.reportAt = Date.now() + 80
 	}
 }
 
-// Every SSL Meter in the MixConsole, with its channel's MixConsole number and name.
-function meterList() {
-	var found = []
-	var base = stepMix.getBaseObjectID(plugAm)
+// Where Meters can sit: the MixConsole, and the Control Room (a Meter on a monitor channel announces that channel's
+// name, e.g. "Monitor 1": found there on the first test, 13.11.2026, and nowhere in the MixConsole).
+var meterCr = null
+try { meterCr = page.mHostAccess.makeDirectAccess(page.mHostAccess.mControlRoom) } catch (e) { out('[CubaseSixty UF1] METER: no Direct Access to the Control Room: ' + e) }
+var meterScans = 0
+// Every SSL Meter under da's base, with its channel's MixConsole number (-1 in the Control Room) and name.
+function meterList(da, where, found, ssl) {
+	var base = da.getBaseObjectID(plugAm)
 	var count = 0
 	function rec(id, depth, channel) {
 		if (++count > 20000) return
 		var type = '', title = '', params = 0
-		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
-		if (/Channel$|^Synth/.test(type)) channel = id
-		if (depth >= 2) {
-			try { title = String(stepMix.getObjectTitle(plugAm, id)) } catch (e) {}
-			if (/SSL.*Meter|^Meter( Pro)?$/i.test(title)) {
-				try { params = stepMix.getNumberOfParameters(plugAm, id) } catch (e) {}
+		try { type = da.getObjectTypeName(plugAm, id) } catch (e) {}
+		if (/Channel|^Synth/.test(type)) channel = id
+		if (depth >= 1) {
+			try { title = String(da.getObjectTitle(plugAm, id)) } catch (e) {}
+			if (/SSL/i.test(title) && ssl.length < 12) ssl.push(where + ' [' + type + '] "' + title + '"')
+			if (/Meter/i.test(title) && /SSL|^Meter( Pro)?$/i.test(title)) {
+				try { params = da.getNumberOfParameters(plugAm, id) } catch (e) {}
 				if (params >= 20) {
 					var index = -1, chName = ''
-					try { index = stepMix.getMixerChannelIndex(plugAm, channel) } catch (e) {}
-					try { chName = String(stepMix.getObjectTitle(plugAm, channel)) } catch (e) {}
-					found.push({ obj: id, title: title, index: index, channel: chName })
+					if (channel >= 0) {
+						try { index = da.getMixerChannelIndex(plugAm, channel) } catch (e) {}
+						try { chName = String(da.getObjectTitle(plugAm, channel)) } catch (e) {}
+					}
+					found.push({ da: da, obj: id, title: title, index: index, channel: chName, where: where })
 					return
 				}
 			}
 		}
-		if (depth >= 6 || /^(QuickControls|Panner|Modulators|Sends|Foldbacks|DirectRouting)$/.test(type)) return
+		if (depth >= 7 || /^(QuickControls|Panner|Modulators|Sends|Foldbacks|DirectRouting)$/.test(type)) return
 		var n = 0
-		try { n = stepMix.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
-		for (var i = 0; i < n && i < 512; ++i) rec(stepMix.getChildObjectID(plugAm, id, i), depth + 1, channel)
+		try { n = da.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
+		for (var i = 0; i < n && i < 512; ++i) rec(da.getChildObjectID(plugAm, id, i), depth + 1, channel)
 	}
 	rec(base, 0, -1)
-	return found
 }
 
 function meterFind(activeDevice) {
 	meter.findAt = Date.now() + 3000
-	if (!stepMix || !plugAm) return
-	var list = meterList(), pick = null
-	for (var i = 0; i < list.length && !pick; ++i) if (meter.index > 0 && list[i].index === meter.index) pick = list[i]
+	if (!plugAm) return
+	var list = [], ssl = []
+	if (stepMix) { try { meterList(stepMix, 'MixConsole', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: MixConsole walk: ' + e) } }
+	if (meterCr) { try { meterList(meterCr, 'Control Room', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: Control Room walk: ' + e) } }
+	if (++meterScans <= 2 && !list.length) out('[CubaseSixty UF1] METER: SSL objects seen: ' + (ssl.length ? ssl.join(', ') : 'none'))
+	var pick = null
+	for (var i = 0; i < list.length && !pick; ++i) if (meter.index > 0 && list[i].index === meter.index && list[i].channel === meter.name) pick = list[i]
 	for (var j = 0; j < list.length && !pick; ++j) if (meter.name && list[j].channel === meter.name) pick = list[j]
+	for (var k = 0; k < list.length && !pick; ++k) if (meter.index > 0 && list[k].index === meter.index) pick = list[k]
 	if (!pick && list.length === 1) pick = list[0]
 	var obj = pick ? pick.obj : -1
-	var what = pick ? pick.title + ' on "' + pick.channel + '" (' + pick.index + ')' : 'none'
+	var what = pick ? pick.title + ' on "' + pick.channel + '" (' + pick.where + ', ' + pick.index + ')' : 'none'
 	var logLine = list.length + ' Meter(s), shown ' + meter.index + ' "' + meter.name + '" -> ' + what
 	if (logLine !== meter.logged) { meter.logged = logLine; out('[CubaseSixty UF1] METER: ' + logLine) }
-	if (obj === meter.obj) return
+	if (obj === meter.obj && (!pick || pick.da === meter.da)) return
 	meter.obj = obj
+	meter.da = pick ? pick.da : null
 	meter.title = pick ? pick.title : ''
 	meter.tags = {}
 	meter.sentSlots = ['', '', '', '']
 	meter.sentRows = {}
 	if (obj >= 0) {
-		var n = stepMix.getNumberOfParameters(plugAm, obj)
+		var n = meter.da.getNumberOfParameters(plugAm, obj)
 		for (var p = 0; p < n && p < 256; ++p) {
-			var tag = stepMix.getParameterTagByIndex(plugAm, obj, p)
+			var tag = meter.da.getParameterTagByIndex(plugAm, obj, p)
 			var t = ''
-			try { t = String(stepMix.getParameterTitle(plugAm, obj, tag, 64)) } catch (e) {}
+			try { t = String(meter.da.getParameterTitle(plugAm, obj, tag, 64)) } catch (e) {}
 			if (t && meter.tags[t.toLowerCase()] === undefined) meter.tags[t.toLowerCase()] = tag
 		}
+		out('[CubaseSixty UF1] METER: "' + meter.title + '", ' + n + ' parameters')
 	}
 	// 62 <found> <title>: Meter Pro or not (Loudness), and the presets' folder.
 	meterSend(activeDevice, [0x62, obj >= 0 ? 1 : 0].concat(toAscii7(meter.title)))
@@ -1615,8 +1628,8 @@ function meterTag(row) {
 
 function meterText(tag) {
 	var t = '', u = ''
-	try { t = String(stepMix.getParameterDisplayValue(plugAm, meter.obj, tag)) } catch (e) {}
-	try { u = String(stepMix.getParameterDisplayUnits(plugAm, meter.obj, tag)) } catch (e) {}
+	try { t = String(meter.da.getParameterDisplayValue(plugAm, meter.obj, tag)) } catch (e) {}
+	try { u = String(meter.da.getParameterDisplayUnits(plugAm, meter.obj, tag)) } catch (e) {}
 	return u && t.indexOf(u) < 0 ? t + ' ' + u : t
 }
 
@@ -1640,7 +1653,7 @@ function meterReport(activeDevice) {
 	for (var r = 0; r < METER_DRAW_ROWS.length; ++r) {
 		var row = METER_DRAW_ROWS[r], tg = meterTag(row)
 		if (tg === undefined) continue
-		var v = stepMix.getParameterProcessValue(plugAm, meter.obj, tg), text = meterText(tg)
+		var v = meter.da.getParameterProcessValue(plugAm, meter.obj, tg), text = meterText(tg)
 		var v14 = Math.max(0, Math.min(16383, Math.round(v * 16383)))
 		var rk = v14 + '|' + text
 		if (meter.sentRows[row] === rk) continue
@@ -1650,7 +1663,7 @@ function meterReport(activeDevice) {
 }
 
 function meterIdle(activeDevice) {
-	if (!meter.active || !stepMix || !plugAm) return
+	if (!meter.active || !plugAm) return
 	var now = Date.now()
 	if (now >= meter.findAt) meterFind(activeDevice)
 	if (meter.obj < 0 || now < meter.reportAt) return
@@ -1664,11 +1677,11 @@ function meterTurn(activeDevice, slot, notches) {
 	if (meter.obj < 0 || slot > 2 || !notches) return
 	var e = meterSlots()[slot], tag = meterTag(e.row)
 	if (tag === undefined) return
-	var cur = stepMix.getParameterProcessValue(plugAm, meter.obj, tag)
+	var cur = meter.da.getParameterProcessValue(plugAm, meter.obj, tag)
 	var dn = e.steps >= 2 ? 1 / (e.steps - 1) : (e.contStep || 0.02)
 	if (e.steps < 2 && meter.fine) dn *= 0.25
 	var nv = Math.max(0, Math.min(1, cur + notches * dn))
-	if (nv !== cur) stepMix.setParameterProcessValue(plugAm, meter.obj, tag, nv)
+	if (nv !== cur) meter.da.setParameterProcessValue(plugAm, meter.obj, tag, nv)
 	meter.reportAt = Date.now() + 60
 }
 
