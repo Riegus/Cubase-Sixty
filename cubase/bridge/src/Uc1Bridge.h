@@ -22,6 +22,8 @@ void uc1RedrawNames();
 void uc1ApplyBrightness();
 void uc1RedrawSevenSeg();
 void uc1SendKnobStep();
+void uc1NoProjectNow();      // no project now (Cubase gone without closing it)
+void uc1IdleText(int kind);  // 1 "No Project", 2 "Waiting for Cubase", 3 "Bridge off"
 void uc1SendStripOptions();   // Settings: uc1-strip-load, uc1-dyn-in-comp, uc1-bus-comp-start
 void uc1SendKeyJobs();
 // One step through the favourites (domain 0 = channel strips, 1 = bus comps; dir +1 / -1), for the UF8's CHANNEL

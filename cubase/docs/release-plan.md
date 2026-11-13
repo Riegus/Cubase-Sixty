@@ -13,7 +13,10 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - Done: the scripts send SysEx 7C 00 / 01 on deactivate / activate. On close the bridge blanks each surface (UF8:
   strips empty, faders down, its own keys dark; UF1: only "No Proj.", the big display's fields blank; UC1: "No
   Project", bus comp row empty, rings and LEDs off). On open each surface puts back what Cubase does not send again
-  (it sends only what changed), and the UF8's start-up follow runs again.
+  (it sends only what changed), and the UF8's start-up follow runs again. 13.11.2026: the surfaces say "No
+  Project" (the Hub), "Waiting for Cubase" (Cubase not running: the bridge looks for the Cubase process every
+  2 s; a Cubase that ended with a project open is blanked as if it had closed it) or "Bridge off"; the faders go
+  to 0 dB.
 
 ## 2. Different setups of the surfaces (done 9.11.2026)
 

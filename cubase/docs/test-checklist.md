@@ -18,6 +18,8 @@ Quick: Cubase starts, all surfaces show the project.
 - scripts.log: each script's "script loaded"; the UF1's "loaded to the end".
 - Close the project (Hub): "No Project" on the surfaces, the UF8 and UF1 faders at 0 dB; reopen: everything back,
   faders on the tracks' levels. Quit from the tray: faders at 0 dB.
+- The idle texts: the Hub "No Project" (UF8 strips 1-2, UF1, UC1); Cubase quit "Waiting for Cubase" (within 2 s);
+  Cubase ended in Task Manager with a project open: blanked, "Waiting for Cubase"; tray Quit "Bridge off" / "Off".
 - Restart the bridge from the tray: surfaces "Waiting for Cubase", then back by themselves.
 
 ## UF8

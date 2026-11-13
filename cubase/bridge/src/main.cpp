@@ -45,7 +45,7 @@
 #include "Settings.h"
 #include "Uc1Bridge.h"
 #include "ScriptLog.h"
-namespace cs { int stopSslCore(); }
+namespace cs { int stopSslCore(); bool cubaseRunning(); }
 
 using namespace cs;
 
@@ -186,6 +186,7 @@ std::string g_dbText[8];               // last fader-level text per strip, shown
    // the UF8 and its ports are open
 std::atomic<long long> g_cubaseFirstMs{0};   // when Cubase first sent anything (steady clock, ms)
 std::atomic<bool> g_cubaseSpoke{false};
+std::atomic<bool> g_projectOpen{false};   // the scripts said a project is open (7C 01); not before the first one
 bool g_ownText = false;   // the bridge feeds its own text through onMidiIn ("Waiting for Cubase"): not Cubase speaking
 
 // Bank-right by the user (UF8 key or UF1 BANK): stop at the bank where the last track is on strip 8,
@@ -860,6 +861,16 @@ void uf8NoProject()
     for (L l : {L::Quick1, L::Quick2, L::VPotBank, L::Soft1, L::Soft2, L::Soft3, L::Soft4, L::Soft5,
                 L::Norm, L::Rec, L::Auto, L::Nav, L::Nudge, L::Plugin, L::Pan, L::Fine, L::Focus})
         sendLedFrames(uf8::buildUf8GlobalLed(l, false));
+    uf8IdleText(cs::cubaseRunning() && g_cubaseSpoke ? 1 : 2);
+}
+// What the strips say while no project is open (strips 1-3, straight to the displays, not through the cache, so the
+// names come back when a project opens): 1 = "No Project" (Cubase shows the Hub), 2 = "Waiting for Cubase" (Cubase
+// is not running), 3 = "Bridge off" (the bridge is leaving).
+void uf8IdleText(int kind)
+{
+    static const char* const t[4][3] = {{"", "", ""}, {"No", "Project", ""}, {"Waiting", "for", "Cubase"}, {"Bridge", "off", ""}};
+    if (kind < 0 || kind > 3) return;
+    for (int s = 0; s < 3; ++s) g_dev.send(uf8::buildStripTextUpper(uint8_t(s), t[kind][s]));
 }
 // A project is open again: the bridge's own keys as they were.
 // Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
@@ -884,6 +895,7 @@ void uf8ProjectOpen()
 }
 
 void uf8NoProject();
+void uf8IdleText(int kind);
 void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
@@ -891,6 +903,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (cs::scriptLogSysex(m.data(), m.size())) return;
     // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
+        g_projectOpen = m[5] != 0;
         if (m[5] == 0) uf8NoProject();
         else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
         // (Always logged: the tray app shows it.)
@@ -1510,6 +1523,27 @@ int main(int argc, char** argv)
         cs::uf1Poll();
         cs::uc1Poll();
         { static int n = 0; if (++n % 5 == 0) selSendLogFlush(); }   // once a second
+        {   // Every 2 s: what the surfaces say while no project is open. Cubase gone without closing its project
+            // (a crash, ended in Task Manager): blanked as if it had.
+            static int n = 0, shown = -1;
+            if (++n % 10 == 0) {
+                const bool running = cs::cubaseRunning();
+                if (!running && g_projectOpen) {
+                    g_projectOpen = false;
+                    std::printf("Cubase: no project (Cubase is not running)\n");
+                    uf8NoProject();
+                    cs::uf1NoProjectNow();
+                    cs::uc1NoProjectNow();
+                }
+                // Not running, or running but not connected yet: "Waiting for Cubase". Connected, no project (the Hub,
+                // also before the first project): "No Project". A project open: the tracks.
+                const int kind = !running || !g_cubaseSpoke ? 2 : !g_projectOpen ? 1 : 0;
+                if (kind != shown) {
+                    shown = kind;
+                    if (kind) { uf8IdleText(kind); cs::uf1IdleText(kind); cs::uc1IdleText(kind); }
+                }
+            }
+        }
         uf8Poll();
         cs::sleep::tick(cs::uf1TransportRunning(), [](bool asleep) {
             std::printf("Surfaces %s.\n", asleep ? "asleep (Sleep when idle)" : "awake");
@@ -1522,6 +1556,7 @@ int main(int argc, char** argv)
     // last tracks. (Ctrl+C and the tray app's Quit come here; a killed process cannot.)
     if (g_uf8Running) {
         uf8NoProject();
+        uf8IdleText(3);
         std::this_thread::sleep_for(std::chrono::milliseconds(800));   // let the frames go out and the faders reach 0 dB
         g_uf8Running = false;
         g_dev.close();
