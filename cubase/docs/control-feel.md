@@ -92,11 +92,11 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   opens / closes its channel editor (13.11.2026). The bridge goes by the SEL LED Cubase reports, and the release
   follows the press's way.
 
-- **Tap and hold on one key** (NAV: tap = encoder on markers, held 1 s = Nav Mode; FLIP: tap = flip, held 0.4 s =
+- **Tap and hold on one key** (NAV: tap = encoder on markers, held 0.7 s = Nav Mode; FLIP: tap = flip, held 0.4 s =
   the V-pot send view): a counter per press cancels the hold timer, and a **separate flag** says whether this press
   was held. Using the counter for both made every tap after a hold act as a hold.
 - **A release without its press is not a tap.** The UF8 sends a NAV release when it connects.
-- **0.4 s is short for a hold** that changes a mode: NAV went to 1 s.
+- **0.4 s is short for a hold** that changes a mode: NAV went to 1 s, which felt long; 0.7 s (13.11.2026).
 - **A key that switches many things off puts back only what it switched off.** UF1 BYPASS (13.11.2026): the
   inserts that were bypassed already stay bypassed when the key switches the rest on again (remembered per track; the setting
   `uf1-bypass` = all gives the old behaviour: every insert switched on).
