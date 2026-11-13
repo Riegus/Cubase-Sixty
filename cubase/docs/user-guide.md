@@ -224,6 +224,7 @@ letting go keeps the one shown.
 | Markers | Jumps to the previous / next marker. The **NAV** key (a tap) switches to this and back. |
 | Bank by 1 | Moves the strips one track at a time. |
 | CS Fav / BC Fav | Steps through your favourite channel strips / bus comps (see [Favourites](#favourites)). |
+| Mouse | Changes **the value under Cubase's mouse pointer**: point at any knob or fader in Cubase (a plug-in, the MixConsole) and turn. The **FOCUS** key switches to this and back. With FINE, four notches make one step. |
 
 ### Markers and Nav Mode
 
@@ -516,7 +517,7 @@ Cubase gives controllers less than REAPER does, so some things are missing or di
 - On fast turns of a **send**, the MixConsole trails the controller for a moment and then lands on the same value.
 - A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
 - The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there. On the UF8,
-  **Q3**, **LAYER 1–3** and **FOCUS** do nothing.
+  **Q3** and **LAYER 1–3** do nothing.
 - The METER view has the Overview screen only.
 
 The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),

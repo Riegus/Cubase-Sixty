@@ -944,7 +944,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
-	if (m[4] >= 0x21 && m[4] <= 0x2C) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
+	if (m[4] >= 0x21 && m[4] <= 0x2D) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
@@ -1320,8 +1320,30 @@ function selWinIdle(activeDevice) {
 	out('[CubaseSixty] SSL strip window: "' + job.title + '", ' + (selWin.open >= 0.5 ? 'closing' : 'opening'))
 	selWin.state.setProcessValue(activeDevice, selWin.open >= 0.5 ? 0 : 1)
 }
+// FOCUS: the CHANNEL encoder on the value under Cubase's mouse pointer (SysEx 2D <1 up / 0 down> <steps> from the
+// bridge). increment / decrement on the host value, in Cubase's own steps; if they do nothing, through a value
+// variable bound to it (1 % a step).
+var mouse = { value: null, variable: null, process: -1, title: '', display: '', used: 0 }
+try {
+	mouse.value = page.mHostAccess.mMouseCursor.mValueUnderMouse
+	mouse.variable = surface.makeCustomValueVariable('valueUnderMouse')
+	page.makeValueBinding(mouse.variable, mouse.value)
+	mouse.variable.mOnProcessValueChange = function (activeDevice, value) { mouse.process = value }
+	mouse.value.mOnTitleChange = function (activeDevice, activeMapping, title, title2) { mouse.title = String(title) + (title2 ? ' / ' + title2 : '') }
+	mouse.value.mOnDisplayValueChange = function (activeDevice, activeMapping, value, units) { mouse.display = String(value) + (units ? ' ' + units : '') }
+} catch (e) { out('[CubaseSixty] value under the mouse not available: ' + e) }
+function mouseStep(activeDevice, up, steps) {
+	if (!mouse.value || !skAm) return
+	var before = mouse.process
+	for (var k = 0; k < steps; ++k) (up ? mouse.value.increment : mouse.value.decrement).call(mouse.value, skAm)
+	if (mouse.used < 20) {   // the first uses, for the test: what is under the mouse and whether it moved
+		++mouse.used
+		out('[CubaseSixty] FOCUS: ' + (up ? '+' : '-') + steps + ' on "' + mouse.title + '" = ' + mouse.display + ' (process ' + before.toFixed(3) + ' before)')
+	}
+}
 function skMessage(activeDevice, m) {
 	if (m[4] === 0x2C && m.length >= 7) { selWindowOpen(activeDevice, m[5]); return }
+	if (m[4] === 0x2D && m.length >= 8) { mouseStep(activeDevice, m[5] === 1, m[6]); return }
 	if (m[4] === 0x24 && m.length >= 7) {
 		stripModeOn = m[5] !== 0
 		out('[CubaseSixty] SSL Strip Mode ' + (stripModeOn ? 'on' : 'off'))
