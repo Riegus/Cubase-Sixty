@@ -406,7 +406,7 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
-        if (d[3] == 0x73) {   // NAV: a tap = encoder on Markers on / off; held 1 s = Nav Mode on / off
+        if (d[3] == 0x73) {   // NAV: a tap = encoder on Markers on / off; held 0.7 s = Nav Mode on / off
             // gen: one per press (a release or a new press makes the timer of the last press do nothing);
             // held: the timer of this press fired, so its release is not a tap.
             static std::atomic<int> gen{0};
@@ -417,7 +417,7 @@ void handleFrame(const uf8frames::Frame& fr)
                 held = false;
                 const int g = ++gen;
                 std::thread([g] {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(700));   // (0.4 s too short, 1 s too long)
                     if (g != gen) return;
                     held = true;
                     g_nav = !g_nav;
