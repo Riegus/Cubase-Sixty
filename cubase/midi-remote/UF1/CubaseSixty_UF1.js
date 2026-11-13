@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.12-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.13-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -981,7 +981,9 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 	var SLOTS = 16
 	var slots = []
 	var ledOn = null
-	var changeAt = 0   // when a slot last reported (a track change reports them one by one)
+	// A track change reports each slot's plug-in at once and each slot's bypass state about half a second later
+	// (measured 13.11.2026: 0.54 s); until then the states are the ones of the track before.
+	var identityAt = 0, valueAt = 0
 	var waiting = null
 	var keep = {}   // per track (object ID): the slots that were bypassed already when BYPASS bypassed the rest
 	function updateLed(activeDevice) {
@@ -1010,10 +1012,16 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 	bypassIdle = function (activeDevice) {
 		if (!waiting) return
 		var now = Date.now()
-		if (now - waiting.at > 1500) { waiting = null; out('[CubaseSixty UF1] BYPASS: dropped, the track did not settle'); return }
+		if (now - waiting.at > 2500) { waiting = null; out('[CubaseSixty UF1] BYPASS: dropped, the track did not settle'); return }
 		var cur = lastTrackId
 		try { if (plugAm) cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
-		if (cur !== lastTrackId || now - changeAt < 200 || now - trackChangedAt < 200) return
+		if (cur !== lastTrackId) return
+		var t0 = Math.max(identityAt, trackChangedAt), any = false
+		for (var q = 0; q < slots.length; ++q) if (slots[q].present) any = true
+		if (now - t0 < 900) {
+			// After a change: the states must have come in for the new track (none come for a track without inserts).
+			if (any ? !(valueAt > t0 && now - valueAt >= 60) : now - t0 < 250) return
+		}
 		var all = waiting.all
 		if (now - waiting.at > 50) out('[CubaseSixty UF1] BYPASS: waited ' + (now - waiting.at) + ' ms for the track to settle')
 		waiting = null
@@ -1055,13 +1063,13 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 			;(function (slot, index) {
 				viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) {
 					slot.present = !!name
-					changeAt = Date.now()
+					identityAt = Date.now()
 					out('[CubaseSixty UF1] bypass: slot ' + (index + 1) + (name ? ' holds "' + name + '"' : ' is empty'))
 					updateLed(activeDevice)
 				}
 				state.mOnProcessValueChange = function (activeDevice, value) {
 					slot.bypassed = value > 0.5
-					changeAt = Date.now()
+					valueAt = Date.now()
 					out('[CubaseSixty UF1] bypass: slot ' + (index + 1) + ' reports ' + (slot.bypassed ? 'bypassed' : 'active'))
 					updateLed(activeDevice)
 				}
