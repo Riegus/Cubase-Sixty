@@ -145,6 +145,11 @@ Touching a fader can also select its track (Settings > Behaviour).
   surface, and the UF8 banks to it. A far jump takes a moment (Cubase can only bank step by step); the UF8 waits and
   shows the result in one go. At start-up it goes to the selected track too.
 - **CHANNEL** is "home": faders on volume, V-pots on pan, whatever view you were in.
+- **PAN** puts the V-pots back on pan (out of a soft-key parameter, the V-pot send view or FLIP). It is lit while
+  they are on pan.
+- **FINE**: while held, the V-pots move a quarter as far. Press it twice quickly to latch it (lit); a press
+  unlatches.
+- **360°** opens the Settings page in your browser.
 
 ### What SEL does: NORM, REC, AUTO
 
@@ -510,7 +515,8 @@ Cubase gives controllers less than REAPER does, so some things are missing or di
 - **Markers** are reached by number; their names are not shown.
 - On fast turns of a **send**, the MixConsole trails the controller for a moment and then lands on the same value.
 - A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
-- The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there.
+- The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there. On the UF8,
+  **Q3**, **LAYER 1–3** and **FOCUS** do nothing.
 - The METER view has the Overview screen only.
 
 The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),

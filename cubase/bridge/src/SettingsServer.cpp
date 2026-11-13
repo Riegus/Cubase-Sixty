@@ -19,6 +19,8 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <windows.h>
+#include <shellapi.h>
 using Sock = SOCKET;
 static const Sock kBad = INVALID_SOCKET;
 static void closeSock(Sock s) { closesocket(s); }
@@ -285,6 +287,18 @@ void stop()
     g_run = false;
     closeSock(g_listen);   // ends the accept
     if (g_thread.joinable()) g_thread.join();
+}
+
+bool openInBrowser()
+{
+    if (g_port <= 0) return false;
+    const std::string url = "http://127.0.0.1:" + std::to_string(g_port) + "/";
+#ifdef _WIN32
+    ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    return true;
+#else
+    return false;
+#endif
 }
 
 } // namespace cs::settingsServer
