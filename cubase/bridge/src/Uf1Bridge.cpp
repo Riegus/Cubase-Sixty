@@ -556,6 +556,11 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         // bypassed: it has each slot's state for the track that is selected at that moment.
         if (ev.id == 0x18) {
             if (!ev.pressed) break;
+            // (Two presses 83 ms apart were seen from one push, 13.11.2026.)
+            static long long lastPress = 0;
+            const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (nowMs - lastPress < 250) { std::printf("UF1 BYPASS: a second press within 250 ms ignored\n"); break; }
+            lastPress = nowMs;
             const bool all = settings::get("uf1-bypass", "remember") == "all";   // 1: switch every insert on again
             sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x1F, uint8_t(all ? 1 : 0), 0xF7});
             std::printf("UF1 BYPASS pressed (%s; the script reports: %s)\n", all ? "all inserts alike" : "remembering the ones bypassed already", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");

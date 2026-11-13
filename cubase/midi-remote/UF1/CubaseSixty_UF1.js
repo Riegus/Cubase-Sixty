@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.10-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.11-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -190,6 +190,7 @@ function reportVpotPosition(activeDevice, index, value) {
 var vpotIdleLast = 0
 deviceDriver.mOnIdle = function (activeDevice) {
 	flushLog(activeDevice)
+	if (bypassIdle) { try { bypassIdle(activeDevice) } catch (e) { out('[CubaseSixty UF1] BYPASS: ' + e) } }
 	var now = 0
 	try { now = Date.now() } catch (e) { return }
 	if (qcResendAt && now >= qcResendAt) {
@@ -775,6 +776,7 @@ function stepCheckLanding() {
 // new track, each report put the pan back on the value line in the middle of a send turn (10.11.2026). Repeats of
 // the same track (same object, same name) are skipped.
 var lastTrackId = -2
+var trackChangedAt = 0
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
@@ -782,6 +784,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	try { trackId = plugDa.getBaseObjectID(activeMapping) } catch (e) {}
 	if (trackId === lastTrackId && title === selectedInfo.title) return
 	lastTrackId = trackId
+	trackChangedAt = Date.now()
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	sendDa.base = -2                   // the new track's sends
 	sendDa.refreshAt = Date.now() + 150
@@ -972,10 +975,13 @@ try {
 // ---------------------------------------------------------------------------
 
 ;var bypassPress = null   // BYPASS on the UF1 (SysEx 1F from the bridge)
+var bypassIdle = null    // a press waiting for the slots' states to settle (deviceDriver.mOnIdle)
 ;(function () {
 	var SLOTS = 16
 	var slots = []
 	var ledOn = null
+	var changeAt = 0   // when a slot last reported (a track change reports them one by one)
+	var waiting = null
 	var keep = {}   // per track (object ID): the slots that were bypassed already when BYPASS bypassed the rest
 	function updateLed(activeDevice) {
 		var present = false, active = false
@@ -994,7 +1000,25 @@ try {
 	// with all bypassed, the ones this key bypassed are switched on again. Decided here, where the slots' states are
 	// the selected track's: decided in the bridge, a press right after a track change went by the track before.
 	// all: the setting "All inserts are switched on" (nothing remembered, as before 13.11.2026).
+	// A press while the track is changing waits until the slots have reported for the new track (found 13.11.2026:
+	// a press that arrived in the middle of a change went by half of each track and switched a bypassed insert on).
 	bypassPress = function (activeDevice, all) {
+		waiting = { all: all, at: Date.now() }
+		bypassIdle(activeDevice)
+	}
+	bypassIdle = function (activeDevice) {
+		if (!waiting) return
+		var now = Date.now()
+		if (now - waiting.at > 1500) { waiting = null; out('[CubaseSixty UF1] BYPASS: dropped, the track did not settle'); return }
+		var cur = lastTrackId
+		try { if (plugAm) cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
+		if (cur !== lastTrackId || now - changeAt < 200 || now - trackChangedAt < 200) return
+		var all = waiting.all
+		if (now - waiting.at > 50) out('[CubaseSixty UF1] BYPASS: waited ' + (now - waiting.at) + ' ms for the track to settle')
+		waiting = null
+		bypassNow(activeDevice, all)
+	}
+	function bypassNow(activeDevice, all) {
 		var active = [], bypassed = [], k
 		for (k = 0; k < slots.length; ++k) if (slots[k].present) (slots[k].bypassed ? bypassed : active).push(k)
 		if (!active.length && !bypassed.length) { out('[CubaseSixty UF1] BYPASS: no inserts on this track'); return }
@@ -1029,10 +1053,12 @@ try {
 			;(function (slot, index) {
 				viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) {
 					slot.present = !!name
+					changeAt = Date.now()
 					updateLed(activeDevice)
 				}
 				state.mOnProcessValueChange = function (activeDevice, value) {
 					slot.bypassed = value > 0.5
+					changeAt = Date.now()
 					updateLed(activeDevice)
 				}
 			})(slot, k)

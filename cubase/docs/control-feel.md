@@ -97,7 +97,10 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   inserts that were bypassed already stay bypassed when the key switches the rest on again (remembered per track; the setting
   `uf1-bypass` = all gives the old behaviour: every insert switched on).
   Decided in the script, at the moment of the press: decided in the bridge from states the script had reported,
-  a press right after a track change went by the track before and bypassed one slot of the new track.
+  a press right after a track change went by the track before and bypassed one slot of the new track. And a
+  press that arrives while Cubase is changing track **waits** until the slots have reported for the new one (no
+  report for 0.2 s, and Cubase's selected track is the one the script has; given up after 1.5 s): in the middle of
+  a change the script holds half of each track. A second press within 250 ms is ignored (one push gave two).
 - **Foot switches are ignored for 4 s after each connect** (a reconnect started playback).
 - **Requests are not replayed on reconnect** (54, 59, 7C, temporary lines): only state is.
 - **Notes back to back are merged or lost by Cubase**: 40 ms apart (bank steps 60–100 ms; see banking.md).
