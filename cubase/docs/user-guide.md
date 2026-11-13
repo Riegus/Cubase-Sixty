@@ -131,7 +131,7 @@ Eight strips on a bank of the MixConsole's channels.
 | Display | Track name and colour, the level in dB, a stereo meter, and a value line (pan, or what the V-pot is on). |
 | V-pot | Pan, with a position bar on the display. **Push: centres the pan** (Settings > Behaviour can make it open the track's channel editor instead). |
 | SOLO, CUT | Solo and mute. |
-| SEL | Selects the track (see [What SEL does](#what-sel-does-norm-rec-auto) for the other two modes). |
+| SEL | Selects the track. **On the track that is already selected (SEL lit): opens / closes its channel editor.** (See [What SEL does](#what-sel-does-norm-rec-auto) for the other two modes.) |
 | Top soft key | A control of the track's SSL channel strip (see [The top soft keys](#the-top-soft-keys-your-ssl-channel-strips)). |
 
 Touching a fader can also select its track (Settings > Behaviour).
@@ -157,7 +157,7 @@ The NORM, REC and AUTO keys choose what the SEL keys do. The mode's key is lit.
 
 | Mode | SEL does | SEL lights |
 |------|----------|-----------|
-| **NORM** | Selects the track. | The selected track. |
+| **NORM** | Selects the track; on the selected track, opens / closes its channel editor. | The selected track. |
 | **REC** | Arms / disarms the track for recording. | Dim red: can be armed. Red: armed. Dark: this strip cannot record (group, FX, VCA, output). |
 | **AUTO** | Switches the track's automation **Write** on / off. | Red while the track is writing. |
 

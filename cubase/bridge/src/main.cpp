@@ -512,6 +512,19 @@ void handleFrame(const uf8frames::Frame& fr)
             else note(uint8_t(kNoteAutoSel + s), pressed);
             break;
         }
+        if (d[3] >= 0x20 && d[3] <= 0x37 && (d[3] - 0x20) % 3 == 2) {
+            // SEL in NORM on the track that is selected already (its SEL lit): open / close its channel editor (the
+            // V-pot push's note; 13.11.2026, since the V-pot push centres the pan). The release goes the press's way.
+            static bool editor[8] = {};
+            const int s = (d[3] - 0x20) / 3;
+            if (pressed) editor[s] = g_selOn[s];
+            if (editor[s]) {
+                note(uint8_t(kNoteVPush + s), pressed);
+                if (pressed) std::printf("UF8 SEL on the selected track (strip %d): channel editor\n", s + 1);
+                if (!pressed) editor[s] = false;
+                break;
+            }
+        }
         if (auto n = buttonToNote(d[3])) {
             // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
             // which started the transport. Ignore the foot switches for the first seconds after each

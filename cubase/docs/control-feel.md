@@ -88,6 +88,10 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
 
 ## Buttons
 
+- **A second press on a lit key can be a second function** without any timing: UF8 SEL on the selected track
+  opens / closes its channel editor (13.11.2026). The bridge goes by the SEL LED Cubase reports, and the release
+  follows the press's way.
+
 - **Tap and hold on one key** (NAV: tap = encoder on markers, held 1 s = Nav Mode; FLIP: tap = flip, held 0.4 s =
   the V-pot send view): a counter per press cancels the hold timer, and a **separate flag** says whether this press
   was held. Using the counter for both made every tap after a hold act as a hold.
