@@ -458,7 +458,8 @@ against a 4K G on a vocal without opening a menu.
 ## Settings
 
 Click the tray icon. The page opens in your browser; it is served by Cubase-Sixty on this computer only. A change
-is saved and takes effect at once.
+is saved and takes effect at once. The **search box** above the sections finds a setting in any section (press
+**/** to jump to it, Escape to clear). This guide has one too, in the HTML version.
 
 | Section | What is there |
 |---------|---------------|

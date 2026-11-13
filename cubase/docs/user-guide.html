@@ -54,6 +54,19 @@ th, td { border-bottom: 1px solid var(--line); padding: 7px 12px; text-align: le
 tr:last-child td { border-bottom: 0; }
 th { background: var(--bg); color: var(--muted); font-weight: 600; font-size: 13px; }
 td:first-child { white-space: nowrap; font-weight: 600; }
+.search { padding: 0 2px 12px; }
+.search input { width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+                color: var(--ink); font: inherit; font-size: 14px; }
+.search input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+#results { display: none; }
+nav.searching .toc { display: none; }
+nav.searching #results { display: block; }
+#results a { padding: 7px 10px; }
+#results .where { font-size: 12px; color: var(--muted); display: block; }
+#results .snip { font-size: 13px; color: var(--muted); display: block; margin-top: 2px; }
+#results .none { color: var(--muted); font-size: 13px; padding: 4px 10px; }
+mark { background: #f5d76e; color: #1d1d1b; border-radius: 2px; padding: 0 1px; }
+mark.cur { background: #f0a030; }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; } nav { display: none; } main { padding: 20px 16px 60px; }
   td:first-child { white-space: normal; }
@@ -63,7 +76,9 @@ td:first-child { white-space: nowrap; font-weight: 600; }
 </head>
 <body>
 <div class="app">
-<nav><div class="brand"><svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="var(--accent)"/><g fill="#1e1e1e"><rect x="3.9" y="3.5" width="1.2" height="9" rx=".6"/><rect x="7.4" y="3.5" width="1.2" height="9" rx=".6"/><rect x="10.9" y="3.5" width="1.2" height="9" rx=".6"/></g><g fill="#fff"><rect x="2.9" y="8.4" width="3.2" height="2.2" rx=".5"/><rect x="6.4" y="3.9" width="3.2" height="2.2" rx=".5"/><rect x="9.9" y="6.4" width="3.2" height="2.2" rx=".5"/></g></svg> Cubase-Sixty</div><div class="ver">User guide · 0.1.0</div><div class="toc">
+<nav><div class="brand"><svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="var(--accent)"/><g fill="#1e1e1e"><rect x="3.9" y="3.5" width="1.2" height="9" rx=".6"/><rect x="7.4" y="3.5" width="1.2" height="9" rx=".6"/><rect x="10.9" y="3.5" width="1.2" height="9" rx=".6"/></g><g fill="#fff"><rect x="2.9" y="8.4" width="3.2" height="2.2" rx=".5"/><rect x="6.4" y="3.9" width="3.2" height="2.2" rx=".5"/><rect x="9.9" y="6.4" width="3.2" height="2.2" rx=".5"/></g></svg> Cubase-Sixty</div><div class="ver">User guide · 0.1.0</div>
+<div class="search"><input id="q" type="search" placeholder="Search the guide  ( / )" aria-label="Search the guide" autocomplete="off"></div>
+<div id="results"></div><div class="toc">
 <ul>
 <li><a href="#cubase-sixty-user-guide">Cubase-Sixty user guide</a><ul>
 <li><a href="#what-you-need">What you need</a></li>
@@ -713,7 +728,8 @@ against a 4K G on a vocal without opening a menu.</p>
 <hr />
 </div><div class="card"><h2 id="settings">Settings</h2>
 <p>Click the tray icon. The page opens in your browser; it is served by Cubase-Sixty on this computer only. A change
-is saved and takes effect at once.</p>
+is saved and takes effect at once. The <strong>search box</strong> above the sections finds a setting in any section (press
+<strong>/</strong> to jump to it, Escape to clear). This guide has one too, in the HTML version.</p>
 <div class="tbl"><table>
 <thead>
 <tr>
@@ -856,6 +872,87 @@ the tray menu <strong>before</strong> uninstalling, or run SSL 360's installer a
     if (cur !== sec && links[cur.id]) links[cur.id].classList.add("on");
   }
   addEventListener("scroll", mark, { passive: true }); mark();
+})();
+// Search: the matching sections in the rail (title matches first), the words marked in the text. Enter goes to the
+// next mark, Escape clears; "/" puts the cursor in the box.
+(function () {
+  var nav = document.querySelector("nav"), box = document.getElementById("q"), list = document.getElementById("results");
+  var main = document.querySelector("main"), sections = [], cur = null;
+  var walk = document.createTreeWalker(main, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  for (var n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (n.nodeType === 1 && (n.tagName === "H1" || n.tagName === "H2" || n.tagName === "H3")) {
+      var chap = n.tagName === "H3" && cur ? (cur.tagName === "H2" ? cur.title : cur.chap) : "";
+      cur = { el: n, tagName: n.tagName, title: n.textContent, chap: chap, text: "" };
+      sections.push(cur);
+    } else if (n.nodeType === 3 && cur && !(n.parentNode.closest && n.parentNode.closest("h1, h2, h3"))) cur.text += n.nodeValue;
+  }
+  function esc(s) { return s.replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+  function clearMarks() {
+    [].slice.call(main.querySelectorAll("mark")).forEach(function (m) { var p = m.parentNode; p.replaceChild(document.createTextNode(m.textContent), m); p.normalize(); });
+  }
+  function markAll(q) {
+    var lq = q.toLowerCase(), nodes = [], w = document.createTreeWalker(main, NodeFilter.SHOW_TEXT);
+    for (var t = w.nextNode(); t; t = w.nextNode()) if (t.nodeValue.toLowerCase().indexOf(lq) >= 0) nodes.push(t);
+    nodes.forEach(function (t) {
+      var s = t.nodeValue, ls = s.toLowerCase(), frag = document.createDocumentFragment(), at = 0, i;
+      while ((i = ls.indexOf(lq, at)) >= 0) {
+        frag.appendChild(document.createTextNode(s.slice(at, i)));
+        var m = document.createElement("mark"); m.textContent = s.slice(i, i + q.length); frag.appendChild(m);
+        at = i + q.length;
+      }
+      frag.appendChild(document.createTextNode(s.slice(at)));
+      t.parentNode.replaceChild(frag, t);
+    });
+  }
+  var marks = [], at = -1;
+  function go(i) {
+    if (!marks.length) return;
+    if (at >= 0 && marks[at]) marks[at].classList.remove("cur");
+    at = (i + marks.length) % marks.length;
+    marks[at].classList.add("cur");
+    marks[at].scrollIntoView({ block: "center" });
+  }
+  function run() {
+    var q = box.value.trim();
+    clearMarks(); marks = []; at = -1; list.innerHTML = "";
+    if (q.length < 2) { nav.classList.remove("searching"); return; }
+    nav.classList.add("searching");
+    var lq = q.toLowerCase(), hits = [];
+    sections.forEach(function (s) {
+      var inTitle = s.title.toLowerCase().indexOf(lq) >= 0, i = s.text.toLowerCase().indexOf(lq);
+      if (!inTitle && i < 0) return;
+      var count = 0, j = -1; while ((j = s.text.toLowerCase().indexOf(lq, j + 1)) >= 0) ++count;
+      var snip = "";
+      if (i >= 0) {
+        var a = Math.max(0, i - 40), b = Math.min(s.text.length, i + q.length + 60);
+        snip = (a ? "…" : "") + esc(s.text.slice(a, i)) + "<mark>" + esc(s.text.slice(i, i + q.length)) + "</mark>" + esc(s.text.slice(i + q.length, b)) + (b < s.text.length ? "…" : "");
+      }
+      hits.push({ s: s, score: (inTitle ? 1000 : 0) + count, snip: snip });
+    });
+    hits.sort(function (x, y) { return y.score - x.score; });
+    if (!hits.length) list.innerHTML = '<div class="none">Nothing found for “' + esc(q) + '”.</div>';
+    hits.slice(0, 40).forEach(function (h) {
+      var a = document.createElement("a");
+      a.href = "#" + (h.s.el.id || "");
+      a.innerHTML = (h.s.chap ? '<span class="where">' + esc(h.s.chap) + "</span>" : "") + esc(h.s.title) + (h.snip ? '<span class="snip">' + h.snip + "</span>" : "");
+      a.addEventListener("click", function () {
+        var first = [].slice.call(main.querySelectorAll("mark")).filter(function (m) { return h.s.el.compareDocumentPosition(m) & 4; })[0];
+        if (first) setTimeout(function () { go(marks.indexOf(first)); });
+      });
+      list.appendChild(a);
+    });
+    markAll(q);
+    marks = [].slice.call(main.querySelectorAll("mark"));
+  }
+  var timer = 0;
+  box.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(run, 150); });
+  box.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); if (!marks.length) run(); go(e.shiftKey ? at - 1 : at + 1); }
+    if (e.key === "Escape") { box.value = ""; run(); }
+  });
+  addEventListener("keydown", function (e) {
+    if (e.key === "/" && document.activeElement !== box) { e.preventDefault(); box.focus(); box.select(); }
+  });
 })();
 </script>
 </body>
