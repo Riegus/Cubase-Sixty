@@ -38,6 +38,11 @@ void uf1SetSoloActive(bool on);
 // A SysEx message for the UF1 script (passed on from the UF8 script: which of several same-named tracks is
 // selected, SysEx 1C).
 void uf1SendToScript(const std::vector<unsigned char>& msg);
+// The fader position (Cubase's 14-bit volume value) of 0 dB, learnt from the faders: a level text of 0.00 dB with
+// its position (UF8 and UF1). Kept in cubase\fader-0db.txt. -1 until known. Used to park the faders at 0 dB when a
+// project closes or the bridge stops.
+void fader0dbSeen(const std::string& text, int pos14);
+int fader0dbPos();
 std::string uf1LevelText(int pos14);                          // "" where the curve is not known
 void uf1LearnLevel(int pos14, const std::string& text);       // Cubase's text for a position ("-6.02 dB")
 // One track back / forward (dir -1 / +1) past the tracks hidden in the MixConsole (track-stepping = mixconsole): the

@@ -837,8 +837,10 @@ void uf8NoProject()
     for (int s = 0; s < kStrips; ++s) {
         std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
         std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
-        // The faders stay where they are (all eight motors running to the bottom at once was loud, 10.11.2026);
-        // the dark displays and LEDs show that nothing is connected.
+        // The faders go to 0 dB (13.11.2026; to the bottom all eight at once was loud, 10.11.2026, and then they stayed
+        // where they were). Driven, not passed through onMidiIn: the cache keeps Cubase's values, which go back when
+        // the project opens.
+        if (const int z = cs::fader0dbPos(); z >= 0 && !g_touched[s]) driveFader(s, uint16_t(z));
         onMidiIn(name);
         onMidiIn(colour);
         g_panLine[s].clear();
@@ -955,6 +957,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             std::string v(m.begin() + 6, m.end() - 1);
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
+            if (g_routeSend < 0 && !g_routeFlip && !g_stripFader[m[5]] && !g_noProject) cs::fader0dbSeen(v, g_volPb[m[5]]);
             if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
         } else if (m.size() >= 7 && m[4] == 0x1C) {
             // Which of several same-named tracks the UF8 script found selected: for the UF1 script's track number.
@@ -1169,6 +1172,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         // here is a placeholder binding and must not move the motors, nor be kept as the volume.
         if (g_routeSend >= 0) return;
         g_volPb[s] = v;
+        if (!g_routeFlip && !g_stripFader[s] && !g_noProject) cs::fader0dbSeen(g_dbText[s], v);
         if (g_touched[s] || g_stripFader[s]) return;   // hand wins; strip mode: the strip's fader drives it
         driveFader(s, v);
         return;
@@ -1518,7 +1522,7 @@ int main(int argc, char** argv)
     // last tracks. (Ctrl+C and the tray app's Quit come here; a killed process cannot.)
     if (g_uf8Running) {
         uf8NoProject();
-        std::this_thread::sleep_for(std::chrono::milliseconds(400));   // let the frames go out
+        std::this_thread::sleep_for(std::chrono::milliseconds(800));   // let the frames go out and the faders reach 0 dB
         g_uf8Running = false;
         g_dev.close();
     }
