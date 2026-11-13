@@ -46,6 +46,8 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
 - **METER view**: the Overview screen (with an SSL Meter plug-in).
 - CHANNEL encoder steps tracks (MixConsole mode skips folders and hidden tracks); push opens / closes the plug-in
   window; SHIFT + turn steps the plug-ins.
+- BYPASS: bypasses all inserts and restores them; an insert bypassed beforehand stays bypassed; LED dim / bright
+  / off (no inserts).
 - ARROW, BANK (with and without a UF8), jog modes, SCRUB, SHUTTLE, 360°, NAV cross, transport keys with LEDs.
 
 ## UC1

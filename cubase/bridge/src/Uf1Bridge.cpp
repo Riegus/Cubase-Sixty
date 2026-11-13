@@ -96,6 +96,8 @@ void sendMidi(std::vector<unsigned char> m)
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
+std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
+std::string g_trackName;   // the selected track's name (SysEx 01), under g_cellMx
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
 // The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
@@ -549,13 +551,13 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         }
         if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
         // SCRUB toggles the jog between nudging the cursor and Cubase's jog (scrubbing). LED on = scrub.
-        // BYPASS (the key above the display). The script reports the state as note 62 (see onMidiIn). A press
-        // bypasses every slot when some are active, or turns them all on when all are bypassed; nothing when
-        // the track has no inserts. Slots = MIDI channel 2, notes 0..15, velocity 127 = bypass, 0 = active.
+        // BYPASS (the key above the display). The script reports the state as note 62 (see onMidiIn) for the LED. A
+        // press goes to the script (SysEx 1F), which bypasses the active inserts or switches on again the ones it
+        // bypassed: it has each slot's state for the track that is selected at that moment.
         if (ev.id == 0x18) {
-            if (!ev.pressed || g_bypassState == 0) break;
-            const uint8_t vel = g_bypassState == 1 ? 127 : 0;
-            for (uint8_t n = 0; n < 16; ++n) sendMidi({0x91, n, vel});
+            if (!ev.pressed) break;
+            sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x1F, 0x00, 0xF7});
+            std::printf("UF1 BYPASS pressed (the script reports: %s)\n", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");
             break;
         }
         // SHIFT + SCRUB toggles SHUTTLE instead: the jog then sets a shuttle speed (stopping when it goes
@@ -736,7 +738,6 @@ void showSelLed()
 // 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
 // cells show them only in SENDS (PLUGIN shows its own, below; DAW none).
 std::array<SendCell, 4> g_sendCells;
-std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
 std::string sendCellValue(int k) { std::lock_guard<std::mutex> lk(g_cellMx); return k >= 0 && k < 4 ? g_sendCells[size_t(k)].value : std::string(); }
 // PLUGIN view cells and soft keys (SysEx 51 / 52), under g_cellMx: the SSL plug-in's controls on the current
 // page, or (no SSL plug-in) the Quick Controls' names and values.
@@ -747,7 +748,6 @@ std::array<PlugKey, 4> g_plugKeys;
 std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
 std::string g_plugTitle;   // the plug-in's name in Cubase (for its preset folder)
 std::string g_qcSource;    // what the Quick Controls belong to (SysEx 56; "" = not known)
-std::string g_trackName;   // the selected track's name (SysEx 01), under g_cellMx
 uf1eq::Model g_cubaseEq;   // Cubase's own channel EQ + input filter, from the script (SysEx 55); off = flat
 
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
@@ -1711,7 +1711,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
         if (m[1] == 62 && status != 0xA0) {
             // BYPASS LED: off without inserts, orange at 35 % while they are active, full orange when bypassed.
             const int vel = status == 0x80 ? 0 : m[2];
+            const int was = g_bypassState;
             g_bypassState = vel == 0 ? 0 : vel < 100 ? 1 : 2;
+            if (g_bypassState != was)
+                std::printf("UF1 BYPASS state from the script: %s\n", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");
             const uint32_t rgb = g_bypassState == 2 ? 0xFF8000u : 0x592D00u;
             setLed(uf1m::Led{0x00, rgb}, g_bypassState != 0);
             return;

@@ -259,7 +259,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 | Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
 | MASTER | Puts the strip on the main output instead of the selected track. Press again to return. |
 | FLIP | Swaps the fader and the pan knob. |
-| BYPASS | Bypasses all inserts of the track (dim: inserts active; bright: all bypassed; off: no inserts). Press again to restore. |
+| BYPASS | Bypasses all inserts of the track (dim: inserts active; bright: all bypassed; off: no inserts). Press again to switch them back on; inserts that were bypassed beforehand stay bypassed. |
 
 ### Getting around
 
