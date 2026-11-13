@@ -101,6 +101,8 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   press that arrives while Cubase is changing track **waits** until the slots have reported for the new one (no
   report for 0.2 s, and Cubase's selected track is the one the script has; given up after 1.5 s): in the middle of
   a change the script holds half of each track. A second press within 250 ms is ignored (one push gave two).
+  **Do not write a host value through the variable you read it with**: set with setProcessValue, the slots' value
+  variables no longer followed Cubase to the next track; the slots are set by notes to separate keys again.
 - **Foot switches are ignored for 4 s after each connect** (a reconnect started playback).
 - **Requests are not replayed on reconnect** (54, 59, 7C, temporary lines): only state is.
 - **Notes back to back are merged or lost by Cubase**: 40 ms apart (bank steps 60–100 ms; see banking.md).

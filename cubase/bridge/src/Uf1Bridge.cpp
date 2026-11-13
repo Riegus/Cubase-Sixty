@@ -552,8 +552,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
         // SCRUB toggles the jog between nudging the cursor and Cubase's jog (scrubbing). LED on = scrub.
         // BYPASS (the key above the display). The script reports the state as note 62 (see onMidiIn) for the LED. A
-        // press goes to the script (SysEx 1F), which bypasses the active inserts or switches on again the ones it
-        // bypassed: it has each slot's state for the track that is selected at that moment.
+        // press goes to the script (SysEx 1F), which decides (it has each slot's state for the selected track): it
+        // answers with the slots to set (SysEx 1E, see onSysex).
         if (ev.id == 0x18) {
             if (!ev.pressed) break;
             // (Two presses 83 ms apart were seen from one push, 13.11.2026.)
@@ -1443,6 +1443,14 @@ void onSysex(const std::vector<unsigned char>& m)
     if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
         if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
         if (g_trace) std::printf("UF1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
+    if (m[4] == 0x1E && m.size() >= 10) {
+        // BYPASS: the script's answer to a press: these insert slots to this state. Sent on as notes to the keys the
+        // script has bound to each slot's bypass (channel 2, note = slot, velocity 127 = bypass, 0 = active).
+        const uint16_t bits = uint16_t((m[6] & 0x7F) | ((m[7] & 0x7F) << 7) | ((m[8] & 0x03) << 14));
+        const uint8_t vel = m[5] ? 127 : 0;
+        for (uint8_t n = 0; n < 16; ++n) if (bits & (1u << n)) sendMidi({0x91, n, vel});
         return;
     }
     if (auto n = parseName(m)) {

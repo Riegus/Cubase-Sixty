@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.11-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.12-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -969,7 +969,8 @@ try {
 // the track has active (non-bypassed) inserts and off when it has none.
 // One insert viewer per used slot. The script reports the state to the bridge as note 62: velocity 0 = no
 // inserts (LED off), 64 = inserts active (LED half lit), 127 = all bypassed (LED lit). A press comes from the
-// bridge as SysEx 1F; the script sets each slot through the value variable bound to its bypass.
+// bridge as SysEx 1F; the script decides which slots change and has the bridge set them (SysEx 1E back; the bridge
+// sends each slot its state on MIDI channel 2, notes 0..15, velocity 127 = bypass, 0 = active).
 // (Until 13.11.2026 the bridge sent every slot its state as a note: all on or all off, forgetting which inserts
 // were bypassed before.)
 // ---------------------------------------------------------------------------
@@ -1035,12 +1036,13 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 			if (!set.length) { set = bypassed; stay = [] }   // nothing of this key's: all of them
 			out('[CubaseSixty UF1] BYPASS: switching on slots ' + mask(function (s, i) { return set.indexOf(i) >= 0 }) + ' (left bypassed: ' + mask(function (s, i) { return stay.indexOf(i) >= 0 }) + ')')
 		}
-		var to = active.length ? 1 : 0
-		for (k = 0; k < set.length; ++k) {
-			try { slots[set[k]].state.setProcessValue(activeDevice, to) } catch (e) { out('[CubaseSixty UF1] BYPASS slot ' + (set[k] + 1) + ': ' + e) }
-			slots[set[k]].bypassed = to === 1
-		}
-		updateLed(activeDevice)
+		// The slots are set by the bridge, as notes to the keys bound to each slot's bypass (SysEx 1E: the state and
+		// the slots, 16 bits as 7 + 7 + 2). Set from here through the value variables (setProcessValue), the
+		// variables no longer followed Cubase to the next track: the states read after a track change were the
+		// ones written on the track before (log 13.11.2026).
+		var to = active.length ? 1 : 0, bits = 0
+		for (k = 0; k < set.length; ++k) bits |= 1 << set[k]
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, to, bits & 0x7F, (bits >> 7) & 0x7F, (bits >> 14) & 0x03, 0xF7]))
 	}
 	try {
 		for (var k = 0; k < SLOTS; ++k) {
@@ -1054,14 +1056,20 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 				viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) {
 					slot.present = !!name
 					changeAt = Date.now()
+					out('[CubaseSixty UF1] bypass: slot ' + (index + 1) + (name ? ' holds "' + name + '"' : ' is empty'))
 					updateLed(activeDevice)
 				}
 				state.mOnProcessValueChange = function (activeDevice, value) {
 					slot.bypassed = value > 0.5
 					changeAt = Date.now()
+					out('[CubaseSixty UF1] bypass: slot ' + (index + 1) + ' reports ' + (slot.bypassed ? 'bypassed' : 'active'))
 					updateLed(activeDevice)
 				}
 			})(slot, k)
+			// The key the bridge sets this slot with (channel 2, note = slot).
+			var slotKey = cmdButton()
+			slotKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, k)
+			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
 		}
 	} catch (e) {
 		out('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)
