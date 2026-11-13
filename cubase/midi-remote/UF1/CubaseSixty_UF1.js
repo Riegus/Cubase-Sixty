@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.1-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.2-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -1584,7 +1584,27 @@ function meterFind(activeDevice) {
 	var list = [], ssl = []
 	if (stepMix) { try { meterList(stepMix, 'MixConsole', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: MixConsole walk: ' + e) } }
 	if (meterCr) { try { meterList(meterCr, 'Control Room', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: Control Room walk: ' + e) } }
-	if (++meterScans <= 2 && !list.length) out('[CubaseSixty UF1] METER: SSL objects seen: ' + (ssl.length ? ssl.join(', ') : 'none'))
+	if (++meterScans <= 1 && !list.length) {
+		out('[CubaseSixty UF1] METER: SSL objects seen: ' + (ssl.length ? ssl.join(', ') : 'none'))
+		// The Control Room's tree, to see where a Meter there would be (13.11.2026: not found on Monitor 1).
+		if (meterCr) {
+			try {
+				var crBase = meterCr.getBaseObjectID(plugAm), lines = []
+				function dump(id, depth) {
+					if (lines.length >= 60) return
+					var ty = '', ti = '', np = 0, nc = 0
+					try { ty = meterCr.getObjectTypeName(plugAm, id) } catch (e) {}
+					try { ti = meterCr.getObjectTitle(plugAm, id) } catch (e) {}
+					try { np = meterCr.getNumberOfParameters(plugAm, id) } catch (e) {}
+					try { nc = meterCr.getNumberOfChildObjects(plugAm, id) } catch (e) {}
+					lines.push(new Array(depth + 1).join('  ') + '#' + id + ' [' + ty + '] "' + ti + '" ' + np + ' params, ' + nc + ' children')
+					if (depth < 5) for (var c = 0; c < nc && c < 40; ++c) dump(meterCr.getChildObjectID(plugAm, id, c), depth + 1)
+				}
+				dump(crBase, 0)
+				for (var li = 0; li < lines.length; ++li) out('[CubaseSixty UF1] METER: Control Room ' + lines[li])
+			} catch (e) { out('[CubaseSixty UF1] METER: Control Room tree: ' + e) }
+		} else out('[CubaseSixty UF1] METER: no Control Room access')
+	}
 	var pick = null
 	for (var i = 0; i < list.length && !pick; ++i) if (meter.index > 0 && list[i].index === meter.index && list[i].channel === meter.name) pick = list[i]
 	for (var j = 0; j < list.length && !pick; ++j) if (meter.name && list[j].channel === meter.name) pick = list[j]
