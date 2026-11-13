@@ -518,6 +518,13 @@ void handleFrame(const uf8frames::Frame& fr)
             static bool editor[8] = {};
             const int s = (d[3] - 0x20) / 3;
             if (pressed) editor[s] = g_selOn[s];
+            // The setting "UF8 SEL on the selected track" = ssl (default): the script opens the track's first SSL
+            // channel strip's window, or asks back (2C) for the channel editor when there is none.
+            if (editor[s] && cs::settings::get("uf8-sel-open", "ssl") == "ssl") {
+                if (pressed) { sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2C, uint8_t(s), 0xF7}); std::printf("UF8 SEL on the selected track (strip %d): SSL strip window\n", s + 1); }
+                else editor[s] = false;
+                break;
+            }
             if (editor[s]) {
                 note(uint8_t(kNoteVPush + s), pressed);
                 if (pressed) std::printf("UF8 SEL on the selected track (strip %d): channel editor\n", s + 1);
@@ -1042,6 +1049,12 @@ void onMidiIn(std::vector<unsigned char>& msg)
             line += v;
             g_panLine[m[5]] = line;
             if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+        } else if (m.size() >= 7 && m[4] == 0x2C && m[5] < kStrips) {
+            // SEL on the selected track: no SSL channel strip there, so the channel editor (the V-pot push's note,
+            // press and release 40 ms apart: notes back to back can merge).
+            const uint8_t n = uint8_t(kNoteVPush + m[5]);
+            note(n, true);
+            std::thread([n] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note(n, false); }).detach();
         } else if (m.size() >= 8 && m[4] == 0x26 && m[5] < kStrips) {
             // Strip mode per strip: on = the fader follows the strip's fader (27); off = back to the track's volume.
             const int s = m[5];
