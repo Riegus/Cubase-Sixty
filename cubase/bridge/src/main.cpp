@@ -825,6 +825,7 @@ void onMidiIn(std::vector<unsigned char>& msg);
 // faders down, value lines and V-pot bars off, the LEDs Cubase drives off. What Cubase sends on the next project
 // paints it all again.
 std::map<int, std::vector<unsigned char>> g_npBefore, g_npBlanked;   // the cache before / right after the blanking
+void uf8IdleText(int kind);
 void uf8NoProject()
 {
     const bool first = !g_noProject;
