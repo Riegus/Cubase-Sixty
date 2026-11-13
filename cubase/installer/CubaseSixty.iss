@@ -38,6 +38,8 @@ UninstallDisplayName=Cubase-Sixty
 UninstallDisplayIcon={app}\CubaseSixty.exe
 ; Cubase-Sixty's own licence is shown; Rea-Sixty's (whose code the bridge uses) is installed beside it, as MIT asks.
 LicenseFile=..\LICENSE
+; What the installer changes, and that Cubase-Sixty is not SSL's or Steinberg's: shown after the licence.
+InfoBeforeFile=before-you-install.txt
 
 [Tasks]
 Name: "autostart"; Description: "Start Cubase-Sixty with Windows"; GroupDescription: "Start:"

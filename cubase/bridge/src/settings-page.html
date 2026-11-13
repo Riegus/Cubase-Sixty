@@ -214,7 +214,8 @@ function sectionBody(id) {
   } else if (id === "about") {
     s.append(el("div", { class: "card" },
       el("h2", {}, "Cubase-Sixty " + (state.version || "")),
-      el("p", { class: "help" }, "SSL UF8, UF1 and UC1 in Cubase, ported from Rea-Sixty."),
+      el("p", { class: "help" }, "SSL UF8, UF1 and UC1 in Cubase, ported from Rea-Sixty. Free, open-source software, provided \"as is\" without warranty."),
+      el("p", { class: "help" }, "Not made, endorsed or supported by Solid State Logic or Steinberg. SSL, UF8, UF1, UC1 and SSL 360 are trademarks of Solid State Logic; Cubase is a trademark of Steinberg Media Technologies."),
       el("p", { class: "help" }, "Logs: ", el("code", {}, state.paths.logs)),
       el("p", { class: "help" }, "This page is served by the bridge on this computer only. The settings are kept in ", el("code", {}, "settings.txt"), " and ", el("code", {}, "favourites.txt"), " in ", el("code", {}, state.paths.settings || ""), "; editing those by hand works too.")));
   } else if (id === "behaviour") {

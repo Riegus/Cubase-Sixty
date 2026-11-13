@@ -1,0 +1,25 @@
+CUBASE-SIXTY: WHAT THIS INSTALLER CHANGES ON YOUR PC
+
+Cubase-Sixty is free, open-source software made by one person. It is provided "as is", without warranty (see the
+licence). It is not made, endorsed or supported by Solid State Logic or Steinberg. SSL, UF8, UF1, UC1 and SSL 360
+are trademarks of Solid State Logic; Cubase is a trademark of Steinberg Media Technologies.
+
+For your user account only (no administrator rights needed):
+  - The program in %LOCALAPPDATA%\Programs\Cubase-Sixty. Your settings, favourites and logs are kept there too.
+  - Four MIDI Remote scripts in Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty.
+  - If you tick "Start with Windows": an entry in your Run key (HKCU\...\CurrentVersion\Run).
+  - While it runs, Cubase-Sixty makes its own virtual MIDI ports (through the teVirtualMIDI driver of loopMIDI or
+    SSL 360), and closes SSL 360's background program SSL360Core.exe whenever it starts.
+  The uninstaller removes all of this (it asks before deleting your settings and favourites).
+
+Only if you tick "Install the USB driver" (asks for administrator permission once):
+  - The SSL controllers are moved from SSL's own USB driver to Windows' WinUSB driver. From then on SSL 360 does
+    not see them. Rea-Sixty uses the same driver.
+  - The driver package is signed on your PC with a certificate made there ("Rea-Sixty Driver Signer"), which is
+    added to the computer's trusted root and trusted publisher certificates. Its private key stays in the
+    computer's certificate store.
+  The uninstaller does NOT remove the driver (Rea-Sixty may be using it). To undo it: tray menu > USB driver >
+  Remove it, before uninstalling. That removes the driver and the certificate; then unplug and replug the
+  controllers (if SSL 360 still does not see them, run SSL 360's installer again).
+
+Before installing the driver, it is sensible to have a recent Windows restore point or backup.

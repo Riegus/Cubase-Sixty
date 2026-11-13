@@ -83,7 +83,10 @@ mark.cur { background: #f0a030; }
 <ul>
 <li><a href="#cubase-sixty-user-guide">Cubase-Sixty user guide</a><ul>
 <li><a href="#what-you-need">What you need</a></li>
-<li><a href="#installing">Installing</a></li>
+<li><a href="#installing">Installing</a><ul>
+<li><a href="#what-the-installer-changes-on-your-pc">What the installer changes on your PC</a></li>
+</ul>
+</li>
 <li><a href="#setting-up-cubase-once">Setting up Cubase (once)</a></li>
 <li><a href="#every-day">Every day</a></li>
 <li><a href="#how-the-surfaces-think">How the surfaces think</a></li>
@@ -135,6 +138,9 @@ mark.cur { background: #f0a030; }
 makes them work in REAPER: the mixer on faders, V-pots and displays, the SSL plug-ins of your tracks on the UC1's
 knobs, without SSL 360. Any one of the three surfaces is enough; they work alone and together.</p>
 <p>Tested with Cubase 15 Pro on Windows 11.</p>
+<p>Cubase-Sixty is free, open-source software, provided "as is" without warranty (see the licence). It is not made,
+endorsed or supported by Solid State Logic or Steinberg. SSL, UF8, UF1, UC1 and SSL 360 are trademarks of Solid
+State Logic; Cubase is a trademark of Steinberg Media Technologies.</p>
 <div class="card"><h2 id="what-you-need">What you need</h2>
 <ul>
 <li>Windows 10 or 11 (64 bit) and Cubase with MIDI Remote and Direct Access (developed and tested on Cubase 15 Pro;
@@ -163,8 +169,28 @@ knobs, without SSL 360. Any one of the three surfaces is enough; they work alone
 </ol>
 <p>Cubase-Sixty now sits in the notification area (the tray) as a small mixing-surface icon, and the controllers show
 "Waiting for Cubase".</p>
-<p>What is installed where: the program in <code>%LOCALAPPDATA%\Programs\Cubase-Sixty</code> (with your settings, favourites and
-logs beside it), four MIDI Remote scripts in <code>Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty</code>.</p>
+<h3 id="what-the-installer-changes-on-your-pc">What the installer changes on your PC</h3>
+<p>For your user account only, without administrator rights:</p>
+<ul>
+<li>The program in <code>%LOCALAPPDATA%\Programs\Cubase-Sixty</code>, with your settings, favourites and logs beside it.</li>
+<li>Four MIDI Remote scripts in <code>Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty</code>.</li>
+<li>With <em>Start with Windows</em> ticked: an entry in your user's Run key (<code>HKCU\...\CurrentVersion\Run</code>).</li>
+<li>While it runs, Cubase-Sixty makes its own virtual MIDI ports (through loopMIDI's or SSL 360's teVirtualMIDI
+  driver) and closes SSL 360's background program <code>SSL360Core.exe</code> whenever it starts.</li>
+</ul>
+<p>The uninstaller removes all of this, and asks before deleting your settings and favourites.</p>
+<p>Only with <em>Install the USB driver</em> ticked (administrator permission, once):</p>
+<ul>
+<li>The SSL controllers move from SSL's USB driver to Windows' WinUSB driver; SSL 360 no longer sees them. Rea-Sixty
+  uses the same driver.</li>
+<li>The driver package is signed on your PC with a certificate made there ("Rea-Sixty Driver Signer"), added to the
+  computer's trusted root and trusted publisher certificates. Its private key stays in the computer's certificate
+  store.</li>
+</ul>
+<p>The uninstaller leaves the driver in place (Rea-Sixty may use it). To undo it, use the tray menu <strong>USB driver &gt;
+Remove it</strong> before uninstalling: that removes the driver and the certificate (see
+<a href="#going-back-to-ssl-360">Going back to SSL 360</a>). A recent Windows restore point or backup before installing the
+driver is a sensible precaution.</p>
 </div><div class="card"><h2 id="setting-up-cubase-once">Setting up Cubase (once)</h2>
 <p>Start Cubase with Cubase-Sixty running. Cubase finds the scripts and the ports by itself: <em>Studio &gt; MIDI Remote
 Manager</em> lists CubaseSixty - UF8, UF1, UC1 and Helper (the Helper has no hardware; it keeps lists for the others).
@@ -859,8 +885,9 @@ folder (tray menu <strong>Open logs folder</strong>) with what you did and what 
 </div><div class="card"><h2 id="uninstalling">Uninstalling</h2>
 <p>Windows <em>Settings &gt; Apps &gt; Installed apps &gt; Cubase-Sixty &gt; Uninstall</em>. It stops Cubase-Sixty, removes the program
 and the scripts, and asks whether to remove your settings and favourites too.</p>
-<p>The USB driver stays (Rea-Sixty may be using it). To give the controllers back to SSL 360, remove the driver from
-the tray menu <strong>before</strong> uninstalling, or run SSL 360's installer afterwards.</p></div>
+<p>The USB driver and its certificate stay (Rea-Sixty may be using them). To give the controllers back to SSL 360 and
+remove the certificate, use the tray menu <strong>USB driver &gt; Remove it</strong> <strong>before</strong> uninstalling, or run SSL 360's
+installer afterwards (that does not remove the certificate).</p></div>
 </main>
 </div>
 <script>

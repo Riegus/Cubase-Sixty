@@ -49,3 +49,7 @@ moved to the driver.
 
 The user guide (`cubase\docs\user-guide.md`) and both licences (Cubase-Sixty's, shown by the installer, and
 Rea-Sixty's) are installed beside the program.
+
+`before-you-install.txt` is shown after the licence page (InfoBeforeFile): what the installer changes on the PC,
+the USB driver and its certificate, and that Cubase-Sixty is not SSL's or Steinberg's. Keep it in step with the
+user guide's "What the installer changes on your PC".
