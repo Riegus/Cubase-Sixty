@@ -556,8 +556,9 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         // bypassed: it has each slot's state for the track that is selected at that moment.
         if (ev.id == 0x18) {
             if (!ev.pressed) break;
-            sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x1F, 0x00, 0xF7});
-            std::printf("UF1 BYPASS pressed (the script reports: %s)\n", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");
+            const bool all = settings::get("uf1-bypass", "remember") == "all";   // 1: switch every insert on again
+            sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x1F, uint8_t(all ? 1 : 0), 0xF7});
+            std::printf("UF1 BYPASS pressed (%s; the script reports: %s)\n", all ? "all inserts alike" : "remembering the ones bypassed already", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");
             break;
         }
         // SHIFT + SCRUB toggles SHUTTLE instead: the jog then sets a shuttle speed (stopping when it goes

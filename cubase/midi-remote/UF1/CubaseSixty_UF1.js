@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.9-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.10-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -616,7 +616,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x1F && m.length >= 7) {   // BYPASS pressed
-		try { if (bypassPress) bypassPress(activeDevice) } catch (e) { out('[CubaseSixty UF1] BYPASS: ' + e) }
+		try { if (bypassPress) bypassPress(activeDevice, m[5] === 1) } catch (e) { out('[CubaseSixty UF1] BYPASS: ' + e) }
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
@@ -993,18 +993,19 @@ try {
 	// A toggle: with any insert active, the active ones are bypassed (and the ones bypassed already remembered);
 	// with all bypassed, the ones this key bypassed are switched on again. Decided here, where the slots' states are
 	// the selected track's: decided in the bridge, a press right after a track change went by the track before.
-	bypassPress = function (activeDevice) {
+	// all: the setting "All inserts are switched on" (nothing remembered, as before 13.11.2026).
+	bypassPress = function (activeDevice, all) {
 		var active = [], bypassed = [], k
 		for (k = 0; k < slots.length; ++k) if (slots[k].present) (slots[k].bypassed ? bypassed : active).push(k)
 		if (!active.length && !bypassed.length) { out('[CubaseSixty UF1] BYPASS: no inserts on this track'); return }
 		var key = 't' + lastTrackId
 		var set = []
 		if (active.length) {
-			keep[key] = bypassed
+			if (all) delete keep[key]; else keep[key] = bypassed
 			set = active
 			out('[CubaseSixty UF1] BYPASS: bypassing slots ' + mask(function (s) { return !s.bypassed }) + ' (bypassed already: ' + mask(function (s) { return s.bypassed }) + ')')
 		} else {
-			var stay = keep[key] || []
+			var stay = all ? [] : keep[key] || []
 			delete keep[key]
 			for (k = 0; k < bypassed.length; ++k) if (stay.indexOf(bypassed[k]) < 0) set.push(bypassed[k])
 			if (!set.length) { set = bypassed; stay = [] }   // nothing of this key's: all of them

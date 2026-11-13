@@ -259,7 +259,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 | Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
 | MASTER | Puts the strip on the main output instead of the selected track. Press again to return. |
 | FLIP | Swaps the fader and the pan knob. |
-| BYPASS | Bypasses all inserts of the track (dim: inserts active; bright: all bypassed; off: no inserts). Press again to switch them back on; inserts that were bypassed beforehand stay bypassed. |
+| BYPASS | Bypasses all inserts of the track (dim: inserts active; bright: all bypassed; off: no inserts). Press again to switch them back on; inserts that were bypassed beforehand stay bypassed (Settings > Behaviour can make it switch all on). |
 
 ### Getting around
 
@@ -457,7 +457,7 @@ is saved and takes effect at once.
 | Section | What is there |
 |---------|---------------|
 | Devices | Which surfaces are connected and whether Cubase is; key / LED and display brightness; sleep when idle. |
-| Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
+| Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; what the UF1's BYPASS key does with inserts that were bypassed already; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
 | UC1 keys | What the magnifier, 360° and secondary encoder push do. |
 | UC1 on Cubase's strip | Whether the knobs / keys load a missing gate or compressor; which compressor DYN IN loads; which bus comp the Bus Comp section starts on. |
 | Display | How long track names are shortened; the UC1's 7-segment leading zeros. |
