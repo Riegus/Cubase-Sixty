@@ -50,7 +50,8 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
 - **PLUGIN view, SSL plug-in**: its pages on the V-pots and display soft keys, ◀ ▶, the EQ curve.
 - **PLUGIN view, no SSL plug-in**: Quick Controls on the V-pots; their names and values in the cells; "QC1 ..." on
   the left display while turning.
-- **METER view**: the Overview screen (with an SSL Meter plug-in).
+- **METER view** (with an SSL Meter plug-in): soft key 1 steps Overview, Analogue, RTA (and Loudness with a Meter
+  Pro); each draws and moves with the audio; RESET clears the holds; the key's label names the screen.
 - CHANNEL encoder steps tracks (MixConsole mode skips folders and hidden tracks); push opens / closes the plug-in
   window; SHIFT + turn steps the plug-ins.
 - BYPASS: bypasses all inserts and restores them; an insert bypassed beforehand stays bypassed (Settings >

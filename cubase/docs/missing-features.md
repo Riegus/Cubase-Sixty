@@ -9,7 +9,9 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 
 1. UF1 PLUGIN: jump to the page of a control touched in the plug-in window.
 2. UF8 strip mode: the SSL strip's name in the colour bar.
-3. UF1 METER: the V-pots on the meter's settings, FINE / PRESETS there.
+3. UF1 METER: the V-pots on the meter's settings, FINE / PRESETS / Loudness PLAY there, and the plug-in's
+   settings in the drawing (PPM, reference, Digital Type, RTA scale, loudness range). The four screens are there
+   (13.11.2026).
 
 
 ## UF8
