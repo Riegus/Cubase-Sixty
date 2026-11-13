@@ -2051,8 +2051,9 @@ void zeroLoad()   // (g_zeroMx held)
 void fader0dbSeen(const std::string& text, int pos14)
 {
     if (pos14 < 0 || pos14 > 16383) return;
-    std::string t;
+    std::string t;   // (spaces and a "dB" left out: Cubase's texts come with and without, e.g. "0.00dB")
     for (char c : text) if (c != ' ') t.push_back(c);
+    if (t.size() >= 2 && (t.compare(t.size() - 2, 2, "dB") == 0 || t.compare(t.size() - 2, 2, "db") == 0)) t.resize(t.size() - 2);
     if (t != "0.00" && t != "0.0" && t != "0" && t != "+0.00" && t != "-0.00") return;
     std::lock_guard<std::mutex> lk(g_zeroMx);
     zeroLoad();
