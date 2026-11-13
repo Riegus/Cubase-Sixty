@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.9-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.13-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -190,6 +190,7 @@ function reportVpotPosition(activeDevice, index, value) {
 var vpotIdleLast = 0
 deviceDriver.mOnIdle = function (activeDevice) {
 	flushLog(activeDevice)
+	if (bypassIdle) { try { bypassIdle(activeDevice) } catch (e) { out('[CubaseSixty UF1] BYPASS: ' + e) } }
 	var now = 0
 	try { now = Date.now() } catch (e) { return }
 	if (qcResendAt && now >= qcResendAt) {
@@ -616,7 +617,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x1F && m.length >= 7) {   // BYPASS pressed
-		try { if (bypassPress) bypassPress(activeDevice) } catch (e) { out('[CubaseSixty UF1] BYPASS: ' + e) }
+		try { if (bypassPress) bypassPress(activeDevice, m[5] === 1) } catch (e) { out('[CubaseSixty UF1] BYPASS: ' + e) }
 		return
 	}
 	if (m[4] === 0x5C && m.length >= 7) {   // a track step past hidden channels
@@ -775,6 +776,7 @@ function stepCheckLanding() {
 // new track, each report put the pan back on the value line in the middle of a send turn (10.11.2026). Repeats of
 // the same track (same object, same name) are skipped.
 var lastTrackId = -2
+var trackChangedAt = 0
 selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	dbg('selected title: [' + title + ']')
 	plugAm = activeMapping
@@ -782,6 +784,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	try { trackId = plugDa.getBaseObjectID(activeMapping) } catch (e) {}
 	if (trackId === lastTrackId && title === selectedInfo.title) return
 	lastTrackId = trackId
+	trackChangedAt = Date.now()
 	plug.rescanAt = Date.now() + 100   // the PLUGIN view: look for the new track's SSL plug-in
 	sendDa.base = -2                   // the new track's sends
 	sendDa.refreshAt = Date.now() + 150
@@ -966,16 +969,22 @@ try {
 // the track has active (non-bypassed) inserts and off when it has none.
 // One insert viewer per used slot. The script reports the state to the bridge as note 62: velocity 0 = no
 // inserts (LED off), 64 = inserts active (LED half lit), 127 = all bypassed (LED lit). A press comes from the
-// bridge as SysEx 1F; the script sets each slot through the value variable bound to its bypass.
+// bridge as SysEx 1F; the script decides which slots change and has the bridge set them (SysEx 1E back; the bridge
+// sends each slot its state on MIDI channel 2, notes 0..15, velocity 127 = bypass, 0 = active).
 // (Until 13.11.2026 the bridge sent every slot its state as a note: all on or all off, forgetting which inserts
 // were bypassed before.)
 // ---------------------------------------------------------------------------
 
 ;var bypassPress = null   // BYPASS on the UF1 (SysEx 1F from the bridge)
+var bypassIdle = null    // a press waiting for the slots' states to settle (deviceDriver.mOnIdle)
 ;(function () {
 	var SLOTS = 16
 	var slots = []
 	var ledOn = null
+	// A track change reports each slot's plug-in at once and each slot's bypass state about half a second later
+	// (measured 13.11.2026: 0.54 s); until then the states are the ones of the track before.
+	var identityAt = 0, valueAt = 0
+	var waiting = null
 	var keep = {}   // per track (object ID): the slots that were bypassed already when BYPASS bypassed the rest
 	function updateLed(activeDevice) {
 		var present = false, active = false
@@ -993,29 +1002,55 @@ try {
 	// A toggle: with any insert active, the active ones are bypassed (and the ones bypassed already remembered);
 	// with all bypassed, the ones this key bypassed are switched on again. Decided here, where the slots' states are
 	// the selected track's: decided in the bridge, a press right after a track change went by the track before.
-	bypassPress = function (activeDevice) {
+	// all: the setting "All inserts are switched on" (nothing remembered, as before 13.11.2026).
+	// A press while the track is changing waits until the slots have reported for the new track (found 13.11.2026:
+	// a press that arrived in the middle of a change went by half of each track and switched a bypassed insert on).
+	bypassPress = function (activeDevice, all) {
+		waiting = { all: all, at: Date.now() }
+		bypassIdle(activeDevice)
+	}
+	bypassIdle = function (activeDevice) {
+		if (!waiting) return
+		var now = Date.now()
+		if (now - waiting.at > 2500) { waiting = null; out('[CubaseSixty UF1] BYPASS: dropped, the track did not settle'); return }
+		var cur = lastTrackId
+		try { if (plugAm) cur = plugDa.getBaseObjectID(plugAm) } catch (e) {}
+		if (cur !== lastTrackId) return
+		var t0 = Math.max(identityAt, trackChangedAt), any = false
+		for (var q = 0; q < slots.length; ++q) if (slots[q].present) any = true
+		if (now - t0 < 900) {
+			// After a change: the states must have come in for the new track (none come for a track without inserts).
+			if (any ? !(valueAt > t0 && now - valueAt >= 60) : now - t0 < 250) return
+		}
+		var all = waiting.all
+		if (now - waiting.at > 50) out('[CubaseSixty UF1] BYPASS: waited ' + (now - waiting.at) + ' ms for the track to settle')
+		waiting = null
+		bypassNow(activeDevice, all)
+	}
+	function bypassNow(activeDevice, all) {
 		var active = [], bypassed = [], k
 		for (k = 0; k < slots.length; ++k) if (slots[k].present) (slots[k].bypassed ? bypassed : active).push(k)
 		if (!active.length && !bypassed.length) { out('[CubaseSixty UF1] BYPASS: no inserts on this track'); return }
 		var key = 't' + lastTrackId
 		var set = []
 		if (active.length) {
-			keep[key] = bypassed
+			if (all) delete keep[key]; else keep[key] = bypassed
 			set = active
 			out('[CubaseSixty UF1] BYPASS: bypassing slots ' + mask(function (s) { return !s.bypassed }) + ' (bypassed already: ' + mask(function (s) { return s.bypassed }) + ')')
 		} else {
-			var stay = keep[key] || []
+			var stay = all ? [] : keep[key] || []
 			delete keep[key]
 			for (k = 0; k < bypassed.length; ++k) if (stay.indexOf(bypassed[k]) < 0) set.push(bypassed[k])
 			if (!set.length) { set = bypassed; stay = [] }   // nothing of this key's: all of them
 			out('[CubaseSixty UF1] BYPASS: switching on slots ' + mask(function (s, i) { return set.indexOf(i) >= 0 }) + ' (left bypassed: ' + mask(function (s, i) { return stay.indexOf(i) >= 0 }) + ')')
 		}
-		var to = active.length ? 1 : 0
-		for (k = 0; k < set.length; ++k) {
-			try { slots[set[k]].state.setProcessValue(activeDevice, to) } catch (e) { out('[CubaseSixty UF1] BYPASS slot ' + (set[k] + 1) + ': ' + e) }
-			slots[set[k]].bypassed = to === 1
-		}
-		updateLed(activeDevice)
+		// The slots are set by the bridge, as notes to the keys bound to each slot's bypass (SysEx 1E: the state and
+		// the slots, 16 bits as 7 + 7 + 2). Set from here through the value variables (setProcessValue), the
+		// variables no longer followed Cubase to the next track: the states read after a track change were the
+		// ones written on the track before (log 13.11.2026).
+		var to = active.length ? 1 : 0, bits = 0
+		for (k = 0; k < set.length; ++k) bits |= 1 << set[k]
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, to, bits & 0x7F, (bits >> 7) & 0x7F, (bits >> 14) & 0x03, 0xF7]))
 	}
 	try {
 		for (var k = 0; k < SLOTS; ++k) {
@@ -1028,13 +1063,21 @@ try {
 			;(function (slot, index) {
 				viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) {
 					slot.present = !!name
+					identityAt = Date.now()
+					dbg('bypass: slot ' + (index + 1) + (name ? ' holds "' + name + '"' : ' is empty'))
 					updateLed(activeDevice)
 				}
 				state.mOnProcessValueChange = function (activeDevice, value) {
 					slot.bypassed = value > 0.5
+					valueAt = Date.now()
+					dbg('bypass: slot ' + (index + 1) + ' reports ' + (slot.bypassed ? 'bypassed' : 'active'))
 					updateLed(activeDevice)
 				}
 			})(slot, k)
+			// The key the bridge sets this slot with (channel 2, note = slot).
+			var slotKey = cmdButton()
+			slotKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, k)
+			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
 		}
 	} catch (e) {
 		out('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)
