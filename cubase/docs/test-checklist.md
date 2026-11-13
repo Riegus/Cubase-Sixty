@@ -32,7 +32,7 @@ Quick: banking, SEL, a fader, a V-pot.
 - PAN (V-pots back on pan from a soft-key parameter, the V-pot send view, FLIP; lit on pan); FINE (held and
   latched: pan, a focused parameter, a send level move a quarter as far); 360 opens the Settings page.
 - CHANNEL encoder: each mode (hold its push and turn); zoom pad. FOCUS: the encoder on the value under the
-  mouse pointer (a plug-in knob, a MixConsole fader); FOCUS lit; FINE slower.
+  mouse pointer (a plug-in knob, a MixConsole fader); FOCUS lit; about as fast as a V-pot on pan; FINE a quarter.
 
 ## UF1
 

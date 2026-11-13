@@ -224,7 +224,7 @@ letting go keeps the one shown.
 | Markers | Jumps to the previous / next marker. The **NAV** key (a tap) switches to this and back. |
 | Bank by 1 | Moves the strips one track at a time. |
 | CS Fav / BC Fav | Steps through your favourite channel strips / bus comps (see [Favourites](#favourites)). |
-| Mouse | Changes **the value under Cubase's mouse pointer**: point at any knob or fader in Cubase (a plug-in, the MixConsole) and turn. The **FOCUS** key switches to this and back. With FINE, four notches make one step. |
+| Mouse | Changes **the value under Cubase's mouse pointer**: point at any knob or fader in Cubase (a plug-in, the MixConsole) and turn. The **FOCUS** key switches to this and back. With FINE it moves a quarter as far. |
 
 ### Markers and Nav Mode
 

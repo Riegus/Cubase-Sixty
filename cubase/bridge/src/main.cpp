@@ -574,16 +574,12 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             const bool right = delta > 0;
             const int mode = g_encMode;
-            if (mode == kEncMouse) {   // the script steps the value under the mouse (FINE: one step per four notches)
-                static int fineAcc = 0;
-                int steps = delta;
-                if (fineOn()) {
-                    if ((fineAcc > 0 && delta < 0) || (fineAcc < 0 && delta > 0)) fineAcc = 0;
-                    fineAcc += delta;
-                    steps = fineAcc / 4;
-                    fineAcc -= steps * 4;
-                }
-                if (steps) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2D, uint8_t(steps > 0 ? 1 : 0), uint8_t(std::min(std::abs(steps), 16)), 0xF7});
+            if (mode == kEncMouse) {
+                // The script steps the value under the mouse in Cubase's steps: about 0.4 % of the range each (measured
+                // 13.11.2026), so one a notch took 250 notches end to end. Four a notch (about 1.6 %, as the V-pots);
+                // FINE: one.
+                const int steps = delta * (fineOn() ? 1 : 4);
+                sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2D, uint8_t(steps > 0 ? 1 : 0), uint8_t(std::min(std::abs(steps), 32)), 0xF7});
                 break;
             }
             for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
