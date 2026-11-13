@@ -32,6 +32,17 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
 // stopped = Cubase's transport is stopped, resetHolds = the RESET key was pressed.
 void buildOverview(uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int trackNo, bool stopped, bool resetHolds);
 
+// The Meter plug-in's own settings, as the UF1 script reads them (SysEx 61: the row of Rea-Sixty's Meter Pro parameter
+// list, the normalised value, the display text). The screens draw with them: Digital Type (row 6), Analogue Mode
+// (8), Max Needle (10), RTA scale top / bottom (22 / 23) and selected band (51), Loudness target (36), scale range
+// (47) and display type (48).
+void setSetting(int row, double norm, const std::string& text);
+void clearSettings();
+// 0x011a, the faceplate the firmware draws: Digital Type on the Overview, VU / PPM on the Analogue; -1 = leave it.
+int scaleSelector(int screen);
+// Pages of V-pot settings on each screen (Overview, Analogue, RTA: 3; Loudness: 10).
+int pageCount(int screen);
+
 // Setting cell 1 (0x010e slot 0): the track whose meter is shown, "NO METER" while no instance streams.
 std::string instanceLabel();
 

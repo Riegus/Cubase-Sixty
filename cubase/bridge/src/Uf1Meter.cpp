@@ -8,7 +8,9 @@
 // (uf1_loudness_chrome.h). What is not here (yet): the V-pot meter settings, FINE, PRESETS and Loudness PLAY, and
 // the plug-in's own settings Rea-Sixty reads as REAPER parameters. Here their defaults: Digital Type Non-Linear,
 // Analogue Mode VU, reference -18 dBFS, max needle 2 s, RTA scale 0 to -120 dB with no band selected, Loudness
-// range -18..+9 with the target from the history stream.
+// range -18..+9 with the target from the history stream. Since the same day the UF1 script reads the plug-in's
+// settings (setSetting) and the screens follow them where the codec allows: Digital Type, VU / PPM, Max Needle, the
+// RTA scale and band, the loudness target, range and display type.
 //
 
 #include "Uf1Meter.h"
@@ -20,7 +22,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,6 +44,67 @@ const bool g_uf1_dev = true;   // the codec only checks that a device exists
 }
 
 namespace cs::uf1meter {
+
+namespace {
+std::mutex g_setMx;
+std::map<int, std::pair<double, std::string>> g_set;   // row -> (normalised, text)
+bool setting(int row, double& norm, std::string* text = nullptr)
+{
+    std::lock_guard<std::mutex> lk(g_setMx);
+    auto it = g_set.find(row);
+    if (it == g_set.end()) return false;
+    norm = it->second.first;
+    if (text) *text = it->second.second;
+    return true;
+}
+int settingIndex(int row, int count, int fallback)
+{
+    double n = 0;
+    return setting(row, n) ? std::clamp(int(n * (count - 1) + 0.5), 0, count - 1) : fallback;
+}
+bool settingNumber(int row, double& v)
+{
+    double n = 0;
+    std::string t;
+    if (!setting(row, n, &t) || t.empty()) return false;
+    char* end = nullptr;
+    v = std::strtod(t.c_str(), &end);
+    return end != t.c_str();
+}
+} // namespace
+
+void setSetting(int row, double norm, const std::string& text)
+{
+    std::lock_guard<std::mutex> lk(g_setMx);
+    g_set[row] = {norm, text};
+}
+void clearSettings()
+{
+    std::lock_guard<std::mutex> lk(g_setMx);
+    g_set.clear();
+}
+int pageCount(int screen) { static const int k[4] = {3, 3, 3, 10}; return k[std::clamp(screen, 0, 3)]; }
+int scaleSelector(int screen)
+{
+    // Rea-Sixty's uf1EmitMeterScaleSelector_ (stereo; a mono stream has its own codes).
+    static const uint8_t kDigitalType[7] = {0x07, 0x08, 0x03, 0x04, 0x0e, 0x0c, 0x0a};
+    static const uint8_t kDigitalTypeMono[7] = {0x05, 0x06, 0x01, 0x02, 0x0d, 0x0b, 0x09};
+    static const uint8_t kAnalogue[2] = {0x02, 0x04}, kAnalogueMono[2] = {0x01, 0x03};
+    auto mono = [](sslmeter::DataType dt) {
+        sslcore::MeterInfo mi;
+        return sslcore::isRunning() && sslcore::getMeterInfo(int(dt), mi) && mi.values > 0 && mi.values != 2;
+    };
+    double n = 0;
+    if (screen == 0 && setting(6, n)) {
+        const int i = std::clamp(int(n * 6 + 0.5), 0, 6);
+        return (mono(sslmeter::DataType::BarPeak) ? kDigitalTypeMono : kDigitalType)[i];
+    }
+    if (screen == 1 && setting(8, n)) {
+        const int i = n >= 0.5 ? 1 : 0;
+        return (mono(sslmeter::DataType::TextVuPpm) ? kAnalogueMono : kAnalogue)[i];
+    }
+    return -1;
+}
 
 const char* screenName(int screen)
 {
@@ -236,7 +301,7 @@ void buildOverview(uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int trackNo,
     sBarHold.step(dbL, dbR, now);
     const float barHoldL = haveHold ? holdL : sBarHold.l;
     const float barHoldR = haveHold ? holdR : sBarHold.r;
-    const uint8_t* scale = kUf1BarScale;
+    const uint8_t* scale = uf1BarScaleFor_(settingIndex(6, 7, 0));   // the plug-in's Digital Type
     const std::array<uint8_t, 2> rmsBar{uf1BarByte_(haveRms ? rmsL : -120.f, scale), uf1BarByte_(haveRms ? rmsR : -120.f, scale)};
     const std::array<uint8_t, 2> peakBar{uf1BarByte_(dbL, scale), uf1BarByte_(dbR, scale)};
     const std::array<uint8_t, 2> holdBar{uf1BarByte_(barHoldL, scale), uf1BarByte_(barHoldR, scale)};
@@ -456,31 +521,46 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         static Uf1MaxNeedle sNdl;
         static float sGlideL = -139.2f, sGlideR = -139.2f, sRawL = NAN, sRawR = NAN;
         static std::chrono::steady_clock::time_point sGlideT{}, sRawSinceL{}, sRawSinceR{};
-        if (force) {
+        static bool sPpm = false;
+        const bool ppm = settingIndex(8, 2, 0) == 1;   // Analogue Mode: VU / PPM
+        // Max Needle: Off / 2 sec / Infinite.
+        const int maxMode = settingIndex(10, 3, 1);
+        const double holdSec = maxMode == 0 ? 0.0 : maxMode == 2 ? -1.0 : kUf1MaxNeedleHoldSec;
+        if (force || ppm != sPpm) {
+            sPpm = ppm;
             sNdl.reset(vuL, vuR, now);
             sGlideL = vuL; sGlideR = vuR; sGlideT = now;
             sRawL = sRawR = NAN; sRawSinceL = sRawSinceR = now;
         }
         const bool silent = havePeak && peak <= -100.f;
-        sNdl.step(vuL, vuR, now, kUf1MaxNeedleHoldSec, kUf1VuMaxNeedleReleaseDbPerS);
-        if (readout) {
-            const float tgtL = silent ? -139.2f : vuL, tgtR = silent ? -139.2f : vuR;
-            const double dtS = std::chrono::duration<double>(now - sGlideT).count();
-            sGlideT = now;
-            const float drop = kUf1VuReadoutFallDbPerS * float(std::clamp(dtS, 0.0, 0.5));
-            if (!(vuL == sRawL)) { sRawL = vuL; sRawSinceL = now; }
-            if (!(vuR == sRawR)) { sRawR = vuR; sRawSinceR = now; }
-            auto held = [&](std::chrono::steady_clock::time_point since) {
-                const double frozen = std::chrono::duration<double>(now - since).count();
-                return frozen >= kUf1VuHoldDetectS && frozen <= kUf1VuHoldMaxS;
-            };
-            sGlideL = std::max(held(sRawSinceL) ? -139.2f : tgtL, sGlideL - drop);
-            sGlideR = std::max(held(sRawSinceR) ? -139.2f : tgtR, sGlideR - drop);
-            vuL = sGlideL; vuR = sGlideR;
+        uint8_t ndl[2], hld[2];
+        if (ppm) {
+            // PPM: the plug-in streams marks, ballistic already (IEC Type II); drawn raw, on the PPM faceplate.
+            const float mL = vuL > -100.f ? vuL : 0.f, mR = vuR > -100.f ? vuR : 0.f;
+            sNdl.step(mL, mR, now, holdSec, kUf1PpmMaxNeedleReleaseMarksPerS);
+            ndl[0] = uf1PpmByte_(mL); ndl[1] = uf1PpmByte_(mR);
+            hld[0] = uf1PpmByte_(haveVuHold ? vuHoldL : sNdl.l); hld[1] = uf1PpmByte_(haveVuHold ? vuHoldR : sNdl.r);
+        } else {
+            sNdl.step(vuL, vuR, now, holdSec, kUf1VuMaxNeedleReleaseDbPerS);
+            if (readout) {
+                const float tgtL = silent ? -139.2f : vuL, tgtR = silent ? -139.2f : vuR;
+                const double dtS = std::chrono::duration<double>(now - sGlideT).count();
+                sGlideT = now;
+                const float drop = kUf1VuReadoutFallDbPerS * float(std::clamp(dtS, 0.0, 0.5));
+                if (!(vuL == sRawL)) { sRawL = vuL; sRawSinceL = now; }
+                if (!(vuR == sRawR)) { sRawR = vuR; sRawSinceR = now; }
+                auto held = [&](std::chrono::steady_clock::time_point since) {
+                    const double frozen = std::chrono::duration<double>(now - since).count();
+                    return frozen >= kUf1VuHoldDetectS && frozen <= kUf1VuHoldMaxS;
+                };
+                sGlideL = std::max(held(sRawSinceL) ? -139.2f : tgtL, sGlideL - drop);
+                sGlideR = std::max(held(sRawSinceR) ? -139.2f : tgtR, sGlideR - drop);
+                vuL = sGlideL; vuR = sGlideR;
+            }
+            ndl[0] = uf1VuByte_(vuL); ndl[1] = uf1VuByte_(vuR);
+            hld[0] = uf1VuByte_(haveVuHold ? vuHoldL : sNdl.l); hld[1] = uf1VuByte_(haveVuHold ? vuHoldR : sNdl.r);
+            if (silent && !readout) { ndl[0] = ndl[1] = 4; hld[0] = hld[1] = 4; }
         }
-        uint8_t ndl[2] = {uf1VuByte_(vuL), uf1VuByte_(vuR)};
-        uint8_t hld[2] = {uf1VuByte_(haveVuHold ? vuHoldL : sNdl.l), uf1VuByte_(haveVuHold ? vuHoldR : sNdl.r)};
-        if (silent && !readout) { ndl[0] = ndl[1] = 4; hld[0] = hld[1] = 4; }
         t.push_back(frame(0x0125, ndl, 2));
         t.push_back(frame(0x0127, hld, 2));
         // Overload marks (bit 0 / 2 = L / R now, 1 / 3 = latched): the plug-in's own, as on the Overview.
@@ -496,7 +576,9 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         // RTA: 31 bands, each its value and its hold (the plug-in's own, else a 26.5 dB/s fall), on the default
         // scale 0 dB to -120 dB. 0x0122 on a change, 0x0124 (the selected band: none) and 0x012a (the scale) when
         // the screen opens.
-        constexpr float kTop = 0.f, kBot = -120.f;
+        float kTop = 0.f, kBot = -120.f;
+        { double v = 0; if (settingNumber(22, v)) kTop = float(v); if (settingNumber(23, v)) kBot = float(v); }
+        if (!(kTop > kBot)) { kTop = 0.f; kBot = -120.f; }
         std::vector<float> cur, pk;
         const bool have = sslcore::isRunning() && sslcore::getMeter(int(sslmeter::DataType::Rta31Band), cur, pk) &&
                           cur.size() >= 31;
@@ -518,11 +600,31 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         }
         static std::array<uint8_t, 64> sRta{};
         if (force || rta != sRta) { sRta = rta; t.push_back(frame(0x0122, rta.data(), rta.size())); }
-        if (force) {
-            const uint8_t sel = 0;
-            const uint8_t axis[2] = {uint8_t(-kTop), uint8_t(-kBot)};
-            t.push_back(frame(0x0124, &sel, 1));
-            t.push_back(frame(0x012a, axis, 2));
+        {
+            // The selected band (the plug-in's text, "1.00 kHz" / "No Band") -> the nearest ISO band, 1-31; 0 = none.
+            static const double kIso[31] = {20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630,
+                                            800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000,
+                                            12500, 16000, 20000};
+            uint8_t sel = 0;
+            double n = 0;
+            std::string txt;
+            if (setting(51, n, &txt) && !txt.empty() && txt.find("No") == std::string::npos) {
+                double hz = std::atof(txt.c_str());
+                if (txt.find('k') != std::string::npos) hz *= 1000.0;
+                if (hz > 0) {
+                    int best = 0;
+                    for (int i = 1; i < 31; ++i) if (std::fabs(kIso[i] - hz) < std::fabs(kIso[best] - hz)) best = i;
+                    sel = uint8_t(best + 1);
+                }
+            }
+            const uint8_t axis[2] = {uint8_t(std::clamp(int(std::lround(-double(kTop))), 0, 255)),
+                                     uint8_t(std::clamp(int(std::lround(-double(kBot))), 0, 255))};
+            static uint8_t sSel = 0xff, sAxis[2] = {0xff, 0xff};
+            if (force || sel != sSel) { sSel = sel; t.push_back(frame(0x0124, &sel, 1)); }
+            if (force || axis[0] != sAxis[0] || axis[1] != sAxis[1]) {
+                sAxis[0] = axis[0]; sAxis[1] = axis[1];
+                t.push_back(frame(0x012a, axis, 2));
+            }
         }
     } else {
         // Loudness: the short-term history as one line over the last 313 columns, the target from the stream's
@@ -532,8 +634,15 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
                               sslcore::getMeter(int(sslmeter::DataType::LoudScrollableHistory), hist, hp) && hist.size() > 16;
         if (haveHist) {
             double target = -23.0;
-            { const float tt = hist[hist.size() - 10]; if (tt > 0.f && tt < 100.f) target = -double(tt); }
-            const double rb = -18.0, span = 27.0;
+            if (!settingNumber(36, target)) {
+                target = -23.0;
+                const float tt = hist[hist.size() - 10];
+                if (tt > 0.f && tt < 100.f) target = -double(tt);
+            }
+            const int ri = settingIndex(47, 3, 0);   // Scale Range: -18..+9, -36..+18, -54..+27
+            const bool relative = settingIndex(48, 2, 0) == 1;
+            static const double kBottom[3] = {-18.0, -36.0, -54.0}, kSpan[3] = {27.0, 54.0, 81.0};
+            const double rb = kBottom[ri], span = kSpan[ri];
             const size_t histLen = hist.size() > 13 ? hist.size() - 13 : hist.size();
             size_t nowIdx = 0;
             for (size_t q = histLen; q-- > 0;) if (hist[q] > -99.f && hist[q] < 60.f) { nowIdx = q; break; }
@@ -553,11 +662,15 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
             sf[0] = 0x01;
             for (int c = 0; c < 250; ++c) sf[size_t(1 + c)] = colByte(312 - c);
             std::array<uint8_t, 251> sf0{};
-            for (int i = 0; i < 251; ++i) sf0[size_t(i)] = kLoudR0Sf0[i];
+            const uint8_t* csf0 = ri == 0 ? kLoudR0Sf0 : ri == 1 ? kLoudR1Sf0 : kLoudR2Sf0;
+            const uint8_t* csf2 = ri == 0 ? kLoudR0Sf2 : ri == 1 ? kLoudR1Sf2 : kLoudR2Sf2;
+            const uint8_t* csf3 = ri == 0 ? kLoudR0Sf3 : ri == 1 ? kLoudR1Sf3 : kLoudR2Sf3;
+            for (int i = 0; i < 251; ++i) sf0[size_t(i)] = csf0[i];
             static const int kTicksLU[8] = {9, 6, 3, 0, -3, -6, -12, -18};
             for (int k = 0; k < 8; ++k) {
                 char lab[16];
-                std::snprintf(lab, sizeof lab, "%ld", long(std::lround(double(kTicksLU[k]) + target)));
+                const int lu = kTicksLU[k] * (ri + 1);
+                std::snprintf(lab, sizeof lab, "%ld", relative ? long(lu) : long(std::lround(double(lu) + target)));
                 for (int c = 0; c < 3; ++c) sf0[size_t(2 + 3 * k + c)] = lab[c] ? uint8_t(lab[c]) : 0;
             }
             auto valByte = [&](int dataType) -> uint8_t {
@@ -571,15 +684,16 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
             sf0[26] = valByte(int(sslmeter::DataType::LoudMomentary));
             sf0[27] = valByte(int(sslmeter::DataType::LoudShortTerm));
             std::array<uint8_t, 251> sf2{};
-            for (int i = 0; i < 251; ++i) sf2[size_t(i)] = kLoudR0Sf2[i];
+            for (int i = 0; i < 251; ++i) sf2[size_t(i)] = csf2[i];
             for (int c = 1; c <= 64; ++c) sf2[size_t(c)] = colByte(64 - c);
             static std::array<uint8_t, 251> sSf{}, sSf0{}, sSf2{};
-            if (force || sf != sSf || sf0 != sSf0 || sf2 != sSf2) {
-                sSf = sf; sSf0 = sf0; sSf2 = sf2;
+            static int sRi = -1;
+            if (force || sf != sSf || sf0 != sSf0 || sf2 != sSf2 || ri != sRi) {
+                sSf = sf; sSf0 = sf0; sSf2 = sf2; sRi = ri;
                 t.push_back(frame(0x0122, sf0.data(), sf0.size()));
                 t.push_back(frame(0x0122, sf.data(), sf.size()));
                 t.push_back(frame(0x0122, sf2.data(), sf2.size()));
-                t.push_back(frame(0x0122, kLoudR0Sf3, 208));
+                t.push_back(frame(0x0122, csf3, 208));
             }
         }
     }
