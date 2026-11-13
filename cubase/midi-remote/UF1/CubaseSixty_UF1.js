@@ -976,6 +976,9 @@ try {
 		var vel = !present ? 0 : active ? 64 : 127
 		if (vel === ledOn) return
 		ledOn = vel
+		var seen = ''
+		for (var q = 0; q < slots.length; ++q) seen += !slots[q].present ? '-' : slots[q].bypassed ? 'b' : 'a'
+		out('[CubaseSixty UF1] bypass state ' + vel + ', slots ' + seen + ' (- empty, a active, b bypassed)')
 		midiOutput.sendMidi(activeDevice, [0x90, 62, vel])
 	}
 	try {
@@ -999,6 +1002,11 @@ try {
 			var slotKey = cmdButton()
 			slotKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, k)
 			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
+			;(function (index) {
+				slotKey.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+					out('[CubaseSixty UF1] bypass key for slot ' + index + ' from the bridge: ' + value)
+				}
+			})(k)
 		}
 	} catch (e) {
 		out('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)
