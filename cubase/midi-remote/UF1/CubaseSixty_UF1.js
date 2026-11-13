@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.25.8-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.25.9-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -969,16 +969,23 @@ try {
 ;(function () {
 	var SLOTS = 16
 	var slots = []
-	var ledOn = null
+	var ledOn = null, sentPresent = -1, sentBypassed = -1
 	function updateLed(activeDevice) {
 		var present = false, active = false
 		for (var k = 0; k < slots.length; ++k) if (slots[k].present) { present = true; if (!slots[k].bypassed) active = true }
 		var vel = !present ? 0 : active ? 64 : 127
+		// Each slot's state too (SysEx 1E: present, bypassed; 16 bits each as 7 + 7 + 2), so that the bridge can
+		// leave the slots bypassed that already were when BYPASS was pressed.
+		var pm = 0, bm = 0
+		for (var q = 0; q < slots.length; ++q) if (slots[q].present) { pm |= 1 << q; if (slots[q].bypassed) bm |= 1 << q }
+		if (pm !== sentPresent || bm !== sentBypassed) {
+			sentPresent = pm; sentBypassed = bm
+			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, pm & 0x7F, (pm >> 7) & 0x7F, (pm >> 14) & 0x03,
+				bm & 0x7F, (bm >> 7) & 0x7F, (bm >> 14) & 0x03, 0xF7]))
+		}
 		if (vel === ledOn) return
 		ledOn = vel
-		var seen = ''
-		for (var q = 0; q < slots.length; ++q) seen += !slots[q].present ? '-' : slots[q].bypassed ? 'b' : 'a'
-		out('[CubaseSixty UF1] bypass state ' + vel + ', slots ' + seen + ' (- empty, a active, b bypassed)')
+		out('[CubaseSixty UF1] bypass state ' + vel + ' (0 no inserts, 64 active, 127 all bypassed)')
 		midiOutput.sendMidi(activeDevice, [0x90, 62, vel])
 	}
 	try {
@@ -1002,11 +1009,6 @@ try {
 			var slotKey = cmdButton()
 			slotKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, k)
 			page.makeValueBinding(slotKey.mSurfaceValue, viewer.mBypass)
-			;(function (index) {
-				slotKey.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-					out('[CubaseSixty UF1] bypass key for slot ' + index + ' from the bridge: ' + value)
-				}
-			})(k)
 		}
 	} catch (e) {
 		out('[CubaseSixty UF1] insert bypass via insert viewers not available: ' + e)

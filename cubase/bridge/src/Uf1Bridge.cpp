@@ -96,6 +96,12 @@ void sendMidi(std::vector<unsigned char> m)
 void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(on ? 127 : 0)}); }
 
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
+// Which insert slots the selected track has and which are bypassed (SysEx 1E from the script), and per track the
+// slots that were already bypassed when BYPASS bypassed the rest: a second press leaves those bypassed.
+std::mutex g_bypMx;
+bool g_bypHave = false;
+uint16_t g_bypPresent = 0, g_bypBypassed = 0;
+std::map<std::string, uint16_t> g_bypKeep;
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
 // The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
@@ -554,11 +560,32 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         // the track has no inserts. Slots = MIDI channel 2, notes 0..15, velocity 127 = bypass, 0 = active.
         if (ev.id == 0x18) {
             if (!ev.pressed) break;
-            std::printf("UF1 BYPASS pressed: %s\n", g_bypassState == 0 ? "the script reports no inserts on this track, nothing sent"
-                 : g_bypassState == 1 ? "inserts active, bypassing all slots" : "all bypassed, switching all slots on");
-            if (g_bypassState == 0) break;
-            const uint8_t vel = g_bypassState == 1 ? 127 : 0;
-            for (uint8_t n = 0; n < 16; ++n) sendMidi({0x91, n, vel});
+            std::string track;
+            { std::lock_guard<std::mutex> lk(g_cellMx); track = g_trackName; }
+            std::lock_guard<std::mutex> lk(g_bypMx);
+            if (!g_bypHave) {   // (an older script: all slots alike)
+                if (g_bypassState == 0) break;
+                const uint8_t vel = g_bypassState == 1 ? 127 : 0;
+                for (uint8_t n = 0; n < 16; ++n) sendMidi({0x91, n, vel});
+                break;
+            }
+            const uint16_t active = uint16_t(g_bypPresent & ~g_bypBypassed);
+            if (!g_bypPresent) { std::printf("UF1 BYPASS pressed: no inserts on this track, nothing sent\n"); break; }
+            if (active) {
+                // Bypass the active ones; remember the ones that were bypassed already.
+                g_bypKeep[track] = uint16_t(g_bypPresent & g_bypBypassed);
+                for (uint8_t n = 0; n < 16; ++n) if (active & (1u << n)) sendMidi({0x91, n, 127});
+                std::printf("UF1 BYPASS pressed: bypassing slots %04X of \"%s\" (already bypassed: %04X)\n", active, track.c_str(), g_bypKeep[track]);
+            } else {
+                // All bypassed: switch on what this key bypassed. Nothing remembered (bypassed by hand, or all of
+                // them were bypassed before): all of them.
+                uint16_t keep = 0;
+                if (auto it = g_bypKeep.find(track); it != g_bypKeep.end()) { keep = it->second; g_bypKeep.erase(it); }
+                uint16_t on = uint16_t(g_bypPresent & ~keep);
+                if (!on) on = g_bypPresent;
+                for (uint8_t n = 0; n < 16; ++n) if (on & (1u << n)) sendMidi({0x91, n, 0});
+                std::printf("UF1 BYPASS pressed: switching on slots %04X of \"%s\" (left bypassed: %04X)\n", on, track.c_str(), uint16_t(g_bypPresent & ~on));
+            }
             break;
         }
         // SHIFT + SCRUB toggles SHUTTLE instead: the jog then sets a shuttle speed (stopping when it goes
@@ -1440,6 +1467,13 @@ void onSysex(const std::vector<unsigned char>& m)
     if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
         if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
         if (g_trace) std::printf("UF1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
+    if (m[4] == 0x1E && m.size() >= 12) {   // the insert slots: present and bypassed, 16 bits each as 7 + 7 + 2
+        std::lock_guard<std::mutex> lk(g_bypMx);
+        g_bypPresent = uint16_t((m[5] & 0x7F) | ((m[6] & 0x7F) << 7) | ((m[7] & 0x03) << 14));
+        g_bypBypassed = uint16_t((m[8] & 0x7F) | ((m[9] & 0x7F) << 7) | ((m[10] & 0x03) << 14));
+        g_bypHave = true;
         return;
     }
     if (auto n = parseName(m)) {
