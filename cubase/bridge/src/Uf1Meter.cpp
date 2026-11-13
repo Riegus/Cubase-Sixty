@@ -500,12 +500,9 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         std::vector<float> cur, pk;
         const bool have = sslcore::isRunning() && sslcore::getMeter(int(sslmeter::DataType::Rta31Band), cur, pk) &&
                           cur.size() >= 31;
-        // The holds: our own (rise with the band, fall 26.5 dB/s), and the plug-in's where it sends them, but never
-        // above ours: RESET clears ours, and whether the plug-in clears its RTA holds on a reset is not known (on the
-        // first test RESET seemed to do nothing on this screen, 13.11.2026).
         static std::array<float, 31> sHold;
         static std::chrono::steady_clock::time_point sHoldT = now;
-        if (force || resetHolds) sHold.fill(-120.f);
+        if (force) sHold.fill(-120.f);
         const double dtR = std::chrono::duration<double>(now - sHoldT).count();
         sHoldT = now;
         std::array<uint8_t, 64> rta{};
@@ -513,12 +510,11 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         for (int i = 0; i < 31; ++i) {
             const float v = have ? cur[size_t(i)] : -120.f;
             float& h = sHold[size_t(i)];
-            if (v >= h) h = v;
+            if (have && pk.size() >= 31) h = pk[size_t(i)];
+            else if (v >= h) h = v;
             else { h = float(h - 26.5 * dtR); if (h < v) h = v; }
-            float shown = h;
-            if (have && pk.size() >= 31 && std::isfinite(pk[size_t(i)])) shown = std::max(v, std::min(pk[size_t(i)], h));
             rta[size_t(2 + 2 * i)] = uf1RtaByte_(v, kTop, kBot);
-            rta[size_t(3 + 2 * i)] = uf1RtaByte_(shown, kTop, kBot);
+            rta[size_t(3 + 2 * i)] = uf1RtaByte_(h, kTop, kBot);
         }
         static std::array<uint8_t, 64> sRta{};
         if (force || rta != sRta) { sRta = rta; t.push_back(frame(0x0122, rta.data(), rta.size())); }
