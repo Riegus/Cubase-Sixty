@@ -82,5 +82,8 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   hardware), and an HTML version in the Settings page's design (`cubase\tools\make-user-guide.py` makes
   `docs\user-guide.html` from the Markdown; installed, and opened from the tray menu's User guide item and the
   Start menu). READMEs and missing-features.md brought up to date first (value line 2 s, favourites 0.8 s).
+- 13.11.2026: Geir tests the installed build for a few days before the first release. Left before releasing: the
+  guide read against the hardware, the uninstaller tried, the FOCUS test log line made debug-only, a GitHub
+  release with CubaseSixty-Setup-0.1.0.exe.
 - A user guide: what each key does on each surface, the setup steps that stay manual (the Mackie Control device for
   scrubbing, SSL 360 not running), with links to the known issues and the Cubase limitations.
