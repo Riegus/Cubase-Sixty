@@ -59,6 +59,15 @@
   #toast { position: fixed; right: 20px; bottom: 20px; background: var(--ink); color: var(--bg); padding: 9px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
   #toast.on { opacity: .95; }
   #toast.bad { background: var(--bad); color: #fff; }
+  .search { padding: 0 2px 12px; }
+  .search input { width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: 14px; }
+  .search input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+  .filter { display: flex; gap: 6px; align-items: center; margin: 0 0 16px; flex-wrap: wrap; }
+  .filter .lbl { color: var(--muted); font-size: 14px; margin-right: 4px; }
+  .filter button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .surf { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .3px; padding: 0 6px; margin-left: 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); vertical-align: 2px; }
+  .sec-tag { font-size: 12px; color: var(--muted); font-weight: normal; display: block; margin-bottom: 2px; }
+  mark { background: #f5d76e; color: #1d1d1b; border-radius: 2px; padding: 0 1px; }
   .gone { padding: 40px; text-align: center; color: var(--muted); }
   @media (max-width: 700px) { .app { grid-template-columns: 1fr; } nav { border-right: 0; border-bottom: 1px solid var(--line); } main { padding: 20px 16px; } .favs { grid-template-columns: 1fr; } }
 </style>
@@ -70,6 +79,7 @@
       <svg width="22" height="22" viewBox="0 0 16 16" aria-hidden="true"><rect x="0.5" y="1" width="15" height="14" rx="2.5" fill="var(--accent)"/><g fill="#1e1e1e"><rect x="3.9" y="3.5" width="1.2" height="9" rx=".6"/><rect x="7.4" y="3.5" width="1.2" height="9" rx=".6"/><rect x="10.9" y="3.5" width="1.2" height="9" rx=".6"/></g><g fill="#fff"><rect x="2.9" y="8.4" width="3.2" height="2.2" rx=".5"/><rect x="6.4" y="3.9" width="3.2" height="2.2" rx=".5"/><rect x="9.9" y="6.4" width="3.2" height="2.2" rx=".5"/></g></svg>
       Cubase-Sixty
     </div>
+    <div class="search"><input id="q" type="search" placeholder="Search settings  ( / )" aria-label="Search settings" autocomplete="off"></div>
     <div id="rail"></div>
   </nav>
   <main id="main">
@@ -207,6 +217,40 @@ function sectionBody(id) {
       el("p", { class: "help" }, "SSL UF8, UF1 and UC1 in Cubase, ported from Rea-Sixty."),
       el("p", { class: "help" }, "Logs: ", el("code", {}, state.paths.logs)),
       el("p", { class: "help" }, "This page is served by the bridge on this computer only. The settings are kept in ", el("code", {}, "settings.txt"), " and ", el("code", {}, "favourites.txt"), " in ", el("code", {}, state.paths.settings || ""), "; editing those by hand works too.")));
+  } else if (id === "behaviour") {
+    // Which surfaces' behaviour to show (several at once); remembered in this browser.
+    const all = ["UF8", "UF1", "UC1"];
+    let shown = all.slice();
+    try { const v = JSON.parse(localStorage.getItem("cs-behaviour-surfaces")); if (Array.isArray(v)) shown = v.filter(x => all.includes(x)); } catch (e) {}
+    const list = el("div");
+    const bar = el("div", { class: "filter", role: "group", "aria-label": "Surfaces" }, el("span", { class: "lbl" }, "Show:"));
+    const fill = () => {
+      list.innerHTML = "";
+      const ds = state.settings.filter(d => d.section === "Behaviour")
+        .map(d => ({ d, s: surfacesOf(d) }))
+        .filter(x => x.s.some(s => shown.includes(s)));
+      ds.sort((a, b) => order(a.s) - order(b.s));   // the ones for all surfaces first, then UF8, UF1, UC1
+      for (const x of ds) {
+        const card = settingCard(x.d);
+        const h = card.querySelector("h2");
+        for (const s of x.s.length === 3 ? ["All surfaces"] : x.s) h.append(el("span", { class: "surf" }, s));
+        list.append(card);
+      }
+      if (!ds.length) list.append(el("div", { class: "gone" }, shown.length ? "Nothing for these surfaces." : "Pick one or more surfaces above."));
+    };
+    const order = s => s.length === 3 ? 0 : 1 + Math.min(...s.map(x => all.indexOf(x)));
+    for (const name of all) {
+      const b = el("button", { type: "button", "aria-pressed": String(shown.includes(name)) }, name);
+      b.addEventListener("click", () => {
+        shown = shown.includes(name) ? shown.filter(x => x !== name) : all.filter(x => x === name || shown.includes(x));
+        b.setAttribute("aria-pressed", String(shown.includes(name)));
+        try { localStorage.setItem("cs-behaviour-surfaces", JSON.stringify(shown)); } catch (e) {}
+        fill();
+      });
+      bar.append(b);
+    }
+    s.append(bar, list);
+    fill();
   } else {
     const title = sections.find(x => x.id === id).title;
     for (const d of state.settings.filter(d => d.section === title)) s.append(settingCard(d));
@@ -214,13 +258,58 @@ function sectionBody(id) {
   return s;
 }
 
+// The surfaces a setting is for: those its key or name names (UF8, UF1, UC1); none named = all three.
+function surfacesOf(d) {
+  const t = (d.key + " " + d.label).toUpperCase();
+  const s = ["UF8", "UF1", "UC1"].filter(x => t.includes(x));
+  return s.length ? s : ["UF8", "UF1", "UC1"];
+}
+
+// Search: every setting whose name, help, choices or section has the words, from all sections, with the words marked.
+function query() { const q = document.getElementById("q"); return q ? q.value.trim() : ""; }
+function markIn(node, q) {
+  const lq = q.toLowerCase(), w = document.createTreeWalker(node, NodeFilter.SHOW_TEXT), hits = [];
+  for (let t = w.nextNode(); t; t = w.nextNode()) if (t.nodeValue.toLowerCase().includes(lq)) hits.push(t);
+  for (const t of hits) {
+    const s = t.nodeValue, ls = s.toLowerCase(), frag = document.createDocumentFragment();
+    let at = 0, i;
+    while ((i = ls.indexOf(lq, at)) >= 0) { frag.append(s.slice(at, i), el("mark", {}, s.slice(i, i + q.length))); at = i + q.length; }
+    frag.append(s.slice(at));
+    t.replaceWith(frag);
+  }
+}
+function renderSearch(main, q) {
+  const lq = q.toLowerCase(), has = t => String(t || "").toLowerCase().includes(lq);
+  main.append(el("h1", {}, "Search"), el("p", { class: "lead" }, "Settings matching “" + q + "”. Escape clears the search."));
+  let n = 0;
+  for (const sec of sections) {
+    const own = state.settings.filter(d => d.section === sec.title || (sec.id === "devices" && d.section === "Devices"));
+    const hits = own.filter(d => has(d.label) || has(d.help) || has(d.section) || has(sec.title) || d.choices.some(c => has(c.label)));
+    for (const d of hits) {
+      const card = settingCard(d);
+      card.querySelector("h2").prepend(el("span", { class: "sec-tag" }, sec.title));
+      markIn(card, q);
+      main.append(card); ++n;
+    }
+    if (!own.length && (has(sec.title) || has(sec.lead))) {   // Favourites, About: the section itself
+      const card = el("div", { class: "card" }, el("h2", {}, el("span", { class: "sec-tag" }, "Section"), sec.title),
+        el("p", { class: "help" }, sec.lead || ""), el("a", { href: "#" + sec.id, onclick: () => { document.getElementById("q").value = ""; current = sec.id; setTimeout(render); } }, "Open " + sec.title));
+      markIn(card, q);
+      main.append(card); ++n;
+    }
+  }
+  if (!n) main.append(el("div", { class: "gone" }, "Nothing found."));
+}
+
 function render() {
   const rail = document.getElementById("rail");
   rail.innerHTML = "";
+  const q = query();
   for (const sec of sections)
-    rail.append(el("a", { href: "#" + sec.id, class: sec.id === current ? "on" : "", onclick: () => { current = sec.id; setTimeout(render); } }, sec.title));
+    rail.append(el("a", { href: "#" + sec.id, class: sec.id === current && q.length < 2 ? "on" : "", onclick: () => { document.getElementById("q").value = ""; current = sec.id; setTimeout(render); } }, sec.title));
   const main = document.getElementById("main");
   main.innerHTML = "";
+  if (q.length >= 2) { renderSearch(main, q); return; }
   const sec = sections.find(x => x.id === current) || sections[0];
   main.append(el("h1", {}, sec.title));
   if (sec.lead) main.append(el("p", { class: "lead" }, sec.lead));   // (append(null) would show "null")
@@ -228,6 +317,15 @@ function render() {
 }
 
 window.addEventListener("hashchange", () => { current = (location.hash || "#devices").slice(1); render(); });
+{
+  const box = document.getElementById("q");
+  let timer = 0;
+  box.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { if (state) render(); }, 150); });
+  box.addEventListener("keydown", e => { if (e.key === "Escape") { box.value = ""; if (state) render(); } });
+  window.addEventListener("keydown", e => {
+    if (e.key === "/" && document.activeElement !== box && !(document.activeElement && document.activeElement.tagName === "INPUT")) { e.preventDefault(); box.focus(); box.select(); }
+  });
+}
 // The Devices status follows along while the page is open.
 // The tab's icon: the tray icon's mixing surface in the same colours (green: a project open, yellow: the bridge
 // runs but Cubase has no project / has not spoken yet, red: the bridge does not answer).

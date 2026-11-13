@@ -68,7 +68,10 @@ Quick: select a track with an SSL strip, turn a knob; the bus comp.
 
 Quick: the page opens from the tray; one setting changed shows at once.
 
-- Each section opens; a change is written to settings.txt and logged once.
+- Each section opens; a change is written to settings.txt and logged once. Search ("/"): matching settings from
+  all sections, words marked; a choice changed from the results is saved; Escape clears.
+  Behaviour: the UF8 / UF1 / UC1 buttons show those surfaces' settings (several at once, kept after a reload);
+  the ones for all surfaces always.
 - Tray icon colours; menu items; Start with Windows.
 
 ## Installer and user guide
@@ -80,3 +83,4 @@ Quick: the installer builds and installs over the previous version; the tray's U
 - The USB driver task is ticked only when needed; tray menu USB driver > Install / Remove.
 - Uninstall: the program and scripts are gone; it asks about settings and favourites.
 - A change to a control: user-guide.md updated, `make-user-guide.py` run, both committed.
+- The guide's search ("/"): sections listed, words marked, Enter / Shift+Enter step through, Escape clears.
