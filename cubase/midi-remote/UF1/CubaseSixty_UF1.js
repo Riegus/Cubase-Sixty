@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.2-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.3-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -1542,8 +1542,21 @@ function meterOnSysex(activeDevice, m) {
 
 // Where Meters can sit: the MixConsole, and the Control Room (a Meter on a monitor channel announces that channel's
 // name, e.g. "Monitor 1": found there on the first test, 13.11.2026, and nowhere in the MixConsole).
+// (Direct Access on the Control Room itself gives the VST Mixer, 13.11.2026: the Control Room's channels are tried
+// one by one: main, monitors 1-4, phones 1-2, cues 1-4.)
 var meterCr = null
-try { meterCr = page.mHostAccess.makeDirectAccess(page.mHostAccess.mControlRoom) } catch (e) { out('[CubaseSixty UF1] METER: no Direct Access to the Control Room: ' + e) }
+var meterCrs = []
+;(function () {
+	var cr = page.mHostAccess.mControlRoom
+	var hosts = [['Control Room main', function () { return cr.mMainChannel }]]
+	for (var i = 0; i < 4; ++i) (function (i) { hosts.push(['Monitor ' + (i + 1), function () { return cr.getMonitorChannelByIndex(i) }]) })(i)
+	for (var j = 0; j < 2; ++j) (function (j) { hosts.push(['Phones ' + (j + 1), function () { return cr.getPhonesChannelByIndex(j) }]) })(j)
+	for (var k = 0; k < 4; ++k) (function (k) { hosts.push(['Cue ' + (k + 1), function () { return cr.getCueChannelByIndex(k) }]) })(k)
+	for (var h = 0; h < hosts.length; ++h) {
+		try { meterCrs.push({ name: hosts[h][0], da: page.mHostAccess.makeDirectAccess(hosts[h][1]()) }) }
+		catch (e) { out('[CubaseSixty UF1] METER: no Direct Access to ' + hosts[h][0] + ': ' + e) }
+	}
+})()
 var meterScans = 0
 // Every SSL Meter under da's base, with its channel's MixConsole number (-1 in the Control Room) and name.
 function meterList(da, where, found, ssl) {
@@ -1583,7 +1596,21 @@ function meterFind(activeDevice) {
 	if (!plugAm) return
 	var list = [], ssl = []
 	if (stepMix) { try { meterList(stepMix, 'MixConsole', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: MixConsole walk: ' + e) } }
-	if (meterCr) { try { meterList(meterCr, 'Control Room', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: Control Room walk: ' + e) } }
+	for (var c = 0; c < meterCrs.length; ++c) {
+		var crd = meterCrs[c]
+		try {
+			var before = list.length
+			meterList(crd.da, crd.name, list, ssl)
+			// A Meter in the Control Room carries the channel's name as the plug-in announces it ("Monitor 1").
+			for (var q = before; q < list.length; ++q) if (!list[q].channel || list[q].channel === 'VST Mixer') list[q].channel = crd.name
+			if (meterScans < 1) {
+				var cb = crd.da.getBaseObjectID(plugAm), cty = '', cti = ''
+				try { cty = crd.da.getObjectTypeName(plugAm, cb) } catch (e) {}
+				try { cti = crd.da.getObjectTitle(plugAm, cb) } catch (e) {}
+				out('[CubaseSixty UF1] METER: ' + crd.name + ': #' + cb + ' [' + cty + '] "' + cti + '", ' + (list.length - before) + ' Meter(s)')
+			}
+		} catch (e) { out('[CubaseSixty UF1] METER: ' + crd.name + ' walk: ' + e) }
+	}
 	if (++meterScans <= 1 && !list.length) {
 		out('[CubaseSixty UF1] METER: SSL objects seen: ' + (ssl.length ? ssl.join(', ') : 'none'))
 		// The Control Room's tree, to see where a Meter there would be (13.11.2026: not found on Monitor 1).
@@ -1603,7 +1630,7 @@ function meterFind(activeDevice) {
 				dump(crBase, 0)
 				for (var li = 0; li < lines.length; ++li) out('[CubaseSixty UF1] METER: Control Room ' + lines[li])
 			} catch (e) { out('[CubaseSixty UF1] METER: Control Room tree: ' + e) }
-		} else out('[CubaseSixty UF1] METER: no Control Room access')
+		}
 	}
 	var pick = null
 	for (var i = 0; i < list.length && !pick; ++i) if (meter.index > 0 && list[i].index === meter.index && list[i].channel === meter.name) pick = list[i]
