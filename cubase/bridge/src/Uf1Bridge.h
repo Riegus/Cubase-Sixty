@@ -13,6 +13,10 @@ void uf1SetTrace(bool on);
 // Lights each UF1 LED we drive in turn (call a few seconds after start-up, once the init is done).
 void uf1LampTest();
 void uf1Stop();
+// No project now (Cubase gone without closing it), and what the strip says meanwhile: 1 "No Proj.", 2 "Waiting for
+// Cubase", 3 "Off" (as uf8IdleText in main.cpp).
+void uf1NoProjectNow();
+void uf1IdleText(int kind);
 // From the main loop: lets go of a UF1 that stopped answering or was unplugged, and picks up one that is
 // connected (tried every two seconds; the last state Cubase sent is drawn on it).
 void uf1Poll();

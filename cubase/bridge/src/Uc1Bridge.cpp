@@ -1228,6 +1228,32 @@ void startSslCore()
     else std::fprintf(stderr, "SSL 360 Core stand-in could not start (is SSL 360 running?); no gain reduction.\n");
 }
 
+void uc1NoProjectNow() { if (g_open) uc1NoProject(); }
+void uc1IdleText(int kind)
+{
+    if (!g_open || kind < 1 || kind > 3) return;
+    auto text = [](uint8_t cmd, const char* t) {
+        std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, cmd};
+        for (const char* c = t; *c; ++c) { m.push_back(0); m.push_back(0); m.push_back(uint8_t(*c)); }
+        m.push_back(0xF7);
+        return m;
+    };
+    auto name = text(0x30, kind == 1 ? "No Project" : kind == 2 ? "Waiting" : "Bridge off");
+    auto label = text(0x32, kind == 2 ? "for Cubase" : "");
+    std::map<int, std::vector<unsigned char>> before;
+    { std::lock_guard<std::mutex> lk(g_stateMx); before = g_cache; }
+    g_ownText = true;
+    onMidiIn(name);
+    onMidiIn(label);
+    g_ownText = false;
+    // The blanked state takes the new texts too, so that Cubase's still come back when the project opens.
+    std::lock_guard<std::mutex> lk(g_stateMx);
+    for (auto& kv : g_cache) {
+        auto b = before.find(kv.first);
+        if ((b == before.end() || b->second != kv.second) && g_npBlanked.count(kv.first)) g_npBlanked[kv.first] = kv.second;
+    }
+}
+
 void uc1Stop()
 {
     g_grRun = false;

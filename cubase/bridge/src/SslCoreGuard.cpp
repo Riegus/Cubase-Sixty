@@ -34,4 +34,27 @@ int stopSslCore()
     return 0;
 #endif
 }
+// Whether Cubase runs (an exe named Cubase.exe or Cubase<version>.exe; not CubaseSixty.exe): the surfaces say
+// "No Project" while it shows the Hub and "Waiting for Cubase" while it is not running.
+bool cubaseRunning()
+{
+#ifdef _WIN32
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return true;   // (not known: as running, the safer text)
+    bool found = false;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof pe;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok && !found; ok = Process32NextW(snap, &pe)) {
+        const wchar_t* n = pe.szExeFile;
+        if (_wcsnicmp(n, L"Cubase", 6) != 0) continue;
+        const wchar_t* r = n + 6;
+        while (*r >= L'0' && *r <= L'9') ++r;
+        if (_wcsicmp(r, L".exe") == 0) found = true;
+    }
+    CloseHandle(snap);
+    return found;
+#else
+    return true;
+#endif
+}
 }

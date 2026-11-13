@@ -1936,6 +1936,21 @@ void uf1Stop()
     g_open = false;
 }
 
+void uf1NoProjectNow() { if (g_open) uf1NoProject(); }
+void uf1IdleText(int kind)
+{
+    if (!g_open || kind < 1 || kind > 3) return;
+    const char* name = kind == 1 ? "No Proj." : kind == 2 ? "Waiting" : "Off";
+    std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};
+    for (const char* c = name; *c; ++c) m.push_back(uint8_t(*c));
+    m.push_back(0xF7);
+    // Through onMidiIn (it draws the name); the blanked state takes the new text too, so that Cubase's name still
+    // comes back when the project opens.
+    onMidiIn(m);
+    { std::lock_guard<std::mutex> lk(g_cacheMx); if (g_npBlanked.count(0x101)) g_npBlanked[0x101] = g_cache[0x101]; }
+    valueHome(kind == 2 ? "for Cubase" : "");
+}
+
 void uf1SetTrace(bool on) { g_trace = on; }
 
 void paintSoloActive()
