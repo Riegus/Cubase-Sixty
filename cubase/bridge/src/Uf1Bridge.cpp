@@ -554,7 +554,7 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         // the track has no inserts. Slots = MIDI channel 2, notes 0..15, velocity 127 = bypass, 0 = active.
         if (ev.id == 0x18) {
             if (!ev.pressed) break;
-            logf("UF1 BYPASS pressed: %s", g_bypassState == 0 ? "the script reports no inserts on this track, nothing sent"
+            std::printf("UF1 BYPASS pressed: %s\n", g_bypassState == 0 ? "the script reports no inserts on this track, nothing sent"
                  : g_bypassState == 1 ? "inserts active, bypassing all slots" : "all bypassed, switching all slots on");
             if (g_bypassState == 0) break;
             const uint8_t vel = g_bypassState == 1 ? 127 : 0;
@@ -1717,7 +1717,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const int was = g_bypassState;
             g_bypassState = vel == 0 ? 0 : vel < 100 ? 1 : 2;
             if (g_bypassState != was)
-                logf("UF1 BYPASS state from the script: %s", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");
+                std::printf("UF1 BYPASS state from the script: %s\n", g_bypassState == 0 ? "no inserts" : g_bypassState == 1 ? "inserts active" : "all bypassed");
             const uint32_t rgb = g_bypassState == 2 ? 0xFF8000u : 0x592D00u;
             setLed(uf1m::Led{0x00, rgb}, g_bypassState != 0);
             return;
