@@ -98,6 +98,8 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
 // Which insert slots the selected track has and which are bypassed (SysEx 1E from the script), and per track the
 // slots that were already bypassed when BYPASS bypassed the rest: a second press leaves those bypassed.
+std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
+std::string g_trackName;   // the selected track's name (SysEx 01), under g_cellMx
 std::mutex g_bypMx;
 bool g_bypHave = false;
 uint16_t g_bypPresent = 0, g_bypBypassed = 0;
@@ -766,7 +768,6 @@ void showSelLed()
 // 0x03 empty). The script sends each pot's name, level text and position (SysEx 15) in every view; the
 // cells show them only in SENDS (PLUGIN shows its own, below; DAW none).
 std::array<SendCell, 4> g_sendCells;
-std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
 std::string sendCellValue(int k) { std::lock_guard<std::mutex> lk(g_cellMx); return k >= 0 && k < 4 ? g_sendCells[size_t(k)].value : std::string(); }
 // PLUGIN view cells and soft keys (SysEx 51 / 52), under g_cellMx: the SSL plug-in's controls on the current
 // page, or (no SSL plug-in) the Quick Controls' names and values.
@@ -777,7 +778,6 @@ std::array<PlugKey, 4> g_plugKeys;
 std::string g_plugModel;   // "CS 2", "4K E", "BC 2" ... ("" = none)
 std::string g_plugTitle;   // the plug-in's name in Cubase (for its preset folder)
 std::string g_qcSource;    // what the Quick Controls belong to (SysEx 56; "" = not known)
-std::string g_trackName;   // the selected track's name (SysEx 01), under g_cellMx
 uf1eq::Model g_cubaseEq;   // Cubase's own channel EQ + input filter, from the script (SysEx 55); off = flat
 
 // The four display soft keys (LED ids 0x01-0x04, label cell 0x0104 with the key index first). Key 1's LED
