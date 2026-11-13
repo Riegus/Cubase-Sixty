@@ -1596,9 +1596,13 @@ function meterFind(activeDevice) {
 	if (!plugAm) return
 	var list = [], ssl = []
 	if (stepMix) { try { meterList(stepMix, 'MixConsole', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: MixConsole walk: ' + e) } }
+	var mixBase = -1
+	try { if (stepMix) mixBase = stepMix.getBaseObjectID(plugAm) } catch (e) {}
 	for (var c = 0; c < meterCrs.length; ++c) {
 		var crd = meterCrs[c]
 		try {
+			// One that gives the whole VST Mixer again is not walked twice (as the Control Room itself did).
+			if (crd.da.getBaseObjectID(plugAm) === mixBase) { if (meterScans < 1) out('[CubaseSixty UF1] METER: ' + crd.name + ': the VST Mixer again'); continue }
 			var before = list.length
 			meterList(crd.da, crd.name, list, ssl)
 			// A Meter in the Control Room carries the channel's name as the plug-in announces it ("Monitor 1").
