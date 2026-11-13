@@ -94,7 +94,8 @@ Cubase-Sixty runs in the tray, whether Cubase is open or not. The icon's colour 
 - **Click the icon** for the Settings page (in your browser); **right-click** for the menu: Settings, User guide,
   Restart bridge, Open logs folder, Start with Windows, USB driver, Quit.
 - Start order does not matter, and controllers can be plugged in and unplugged at any time.
-- Closing a project blanks the displays; the faders stay where they are.
+- Closing a project, or quitting Cubase-Sixty, blanks the displays and puts the faders at 0 dB. (Cubase-Sixty
+  learns where 0 dB is from a track at 0.00 dB; until it has seen one, the faders stay where they are.)
 - After **Restart bridge**, Cubase finds it again by itself within some seconds. If the controllers stay on "Waiting
   for Cubase" for long, restart Cubase.
 - After Cubase's own *Reload Scripts*, a surface can behave oddly: restart Cubase.

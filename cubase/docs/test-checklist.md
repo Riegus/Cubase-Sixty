@@ -16,7 +16,8 @@ Quick: Cubase starts, all surfaces show the project.
 
 - Script console: no errors after a Cubase start (Reload Scripts can show "DukValue is uninitialized" from Cubase).
 - scripts.log: each script's "script loaded"; the UF1's "loaded to the end".
-- Close the project (Hub): "No Project" on the surfaces; reopen: everything back.
+- Close the project (Hub): "No Project" on the surfaces, the UF8 and UF1 faders at 0 dB; reopen: everything back,
+  faders on the tracks' levels. Quit from the tray: faders at 0 dB.
 - Restart the bridge from the tray: surfaces "Waiting for Cubase", then back by themselves.
 
 ## UF8

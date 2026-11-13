@@ -98,6 +98,7 @@ void note(uint8_t n, bool on) { sendMidi({uint8_t(on ? 0x90 : 0x80), n, uint8_t(
 int g_bypassState = 0;   // from the script (note 62): 0 no inserts, 1 inserts active, 2 all bypassed
 std::mutex g_cellMx;   // the cells are filled on the MIDI thread and drawn from the painter and the USB thread
 std::string g_trackName;   // the selected track's name (SysEx 01), under g_cellMx
+std::string g_levelNow;    // the fader's level text (SysEx 03), under g_cellMx: for learning where 0 dB is
 bool g_shift = false, g_sends58 = false, g_master = false, g_flip = false, g_scrub = false, g_shuttle = false;   // UF1 key states (touched on the USB thread)
 bool g_modeHeld = false;     // MODE held: the four display soft keys show the view picker
 // The MODE view: the soft key that picks it (0 PLUGIN = V-pots on Quick Controls, 1 DAW = V-pots on the sends,
@@ -1380,7 +1381,7 @@ void uf1NoProject(const char* label = "No Proj.")
     name.push_back(0xF7);
     std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, 0x00, 0, 0, 0, 0xF7};
     std::vector<unsigned char> level{0xF0, 0x7D, 0x52, 0x36, 0x03, ' ', 0xF7};
-    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0};   // (the fader stays where it is, as on the UF8)
+    std::vector<unsigned char> meterL{0xB0, kCcMeter, 0}, meterR{0xB0, uint8_t(kCcMeter + 1), 0};
     onMidiIn(name);
     onMidiIn(colour);
     onMidiIn(level);
@@ -1391,6 +1392,9 @@ void uf1NoProject(const char* label = "No Proj.")
     onMidiIn(time);
     if (first) { std::lock_guard<std::mutex> lk(g_cacheMx); g_npBlanked = g_cache; }
     valueHome("");
+    // The fader to 0 dB (as the UF8's; 13.11.2026, they used to stay where they were). Not into the cache: what
+    // Cubase sent before the close goes back when the project opens.
+    if (const int z = fader0dbPos(); z >= 0 && !g_touched) motorTo(uint16_t(z));
     // Only "No Proj." on the strip display: no BYPASS label, channel number, plug-in model or V-pot bar.
     g_noProject = true;
     screenText(::uf1::scr::kChSoftKey, "");
@@ -1669,6 +1673,8 @@ void onSysex(const std::vector<unsigned char>& m)
     } else if (m[4] == 0x03) {
         std::string v;
         for (size_t i = 5; i + 1 < m.size(); ++i) v.push_back(char(m[i]));
+        { std::lock_guard<std::mutex> lk(g_cellMx); g_levelNow = v; }
+        if (!g_flip && !g_stripFader && !g_noProject) fader0dbSeen(v, g_volPos);
         std::vector<uint8_t> p;
         p.push_back(0x00);
         for (size_t k = 0; k < 6; ++k) p.push_back(k < v.size() ? uint8_t(v[k]) : 0x00);
@@ -1708,6 +1714,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
     if (status == 0xE0 && (m[0] & 0x0F) == 0) {   // fader from Cubase
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
         g_volPos = v;
+        if (!g_flip && !g_stripFader && !g_noProject) { std::string t; { std::lock_guard<std::mutex> lk(g_cellMx); t = g_levelNow; } fader0dbSeen(t, v); }
         if (g_touched || g_stripFader) return;
         const uint16_t pos = uf1m::midi14ToPos15(v);
         bool first;
@@ -1924,7 +1931,7 @@ void uf1Stop()
 {
     if (!g_open) return;
     uf1NoProject("Off");   // blank, as with no project, before letting go
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    std::this_thread::sleep_for(std::chrono::milliseconds(800));   // (the fader to 0 dB)
     g_dev.close();
     g_open = false;
 }
@@ -2024,6 +2031,48 @@ bool uf1Connect(bool quiet)
     startIdleCycle();
     std::printf("UF1 connected (serial %s).\n", g_dev.serial().c_str());
     return true;
+}
+
+// 0 dB on the faders (see Uf1Bridge.h). Each sighting is counted, and the position seen most often wins: a text and
+// a position can arrive out of step while a fader moves past 0 dB.
+namespace {
+std::mutex g_zeroMx;
+std::map<int, int> g_zeroSeen;
+int g_zeroPos = -2;   // -2: not read from the file yet
+void zeroLoad()   // (g_zeroMx held)
+{
+    if (g_zeroPos != -2) return;
+    g_zeroPos = -1;
+    std::ifstream in(settings::dir() / "fader-0db.txt");
+    int v = -1;
+    if (in >> v && v >= 0 && v <= 16383) { g_zeroPos = v; g_zeroSeen[v] = 3; }
+}
+} // namespace
+void fader0dbSeen(const std::string& text, int pos14)
+{
+    {   // the first few texts, to see what Cubase sends while 0 dB is not known
+        static std::atomic<int> said{0};
+        if (g_zeroPos < 0 && said < 6 && !text.empty()) { ++said; std::printf("Faders: level text \"%s\" at %d\n", text.c_str(), pos14); }
+    }
+    if (pos14 < 0 || pos14 > 16383) return;
+    std::string t;   // (spaces and a "dB" left out: Cubase's texts come with and without, e.g. "0.00dB")
+    for (char c : text) if (c != ' ') t.push_back(c);
+    if (t.size() >= 2 && (t.compare(t.size() - 2, 2, "dB") == 0 || t.compare(t.size() - 2, 2, "db") == 0)) t.resize(t.size() - 2);
+    if (t != "0.00" && t != "0.0" && t != "0" && t != "+0.00" && t != "-0.00") return;
+    std::lock_guard<std::mutex> lk(g_zeroMx);
+    zeroLoad();
+    const int n = ++g_zeroSeen[pos14];
+    // (Twice at least: the first test learnt 6256 from a fader moving past 0 dB, then 12928 from two still ones.)
+    if (n < 2 || pos14 == g_zeroPos || (g_zeroPos >= 0 && n <= g_zeroSeen[g_zeroPos])) return;
+    g_zeroPos = pos14;
+    std::ofstream(settings::dir() / "fader-0db.txt") << pos14 << "\n";
+    std::printf("Faders: 0 dB is at %d (of 16383)\n", pos14);
+}
+int fader0dbPos()
+{
+    std::lock_guard<std::mutex> lk(g_zeroMx);
+    zeroLoad();
+    return g_zeroPos;
 }
 
 } // namespace cs
