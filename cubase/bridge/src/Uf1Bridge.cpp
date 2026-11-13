@@ -2062,7 +2062,8 @@ void fader0dbSeen(const std::string& text, int pos14)
     std::lock_guard<std::mutex> lk(g_zeroMx);
     zeroLoad();
     const int n = ++g_zeroSeen[pos14];
-    if (pos14 == g_zeroPos || (g_zeroPos >= 0 && n <= g_zeroSeen[g_zeroPos])) return;
+    // (Twice at least: the first test learnt 6256 from a fader moving past 0 dB, then 12928 from two still ones.)
+    if (n < 2 || pos14 == g_zeroPos || (g_zeroPos >= 0 && n <= g_zeroSeen[g_zeroPos])) return;
     g_zeroPos = pos14;
     std::ofstream(settings::dir() / "fader-0db.txt") << pos14 << "\n";
     std::printf("Faders: 0 dB is at %d (of 16383)\n", pos14);

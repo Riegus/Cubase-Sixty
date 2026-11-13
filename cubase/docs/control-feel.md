@@ -84,7 +84,8 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   pitch bend is ignored altogether (it is the placeholder binding's).
 - **Closing a project / stopping the bridge puts the faders at 0 dB** (13.11.2026; before: all eight to the bottom
   at once was loud, then they stayed where they were). Where 0 dB is, the bridge learns from the faders (a level
-  text of 0.00 with its position, the position seen most often; kept in `cubase\fader-0db.txt`); until it is
+  text of 0.00 with its position, the position seen most often and at least twice: a fader moving past 0 dB once
+  gave 6256 instead of 12928; kept in `cubase\fader-0db.txt`); until it is
   known they stay put. The cache keeps Cubase's values, so they go back when the project opens.
 - "Touch selects the track" is a setting.
 
