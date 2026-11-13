@@ -165,8 +165,10 @@ void paintVpots();
 // (MIDI channel 2, notes 0-5, or the Page notes for Bank by 1). Picked as in Rea-Sixty: hold the encoder's push
 // (id 0x76) and turn; the scribble strips list the modes, the current one on strip 4 with its top soft key lit;
 // letting go keeps the mode. NAV (0x73) and NUDGE (0x74) switch to Markers / Nudge directly and back (lit while on).
-enum { kEncSelect = 0, kEncNudge, kEncMarkers, kEncBank, kEncCsFav, kEncBcFav, kEncModes };
-const char* const kEncNames[kEncModes] = { "Ch Sel", "Nudge", "Markers", "Bank 1", "CS Fav", "BC Fav" };
+// Mouse (FOCUS, 13.11.2026): the value under Cubase's mouse pointer (as Steinberg's AI knob; Rea-Sixty: the last
+// touched parameter), stepped by the UF8 script (SysEx 2D).
+enum { kEncSelect = 0, kEncNudge, kEncMarkers, kEncBank, kEncCsFav, kEncBcFav, kEncMouse, kEncModes };
+const char* const kEncNames[kEncModes] = { "Ch Sel", "Nudge", "Markers", "Bank 1", "CS Fav", "BC Fav", "Mouse" };
 std::atomic<int> g_encMode{kEncSelect};
 std::atomic<bool> g_encHeld{false};
 int g_encPick = 0;
@@ -433,6 +435,14 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
+        if (d[3] == 0x75) {   // FOCUS: the encoder on the value under the mouse pointer, on and off
+            if (pressed) {
+                g_encMode = g_encMode == kEncMouse ? kEncSelect : kEncMouse;
+                paintEncLeds();
+                std::printf("UF8 FOCUS: encoder on %s\n", g_encMode == kEncMouse ? "the value under the mouse" : "Ch Sel");
+            }
+            break;
+        }
         if (d[3] == 0x74) {   // NUDGE: Nudge on and off
             if (pressed) {
                 g_encMode = g_encMode == kEncNudge ? kEncSelect : kEncNudge;
@@ -564,6 +574,14 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             const bool right = delta > 0;
             const int mode = g_encMode;
+            if (mode == kEncMouse) {
+                // The script steps the value under the mouse in Cubase's steps: about 0.4 % of the range each (measured
+                // 13.11.2026), so one a notch took 250 notches end to end. Four a notch (about 1.6 %, as the V-pots);
+                // FINE: one.
+                const int steps = delta * (fineOn() ? 1 : 4);
+                sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2D, uint8_t(steps > 0 ? 1 : 0), uint8_t(std::min(std::abs(steps), 32)), 0xF7});
+                break;
+            }
             for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
                 if (mode == kEncBank) { note(right ? kNotePageRight : kNotePageLeft, true); note(right ? kNotePageRight : kNotePageLeft, false); continue; }
                 if (mode == kEncCsFav || mode == kEncBcFav) { cs::uc1FavouriteStep(mode == kEncBcFav, right ? 1 : -1); continue; }
@@ -769,6 +787,7 @@ void paintEncLeds()
     if (g_noProject) return;
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nav, g_encMode == kEncMarkers));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nudge, g_encMode == kEncNudge));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Focus, g_encMode == kEncMouse));
     paintPanFine();
 }
 void paintSelMode()
@@ -837,7 +856,7 @@ void uf8NoProject()
     }
     using L = uf8::Uf8GlobalLed;
     for (L l : {L::Quick1, L::Quick2, L::VPotBank, L::Soft1, L::Soft2, L::Soft3, L::Soft4, L::Soft5,
-                L::Norm, L::Rec, L::Auto, L::Nav, L::Nudge, L::Plugin, L::Pan, L::Fine})
+                L::Norm, L::Rec, L::Auto, L::Nav, L::Nudge, L::Plugin, L::Pan, L::Fine, L::Focus})
         sendLedFrames(uf8::buildUf8GlobalLed(l, false));
 }
 // A project is open again: the bridge's own keys as they were.

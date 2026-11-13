@@ -30,8 +30,8 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
   auto-follow, the UC1 / UF1 parts.
 - **Two UF8s** (16 strips); **the UF1 as an extender** (a 9th fader) and Pin Set.
 - **Solo / Mute modifier modes**, the **MIDI CC layer**, the **layer keys**.
-- Keys without a function (13.11.2026): Q3, LAYER 1-3, FOCUS (Rea-Sixty: the encoder on the last touched
-  parameter; to try: Cubase's value under the mouse pointer). PAN, FINE and 360 are done; FINE is not a Shift
+- Keys without a function (13.11.2026): Q3, LAYER 1-3. FOCUS puts the encoder on the value under Cubase's mouse
+  pointer (Rea-Sixty: the last touched parameter, which Cubase does not offer). PAN, FINE and 360 are done; FINE is not a Shift
   modifier here (no key layers).
 - **Show only armed tracks** (AUTO: only tracks armed for writing; also "only record-enabled tracks", on the pending
   list).

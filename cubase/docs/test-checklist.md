@@ -31,7 +31,8 @@ Quick: banking, SEL, a fader, a V-pot.
   strip's window opens / closes (no SSL strip: the channel editor; setting = editor: always the editor); the first press on another track only selects.
 - PAN (V-pots back on pan from a soft-key parameter, the V-pot send view, FLIP; lit on pan); FINE (held and
   latched: pan, a focused parameter, a send level move a quarter as far); 360 opens the Settings page.
-- CHANNEL encoder: each mode (hold its push and turn); zoom pad.
+- CHANNEL encoder: each mode (hold its push and turn); zoom pad. FOCUS: the encoder on the value under the
+  mouse pointer (a plug-in knob, a MixConsole fader); FOCUS lit; about as fast as a V-pot on pan; FINE a quarter.
 
 ## UF1
 
