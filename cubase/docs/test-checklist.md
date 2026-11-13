@@ -26,7 +26,7 @@ Quick: banking, SEL, a fader, a V-pot.
 - Bank left / right, Page left / right; banking ends at the first / last track.
 - Follow selection: select a track in Cubase off the strips; the UF8 banks to it.
 - Faders: volume, touch; FLIP; send views (the route keys); SSL Strip Mode (PLUGIN).
-- V-pots: pan; push; the top soft keys (SSL soft keys, Q1 / Q2, pages); Nav Mode (NAV held 1 s), NAV tap.
+- V-pots: pan; push (centres the pan; Settings > Behaviour > UF8 V-pot push = editor: the channel editor); the top soft keys (SSL soft keys, Q1 / Q2, pages); Nav Mode (NAV held 1 s), NAV tap.
 - SOLO / CUT / SEL with LEDs; REC / AUTO selection modes.
 - PAN (V-pots back on pan from a soft-key parameter, the V-pot send view, FLIP; lit on pan); FINE (held and
   latched: pan, a focused parameter, a send level move a quarter as far); 360 opens the Settings page.

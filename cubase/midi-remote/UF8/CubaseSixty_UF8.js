@@ -232,6 +232,7 @@ function paintStripName(activeDevice, index) {
 var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
 var trackDb = [], dbResend = []
 var trackPan = [], panResend = [], stripPanShow = []
+var panCentre = []
 for (var i = 0; i < STRIPS; ++i) {
 	var channel = bankZone.makeMixerBankChannel()
 	var strip = strips[i]
@@ -242,6 +243,10 @@ for (var i = 0; i < STRIPS; ++i) {
 		.setValueTakeOverModeJump().setSubPage(faderPan)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(vpotPan)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(vpotVol)
+	// The V-pot push can centre the pan (SysEx 2B from the bridge; the setting "V-pot push"): through Direct Access where
+	// the channel shows a pan parameter, else through this variable, which is only written.
+	panCentre[i] = surface.makeCustomValueVariable('panCentre' + i)
+	page.makeValueBinding(panCentre[i], channel.mValue.mPan)
 	// (Send levels go through Direct Access, see "Send views" below: the send's on switch is only a placeholder, a
 	// control needs a binding in every sub page.)
 	page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mOn).setSubPage(vpotSends)
@@ -939,7 +944,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
-	if (m[4] >= 0x21 && m[4] <= 0x2A) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
+	if (m[4] >= 0x21 && m[4] <= 0x2B) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
@@ -1305,6 +1310,32 @@ function skMessage(activeDevice, m) {
 		st.vSettleAt = nowT + 600   // (the bridge draws the ring itself for 0.5 s after a turn: then Cubase's value once)
 		da.setParameterProcessValue(skAm, st.vObj, st.vTag, next)
 		stripPanSend(activeDevice, pi)
+		return
+	}
+	if (m[4] === 0x2B && m.length >= 7) {   // V-pot push on the track's own pan: centre it
+		var bi = m[5]
+		if (bi >= STRIPS) return
+		var how = 'nothing found'
+		try {
+			var bda = skDa[bi], bbase = bda && skAm ? bda.getBaseObjectID(skAm) : -1, btag = -1, seen = []
+			if (bbase >= 0) {
+				var bn = bda.getNumberOfParameters(skAm, bbase)
+				for (var bk = 0; bk < bn && bk < 64; ++bk) {
+					var bt = bda.getParameterTagByIndex(skAm, bbase, bk)
+					var btitle = String(bda.getParameterTitle(skAm, bbase, bt, 32))
+					seen.push(btitle)
+					if (btag < 0 && /^pan(orama)?( left-right)?$/i.test(btitle)) btag = bt
+				}
+			}
+			if (btag >= 0) { bda.setParameterProcessValue(skAm, bbase, btag, 0.5); how = 'Direct Access' }
+			else {
+				// Twice: a variable that already holds 0.5 (from the last time) may not pass the same value on.
+				panCentre[bi].setProcessValue(activeDevice, 0.5001)
+				panCentre[bi].setProcessValue(activeDevice, 0.5)
+				how = 'value variable (channel parameters: ' + seen.join(', ') + ')'
+			}
+		} catch (e) { how = 'failed: ' + e }
+		out('[CubaseSixty] V-pot push, strip ' + (bi + 1) + ': pan to the centre through ' + how)
 		return
 	}
 	if (m[4] === 0x29 && m.length >= 7) {   // V-pot push: centre the plug-in's pan; on a send: the send on / off

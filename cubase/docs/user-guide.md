@@ -129,7 +129,7 @@ Eight strips on a bank of the MixConsole's channels.
 |---------|--------------|
 | Fader | The track's volume, with touch: Touch and Latch automation write while your finger is on it. |
 | Display | Track name and colour, the level in dB, a stereo meter, and a value line (pan, or what the V-pot is on). |
-| V-pot | Pan, with a position bar on the display. **Push: opens / closes the track's channel editor.** |
+| V-pot | Pan, with a position bar on the display. **Push: centres the pan** (Settings > Behaviour can make it open the track's channel editor instead). |
 | SOLO, CUT | Solo and mute. |
 | SEL | Selects the track (see [What SEL does](#what-sel-does-norm-rec-auto) for the other two modes). |
 | Top soft key | A control of the track's SSL channel strip (see [The top soft keys](#the-top-soft-keys-your-ssl-channel-strips)). |
@@ -462,7 +462,7 @@ is saved and takes effect at once.
 | Section | What is there |
 |---------|---------------|
 | Devices | Which surfaces are connected and whether Cubase is; key / LED and display brightness; sleep when idle. |
-| Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; what the UF1's BYPASS key does with inserts that were bypassed already; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
+| Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; what a UF8 V-pot push does; what the UF1's BYPASS key does with inserts that were bypassed already; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
 | UC1 keys | What the magnifier, 360° and secondary encoder push do. |
 | UC1 on Cubase's strip | Whether the knobs / keys load a missing gate or compressor; which compressor DYN IN loads; which bus comp the Bus Comp section starts on. |
 | Display | How long track names are shortened; the UC1's 7-segment leading zeros. |

@@ -112,6 +112,8 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
 
 ## Encoders and knobs
 
+- **UF8 V-pot push** (13.11.2026): centres the pan, as Rea-Sixty (a setting gives back the channel editor).
+
 - **UF8 FINE** (13.11.2026): a quarter of the way while held (double press latches). A value the bridge keeps (a
   send level) takes a quarter step; values Cubase or the script counts (pan, a focused parameter, strip pan) get
   one whole step for every four, the rest kept until the direction changes.
