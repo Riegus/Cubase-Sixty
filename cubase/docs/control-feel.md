@@ -112,6 +112,10 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
 
 ## Encoders and knobs
 
+- **UF8 FINE** (13.11.2026): a quarter of the way while held (double press latches). A value the bridge keeps (a
+  send level) takes a quarter step; values Cubase or the script counts (pan, a focused parameter, strip pan) get
+  one whole step for every four, the rest kept until the direction changes.
+
 - The UC1's knob step is a setting (SysEx 4E to the script).
 - The CHANNEL encoders step tracks by selecting the next channel directly (the Helper script), not by counting
   Cubase's next / previous track: see banking.md.

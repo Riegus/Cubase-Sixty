@@ -19,5 +19,7 @@ namespace cs::settingsServer {
 bool start(std::function<std::string()> status, std::function<void()> favouritesSaved, const std::string& logsDir,
            std::function<void(const std::string&)> changed);
 void stop();
+// Opens the page in the browser (the UF8's 360 key). False when the server is not running.
+bool openInBrowser();
 
 } // namespace cs::settingsServer

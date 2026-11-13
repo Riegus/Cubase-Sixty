@@ -246,12 +246,23 @@ void driveFader(int s, uint16_t v14)
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
 long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 void note2(uint8_t n) { sendMidi({0x91, n, 127}); sendMidi({0x81, n, 0}); }
+// FINE: the V-pots move a quarter as far while it is held; a double press latches it (a press unlatches).
+// PAN: the V-pots back on pan (out of a focused soft-key parameter, the V-pot send view and FLIP); lit while they are.
+std::atomic<bool> g_fineHeld{false}, g_fineLatched{false};
+bool fineOn() { return g_fineHeld || g_fineLatched; }
+void paintPanFine()
+{
+    if (g_noProject) return;
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Pan, g_focus < 0 && !g_routeSelSends && !g_routeFlip));
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Fine, fineOn()));
+}
 void unfocus()
 {
     g_focus = -1;
     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x21, 0x7F, 0x7F, 0xF7});
     paintSoftKeys();
     paintVpots();
+    paintPanFine();
 }
 void applyRoute()
 {
@@ -266,6 +277,7 @@ void applyRoute()
         uf8::Uf8GlobalLed::SendPlugin8 };
     for (int i = 0; i < 8; ++i) sendLedFrames(uf8::buildUf8GlobalLed(sp[i], i == send));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Flip, flip || sel));
+    paintPanFine();
     if (g_trace8) std::printf("UF8 route: faders %s, V-pots %s\n", send >= 0 ? ("send " + std::to_string(send + 1)).c_str() : flip ? "pan" : "volume",
                               sel ? "selected track's sends" : flip ? "volume" : "pan");
 }
@@ -350,6 +362,30 @@ void handleFrame(const uf8frames::Frame& fr)
                 sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Plugin, g_stripMode));
                 if (g_trace8) std::printf("UF8 SSL Strip Mode %s\n", g_stripMode ? "on" : "off");
             }
+            break;
+        }
+        if (d[3] == 0x6E) {   // PAN: the V-pots back on pan
+            if (pressed) {
+                if (g_focus >= 0) unfocus();
+                if (g_routeSelSends || g_routeFlip) { g_routeSelSends = false; g_routeFlip = false; applyRoute(); }
+                paintPanFine();
+                std::printf("UF8 PAN: V-pots on pan\n");
+            }
+            break;
+        }
+        if (d[3] == 0x6F) {   // FINE: held = fine V-pot steps; pressed twice within 0.4 s = latched; a press unlatches
+            static long long lastDown = 0;
+            if (pressed) {
+                const long long now = nowMs8();
+                if (g_fineLatched) { g_fineLatched = false; lastDown = 0; }
+                else { g_fineHeld = true; if (now - lastDown < 400) g_fineLatched = true; lastDown = now; }
+            } else g_fineHeld = false;
+            paintPanFine();
+            if (pressed || !g_fineLatched) std::printf("UF8 FINE %s\n", g_fineLatched ? "latched" : fineOn() ? "held" : "off");
+            break;
+        }
+        if (d[3] == 0x46) {   // 360: the Settings page in the browser
+            if (pressed) std::printf("UF8 360: Settings page %s\n", cs::settingsServer::openInBrowser() ? "opened" : "not available");
             break;
         }
         if (d[3] == 0x51) {   // CHANNEL (left panel): home, the strips back on track volume and pan
@@ -439,6 +475,7 @@ void handleFrame(const uf8frames::Frame& fr)
             if (g_trace8) std::printf("UF8 soft key: %s\n", f < 0 ? "focus off (pan)" : skLabelOfKey(f));
             paintSoftKeys();
             paintVpots();
+            paintPanFine();
             break;
         }
         // Strip mode: centre the strip's pan; the V-pot send view: the selected track's send on / off (always the script's
@@ -513,8 +550,22 @@ void handleFrame(const uf8frames::Frame& fr)
             break;
         }
         if (s >= kStrips) return;
-        const int delta = uf8frames::vpotDelta(d[4]);
-        if (delta == 0) break;
+        const int raw = uf8frames::vpotDelta(d[4]);
+        if (raw == 0) break;
+        // FINE: a quarter of the way. A send level (kept here) takes a quarter step; the others go on as whole steps,
+        // one for every four (the rest kept for the next frame; it starts again when the direction changes).
+        const bool fine = fineOn();
+        const bool sendTurn = g_focus < 0 && g_routeSelSends && g_routeSend < 0;
+        int delta = raw;
+        if (fine && !sendTurn) {
+            static int acc[8] = {};
+            if ((acc[s] > 0 && raw < 0) || (acc[s] < 0 && raw > 0)) acc[s] = 0;
+            acc[s] += raw;
+            delta = acc[s] / 4;
+            acc[s] -= delta * 4;
+            if (delta == 0) break;
+        }
+        const double sendStep = raw / (fine ? 400.0 : 100.0);
         if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
         else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) {   // strip mode's pan; a send (V-pot send view)
             const bool sends = g_routeSelSends && g_routeSend < 0;
@@ -525,7 +576,7 @@ void handleFrame(const uf8frames::Frame& fr)
                 // The V-pot send view: the bridge keeps the level, shows it at once and sends the script the level
                 // itself (2A <strip> <msb> <lsb>), not the step: counted on both sides, the two drifted apart and the
                 // settled value came as a small correction (12.11.2026).
-                const double v = std::clamp(g_selSendVal[s].load() + delta / 100.0, 0.0, 1.0);
+                const double v = std::clamp(g_selSendVal[s].load() + sendStep, 0.0, 1.0);
                 const int v14 = int(std::lround(v * 16383.0));
                 // At most one level every 60 ms, the last one always: at 30-40 a second Cubase gave the script 2 idle
                 // ticks a second instead of 10 and the MixConsole trailed; up to about 20 it kept up (12.11.2026).
@@ -692,6 +743,7 @@ void paintEncLeds()
     if (g_noProject) return;
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nav, g_encMode == kEncMarkers));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Nudge, g_encMode == kEncNudge));
+    paintPanFine();
 }
 void paintSelMode()
 {
@@ -759,7 +811,7 @@ void uf8NoProject()
     }
     using L = uf8::Uf8GlobalLed;
     for (L l : {L::Quick1, L::Quick2, L::VPotBank, L::Soft1, L::Soft2, L::Soft3, L::Soft4, L::Soft5,
-                L::Norm, L::Rec, L::Auto, L::Nav, L::Nudge, L::Plugin})
+                L::Norm, L::Rec, L::Auto, L::Nav, L::Nudge, L::Plugin, L::Pan, L::Fine})
         sendLedFrames(uf8::buildUf8GlobalLed(l, false));
 }
 // A project is open again: the bridge's own keys as they were.
