@@ -944,7 +944,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
-	if (m[4] >= 0x21 && m[4] <= 0x2B) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
+	if (m[4] >= 0x21 && m[4] <= 0x2C) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
@@ -1007,11 +1007,12 @@ function skScan(index) {
 	st.model = null
 	st.bcObj = -1
 	st.bcModel = null
+	st.slot = -1
 	if (!da || !skAm) return
 	var base
 	try { base = da.getBaseObjectID(skAm) } catch (e) { return }
 	var seen = {}, count = 0
-	function rec(id, depth, parentType) {
+	function rec(id, depth, parentType, parentId) {
 		if ((st.obj >= 0 && st.bcObj >= 0) || count > 300 || seen[id]) return
 		seen[id] = true
 		++count
@@ -1025,14 +1026,19 @@ function skScan(index) {
 		}
 		for (var k = 0; k < SK_MODELS.length && !hit; ++k) if (title && title.indexOf(SK_MODELS[k][0]) >= 0) {
 			hit = true
-			if (SK_MODELS[k][1] && st.obj < 0) { st.obj = id; st.model = SK_MODELS[k][1] }
+			if (SK_MODELS[k][1] && st.obj < 0) {
+				st.obj = id; st.model = SK_MODELS[k][1]
+				// Its insert slot (slots are titled "1".."16"): for opening its window (SEL on the selected track).
+				if (parentType === 'Slot') { try { st.slot = parseInt(da.getObjectTitle(skAm, parentId), 10) - 1 } catch (e) {} }
+				if (!(st.slot >= 0 && st.slot < 16)) st.slot = -1
+			}
 		}
 		if (hit || depth >= 4 || (/Channel$/.test(parentType) && SK_SKIP[type])) return
 		var n = 0
 		try { n = da.getNumberOfChildObjects(skAm, id) } catch (e) { return }
-		for (var i = 0; i < n && i < 256; ++i) rec(da.getChildObjectID(skAm, id, i), depth + 1, type)
+		for (var i = 0; i < n && i < 256; ++i) rec(da.getChildObjectID(skAm, id, i), depth + 1, type, id)
 	}
-	rec(base, 0, '')
+	rec(base, 0, '', -1)
 }
 // The focused parameter on strip index: { da, obj, tag, kind } or null.
 function skTarget(index) {
@@ -1273,7 +1279,49 @@ if (selDa) {
 	selDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) { skAm = activeMapping; skRescanAt = Date.now() + 300 }
 }
 
+// SEL on the selected track (SysEx 2C <strip> from the bridge, the setting "UF8 SEL on the selected track" = ssl): the
+// window of the track's first SSL channel strip, through an insert viewer moved to its slot and checked by name (as the
+// UF1's encoder push). Without an SSL channel strip the bridge is asked to open the channel editor (2C <strip> back).
+var selWin = { viewer: null, state: null, open: 0, name: '', job: null }
+try {
+	selWin.viewer = routeSelected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtySelWindow')
+	selWin.state = surface.makeCustomValueVariable('selPluginWindow')
+	page.makeValueBinding(selWin.state, selWin.viewer.mEdit)
+	selWin.state.mOnProcessValueChange = function (activeDevice, value) { selWin.open = value }
+	selWin.viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { selWin.name = name || '' }
+} catch (e) { out('[CubaseSixty] SSL strip window switch could not be set up: ' + e) }
+function selWindowOpen(activeDevice, index) {
+	var st = skStrip[index], title = ''
+	if (st) { try { skScan(index) } catch (e) {} }
+	if (st && st.obj >= 0) { try { title = String(skDa[index].getObjectTitle(skAm, st.obj)) } catch (e) {} }
+	if (!st || st.obj < 0 || st.slot < 0 || !title || !selWin.viewer || !skAm) {
+		out('[CubaseSixty] SEL on the selected track, strip ' + (index + 1) + ': ' + (st && st.obj >= 0 ? 'SSL strip slot not known' : 'no SSL channel strip') + ', channel editor')
+		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x2C, index, 0xF7]))
+		return
+	}
+	try {
+		selWin.viewer.mAction.mReset.trigger(skAm)
+		for (var k = 0; k < st.slot; ++k) selWin.viewer.mAction.mNext.trigger(skAm)
+	} catch (e) { out('[CubaseSixty] SSL strip window: ' + e); return }
+	selWin.job = { title: title, at: Date.now() + 60, tries: 0 }
+}
+function selWinIdle(activeDevice) {
+	var job = selWin.job
+	if (Date.now() < job.at) return
+	// Not there yet: on by one slot (16 tries), then back by one (16 more).
+	if (selWin.name && job.title.indexOf(selWin.name) < 0 && selWin.name.indexOf(job.title) < 0 && job.tries < 32) {
+		++job.tries
+		job.at = Date.now() + 60
+		;(job.tries <= 16 ? selWin.viewer.mAction.mNext : selWin.viewer.mAction.mPrev).trigger(skAm)
+		return
+	}
+	selWin.job = null
+	if (job.tries >= 32) { out('[CubaseSixty] SSL strip window: "' + job.title + '" not found in the inserts'); return }
+	out('[CubaseSixty] SSL strip window: "' + job.title + '", ' + (selWin.open >= 0.5 ? 'closing' : 'opening'))
+	selWin.state.setProcessValue(activeDevice, selWin.open >= 0.5 ? 0 : 1)
+}
 function skMessage(activeDevice, m) {
+	if (m[4] === 0x2C && m.length >= 7) { selWindowOpen(activeDevice, m[5]); return }
 	if (m[4] === 0x24 && m.length >= 7) {
 		stripModeOn = m[5] !== 0
 		out('[CubaseSixty] SSL Strip Mode ' + (stripModeOn ? 'on' : 'off'))
@@ -1409,6 +1457,7 @@ function sendViewPoll(activeDevice) {
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	skAm = activeMapping
+	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
 	if (route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
