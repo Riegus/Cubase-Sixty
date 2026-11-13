@@ -2050,6 +2050,10 @@ void zeroLoad()   // (g_zeroMx held)
 } // namespace
 void fader0dbSeen(const std::string& text, int pos14)
 {
+    {   // the first few texts, to see what Cubase sends while 0 dB is not known
+        static std::atomic<int> said{0};
+        if (g_zeroPos < 0 && said < 6 && !text.empty()) { ++said; std::printf("Faders: level text \"%s\" at %d\n", text.c_str(), pos14); }
+    }
     if (pos14 < 0 || pos14 > 16383) return;
     std::string t;   // (spaces and a "dB" left out: Cubase's texts come with and without, e.g. "0.00dB")
     for (char c : text) if (c != ' ') t.push_back(c);
