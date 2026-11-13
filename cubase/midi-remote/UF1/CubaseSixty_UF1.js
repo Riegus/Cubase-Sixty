@@ -1064,13 +1064,13 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 				viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) {
 					slot.present = !!name
 					identityAt = Date.now()
-					out('[CubaseSixty UF1] bypass: slot ' + (index + 1) + (name ? ' holds "' + name + '"' : ' is empty'))
+					dbg('bypass: slot ' + (index + 1) + (name ? ' holds "' + name + '"' : ' is empty'))
 					updateLed(activeDevice)
 				}
 				state.mOnProcessValueChange = function (activeDevice, value) {
 					slot.bypassed = value > 0.5
 					valueAt = Date.now()
-					out('[CubaseSixty UF1] bypass: slot ' + (index + 1) + ' reports ' + (slot.bypassed ? 'bypassed' : 'active'))
+					dbg('bypass: slot ' + (index + 1) + ' reports ' + (slot.bypassed ? 'bypassed' : 'active'))
 					updateLed(activeDevice)
 				}
 			})(slot, k)
