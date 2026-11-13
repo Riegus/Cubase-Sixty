@@ -484,6 +484,12 @@ void handleFrame(const uf8frames::Frame& fr)
             if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x29, uint8_t(d[3] - 0x08), 0xF7});
             break;
         }
+        // On the track's own pan: centre it (the setting "V-pot push"; as Rea-Sixty) or, as before 13.11.2026 and
+        // always under FLIP, the channel editor (the note below).
+        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && !g_routeFlip && cs::settings::get("uf8-vpot-push", "centre") == "centre") {
+            if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x2B, uint8_t(d[3] - 0x08), 0xF7});
+            break;
+        }
         if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus >= 0) {   // V-pot push with a focused parameter: to the script
             if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x23, uint8_t(d[3] - 0x08), 0xF7});
             break;
@@ -505,6 +511,19 @@ void handleFrame(const uf8frames::Frame& fr)
             if (g_selMode == kSelRec) { if (!g_noRec[s]) note(uint8_t(kNoteTopSoft + s), pressed); }
             else note(uint8_t(kNoteAutoSel + s), pressed);
             break;
+        }
+        if (d[3] >= 0x20 && d[3] <= 0x37 && (d[3] - 0x20) % 3 == 2) {
+            // SEL in NORM on the track that is selected already (its SEL lit): open / close its channel editor (the
+            // V-pot push's note; 13.11.2026, since the V-pot push centres the pan). The release goes the press's way.
+            static bool editor[8] = {};
+            const int s = (d[3] - 0x20) / 3;
+            if (pressed) editor[s] = g_selOn[s];
+            if (editor[s]) {
+                note(uint8_t(kNoteVPush + s), pressed);
+                if (pressed) std::printf("UF8 SEL on the selected track (strip %d): channel editor\n", s + 1);
+                if (!pressed) editor[s] = false;
+                break;
+            }
         }
         if (auto n = buttonToNote(d[3])) {
             // An unplugged foot-switch jack reports itself as "pressed" while the UF8 starts up,
