@@ -62,6 +62,10 @@
   .search { padding: 0 2px 12px; }
   .search input { width: 100%; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); font: inherit; font-size: 14px; }
   .search input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+  .filter { display: flex; gap: 6px; align-items: center; margin: 0 0 16px; flex-wrap: wrap; }
+  .filter .lbl { color: var(--muted); font-size: 14px; margin-right: 4px; }
+  .filter button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .surf { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .3px; padding: 0 6px; margin-left: 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); vertical-align: 2px; }
   .sec-tag { font-size: 12px; color: var(--muted); font-weight: normal; display: block; margin-bottom: 2px; }
   mark { background: #f5d76e; color: #1d1d1b; border-radius: 2px; padding: 0 1px; }
   .gone { padding: 40px; text-align: center; color: var(--muted); }
@@ -213,11 +217,52 @@ function sectionBody(id) {
       el("p", { class: "help" }, "SSL UF8, UF1 and UC1 in Cubase, ported from Rea-Sixty."),
       el("p", { class: "help" }, "Logs: ", el("code", {}, state.paths.logs)),
       el("p", { class: "help" }, "This page is served by the bridge on this computer only. The settings are kept in ", el("code", {}, "settings.txt"), " and ", el("code", {}, "favourites.txt"), " in ", el("code", {}, state.paths.settings || ""), "; editing those by hand works too.")));
+  } else if (id === "behaviour") {
+    // Which surfaces' behaviour to show (several at once); remembered in this browser.
+    const all = ["UF8", "UF1", "UC1"];
+    let shown = all.slice();
+    try { const v = JSON.parse(localStorage.getItem("cs-behaviour-surfaces")); if (Array.isArray(v)) shown = v.filter(x => all.includes(x)); } catch (e) {}
+    const list = el("div");
+    const bar = el("div", { class: "filter", role: "group", "aria-label": "Surfaces" }, el("span", { class: "lbl" }, "Show:"));
+    const fill = () => {
+      list.innerHTML = "";
+      const ds = state.settings.filter(d => d.section === "Behaviour")
+        .map(d => ({ d, s: surfacesOf(d) }))
+        .filter(x => x.s.some(s => shown.includes(s)));
+      ds.sort((a, b) => order(a.s) - order(b.s));   // the ones for all surfaces first, then UF8, UF1, UC1
+      for (const x of ds) {
+        const card = settingCard(x.d);
+        const h = card.querySelector("h2");
+        for (const s of x.s.length === 3 ? ["All surfaces"] : x.s) h.append(el("span", { class: "surf" }, s));
+        list.append(card);
+      }
+      if (!ds.length) list.append(el("div", { class: "gone" }, shown.length ? "Nothing for these surfaces." : "Pick one or more surfaces above."));
+    };
+    const order = s => s.length === 3 ? 0 : 1 + Math.min(...s.map(x => all.indexOf(x)));
+    for (const name of all) {
+      const b = el("button", { type: "button", "aria-pressed": String(shown.includes(name)) }, name);
+      b.addEventListener("click", () => {
+        shown = shown.includes(name) ? shown.filter(x => x !== name) : all.filter(x => x === name || shown.includes(x));
+        b.setAttribute("aria-pressed", String(shown.includes(name)));
+        try { localStorage.setItem("cs-behaviour-surfaces", JSON.stringify(shown)); } catch (e) {}
+        fill();
+      });
+      bar.append(b);
+    }
+    s.append(bar, list);
+    fill();
   } else {
     const title = sections.find(x => x.id === id).title;
     for (const d of state.settings.filter(d => d.section === title)) s.append(settingCard(d));
   }
   return s;
+}
+
+// The surfaces a setting is for: those its key or name names (UF8, UF1, UC1); none named = all three.
+function surfacesOf(d) {
+  const t = (d.key + " " + d.label).toUpperCase();
+  const s = ["UF8", "UF1", "UC1"].filter(x => t.includes(x));
+  return s.length ? s : ["UF8", "UF1", "UC1"];
 }
 
 // Search: every setting whose name, help, choices or section has the words, from all sections, with the words marked.

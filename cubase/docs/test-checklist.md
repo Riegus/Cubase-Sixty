@@ -70,6 +70,8 @@ Quick: the page opens from the tray; one setting changed shows at once.
 
 - Each section opens; a change is written to settings.txt and logged once. Search ("/"): matching settings from
   all sections, words marked; a choice changed from the results is saved; Escape clears.
+  Behaviour: the UF8 / UF1 / UC1 buttons show those surfaces' settings (several at once, kept after a reload);
+  the ones for all surfaces always.
 - Tray icon colours; menu items; Start with Windows.
 
 ## Installer and user guide
