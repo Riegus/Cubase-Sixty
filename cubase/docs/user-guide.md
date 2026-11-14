@@ -318,7 +318,8 @@ the send on / off. The **5–8** key puts them on sends 5–8. The small display
 turn.
 
 **The soft keys in DAW and SENDS** (the four keys under the display) jump to the **first, previous, next and last
-marker**, labelled. Settings > UF1 soft keys can put commands of your choice on them instead (undo, save, the
+marker**, labelled. (A marker exactly at the project start is passed over by First Marker, which then lands on the
+one after it; Prev Marker from there goes back to it.) Settings > UF1 soft keys can put commands of your choice on them instead (undo, save, the
 MixConsole, the locators and more), or leave them free for Cubase's **Mapping Assistant** (MIDI Remote): they are
 then labelled USER 1–4, and you assign them in Cubase:
 
