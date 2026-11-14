@@ -82,6 +82,10 @@ window follows and it reports the new value back). Other plug-ins in the Control
   new ports by itself. After a minute down with SSL plug-ins in the project (they start SSL360Core.exe, which makes
   ports of its own), Cubase stopped sending to the bridge; Reload Scripts only half helped, a Cubase restart did
   (10.11.2026). So there is no "Stop bridge" in the tray app.
+  14.11.2026: a short restart is not always fine either. Bridge down about 6 s (dev-restart -BridgeOnly): nothing
+  from Cubase for over 2 minutes; Reload Scripts brought back Cubase → surfaces only (the UF8 updated, its faders
+  and the UF1 reached nothing); a Cubase restart was needed. 13.11.2026: 9 minutes without Cubase after a restart.
+  To be investigated before the release (known-issues.md).
 - **Mackie Control's cursor keys do not select tracks**; its SELECT keys do, within its bank of eight
   (10.11.2026, timing test: see [banking.md](banking.md)).
 - **Send levels through MIDI Remote value bindings are slow.** While a bound send level keeps changing, Cubase

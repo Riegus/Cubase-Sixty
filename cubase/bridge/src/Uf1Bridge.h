@@ -14,7 +14,8 @@ void uf1SetTrace(bool on);
 void uf1LampTest();
 void uf1Stop();
 // No project now (Cubase gone without closing it), and what the strip says meanwhile: 1 "No Proj.", 2 "Waiting for
-// Cubase", 3 "Off" (as uf8IdleText in main.cpp).
+// Cubase", 3 "Off" (as uf8IdleText in main.cpp); 0 = a project is open: an idle text still shown as the track name
+// (no track selected) is blanked.
 void uf1NoProjectNow();
 void uf1IdleText(int kind);
 // From the main loop: lets go of a UF1 that stopped answering or was unplugged, and picks up one that is

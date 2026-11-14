@@ -1591,6 +1591,26 @@ void uf1NoProject(const char* label = "No Proj.")
         g_dev.send(::uf1::buildScreen(::uf1::scr::kBarStyle, std::span<const uint8_t>(&off, 1)));
     }
 }
+// The track name still an idle text ("No Proj." / "Waiting" / "Off": from the Hub, or drawn while the bridge started)
+// once a project is open: no track is selected, and Cubase sends no name then. Blank, until a track is selected
+// (14.11.2026: "No Proj." stayed on the small display with a project open).
+void blankIdleName()
+{
+    // What is SHOWN, not the last name message: the script sends an empty name when nothing is selected, which
+    // leaves the display as it was (onSysex) but replaced "Waiting" in the cache (14.11.2026, after Reload Scripts).
+    std::string shown;
+    { std::lock_guard<std::mutex> lk(g_cellMx); shown = g_trackName; }
+    if (shown != "No Proj." && shown != "Waiting" && shown != "Off") return;
+    // Drawn here: an empty name from Cubase keeps the last track shown (onSysex), which is what is wrong.
+    { std::lock_guard<std::mutex> lk(g_cacheMx); g_cache[0x101] = {0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00, 0xF7}; }
+    { std::lock_guard<std::mutex> lk(g_cellMx); g_trackName.clear(); }
+    screenText(::uf1::scr::kTrackName, "");
+    // "for Cubase" under "Waiting" goes too.
+    bool waitingLine = false;
+    { std::lock_guard<std::mutex> lk(g_lineMx); waitingLine = g_homeText == "for Cubase"; }
+    if (waitingLine) valueHome("");
+    paintHeader(true);
+}
 // A project is open again: the strip display's own parts back (Cubase sends the rest).
 // Cubase does not send again what has not changed when the project opens (the level, pan, LEDs): what was shown
 // before the close is put back for every kind nothing new has arrived for since the blanking.
@@ -1609,6 +1629,7 @@ void uf1ProjectOpen()
         }
     }
     for (auto& mm : again) onMidiIn(mm);
+    blankIdleName();
     screenText(::uf1::scr::kChSoftKey, "BYPASS");
     showStripNumber();
     paintCsType(true);
@@ -2150,6 +2171,7 @@ void uf1Stop()
 void uf1NoProjectNow() { if (g_open) uf1NoProject(); }
 void uf1IdleText(int kind)
 {
+    if (g_open && kind == 0 && !g_noProject) { blankIdleName(); return; }   // a project is open
     if (!g_open || kind < 1 || kind > 3) return;
     const char* name = kind == 1 ? "No Proj." : kind == 2 ? "Waiting" : "Off";
     std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00};

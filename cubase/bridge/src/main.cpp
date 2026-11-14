@@ -1542,6 +1542,7 @@ int main(int argc, char** argv)
                 if (kind != shown) {
                     shown = kind;
                     if (kind) { uf8IdleText(kind); cs::uf1IdleText(kind); cs::uc1IdleText(kind); }
+                    else cs::uf1IdleText(0);   // a project open: the UF1's name not left on "No Proj." without a track
                 }
             }
         }

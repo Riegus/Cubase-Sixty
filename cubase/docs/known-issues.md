@@ -2,6 +2,15 @@
 
 Bugs seen in testing and noted for later. Each entry: what happens, where, and what is known about the cause.
 
+## Bridge
+
+- **Cubase does not reconnect reliably after a bridge restart** (14.11.2026). Bridge down about 6 s with Cubase and
+  a project open: Cubase sent nothing for over 2 minutes; Reload Scripts brought back only Cubase → surfaces (the
+  displays updated, faders, keys and the UF1 reached nothing); a Cubase restart fixed it. Matters for the release:
+  the tray app restarts a bridge that stops. To measure first: how long Cubase takes to see the new ports, in each
+  direction, with and without SSL plug-ins in the project; then whether the bridge can make Cubase look again, or
+  at least tell the user (the surfaces) what to do. See cubase-limitations.md (bridge outage).
+
 ## UF1
 
 - **V-pots not smooth: fixed on wip/uf1-vpot-test (10.11.2026), to be merged after the test checklist.** Cause: a
