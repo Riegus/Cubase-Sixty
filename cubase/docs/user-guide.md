@@ -357,6 +357,10 @@ The Meter's own settings are on the V-pots, as on SSL's UF1:
 The screens follow the Meter's settings: the bar scale (Digital Type), VU or PPM needles, the max needle, the RTA
 scale and selected band, and the loudness target, range and display type.
 
+The settings, FINE and PRESETS need the Meter in the **MixConsole** (on the Stereo Out, a group or a track). A Meter
+in the Control Room's inserts (Monitor 1, for example) is drawn on all screens, but Cubase does not let a controller
+reach its settings: the UF1 says "Only in MixConsole" above the V-pots.
+
 ### Transport and time
 
 - **Transport keys**: rewind, forward, stop, play, record, **cycle** and **click**, each with its LED.

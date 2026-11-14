@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.4-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.5-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -1540,32 +1540,10 @@ function meterOnSysex(activeDevice, m) {
 	}
 }
 
-// Where Meters can sit: the MixConsole, and the Control Room (a Meter on a monitor channel announces that channel's
-// name, e.g. "Monitor 1": found there on the first test, 13.11.2026, and nowhere in the MixConsole).
-// (Direct Access on the Control Room itself gives the VST Mixer, 13.11.2026: the Control Room's channels are tried
-// one by one: main, monitors 1-4, phones 1-2, cues 1-4.)
-var meterCr = null
-var meterCrs = []
-;(function () {
-	var cr = page.mHostAccess.mControlRoom
-	var hosts = [['Control Room main', function () { return cr.mMainChannel }]]
-	for (var i = 0; i < 4; ++i) (function (i) { hosts.push(['Monitor ' + (i + 1), function () { return cr.getMonitorChannelByIndex(i) }]) })(i)
-	for (var j = 0; j < 2; ++j) (function (j) { hosts.push(['Phones ' + (j + 1), function () { return cr.getPhonesChannelByIndex(j) }]) })(j)
-	for (var k = 0; k < 4; ++k) (function (k) { hosts.push(['Cue ' + (k + 1), function () { return cr.getCueChannelByIndex(k) }]) })(k)
-	for (var h = 0; h < hosts.length; ++h) {
-		try {
-			var host = hosts[h][1]()
-			// A Control Room channel by index had no object (#-1) on the first test, 13.11.2026: perhaps it is only
-			// resolved once something is bound to it. A value variable on its insert bypass, read only (never set).
-			if (h > 0 && host.mBypassInserts) {
-				var watch = surface.makeCustomValueVariable('meterCrWatch' + h)
-				page.makeValueBinding(watch, host.mBypassInserts)
-			}
-			meterCrs.push({ name: hosts[h][0], host: host, da: page.mHostAccess.makeDirectAccess(host) })
-		}
-		catch (e) { out('[CubaseSixty UF1] METER: no Direct Access to ' + hosts[h][0] + ': ' + e) }
-	}
-})()
+// Where Meters can be reached: the MixConsole only. A Meter in the Control Room's inserts (Monitor 1 ...) is out of
+// the MIDI Remote API's reach (14.11.2026: Direct Access on the Control Room gives the VST Mixer, on its channels by
+// index nothing, #-1, even with a value bound to them). Its screens still draw (the SSL 360 Core stand-in reads every
+// Meter); its settings cannot be changed from here.
 var meterScans = 0
 // Every SSL Meter under da's base, with its channel's MixConsole number (-1 in the Control Room) and name.
 function meterList(da, where, found, ssl) {
@@ -1605,67 +1583,14 @@ function meterFind(activeDevice) {
 	if (!plugAm) return
 	var list = [], ssl = []
 	if (stepMix) { try { meterList(stepMix, 'MixConsole', list, ssl) } catch (e) { out('[CubaseSixty UF1] METER: MixConsole walk: ' + e) } }
-	var mixBase = -1
-	try { if (stepMix) mixBase = stepMix.getBaseObjectID(plugAm) } catch (e) {}
-	for (var c = 0; c < meterCrs.length; ++c) {
-		var crd = meterCrs[c]
-		try {
-			// One that gives the whole VST Mixer again is not walked twice (as the Control Room itself did).
-			if (crd.da.getBaseObjectID(plugAm) === mixBase) { if (meterScans < 1) out('[CubaseSixty UF1] METER: ' + crd.name + ': the VST Mixer again'); continue }
-			var before = list.length
-			meterList(crd.da, crd.name, list, ssl)
-			// A Meter in the Control Room carries the channel's name as the plug-in announces it ("Monitor 1").
-			for (var q = before; q < list.length; ++q) if (!list[q].channel || list[q].channel === 'VST Mixer') list[q].channel = crd.name
-			if (meterScans < 1) {
-				var cb = crd.da.getBaseObjectID(plugAm), cty = '', cti = ''
-				try { cty = crd.da.getObjectTypeName(plugAm, cb) } catch (e) {}
-				try { cti = crd.da.getObjectTitle(plugAm, cb) } catch (e) {}
-				var rid = '?'
-				try { rid = crd.host.getRuntimeID(plugAm) } catch (e) {}
-				out('[CubaseSixty UF1] METER: ' + crd.name + ': #' + cb + ' [' + cty + '] "' + cti + '" (runtime ID ' + rid + '), ' + (list.length - before) + ' Meter(s)')
-				if (cb >= 0) {   // its tree, for the first test
-					var lines2 = []
-					var dump2 = function (id, depth) {
-						if (lines2.length >= 40) return
-						var ty = '', ti = '', nc = 0
-						try { ty = crd.da.getObjectTypeName(plugAm, id) } catch (e) {}
-						try { ti = crd.da.getObjectTitle(plugAm, id) } catch (e) {}
-						try { nc = crd.da.getNumberOfChildObjects(plugAm, id) } catch (e) {}
-						lines2.push(new Array(depth + 1).join('  ') + '#' + id + ' [' + ty + '] "' + ti + '" ' + nc + ' children')
-						if (depth < 4) for (var c2 = 0; c2 < nc && c2 < 30; ++c2) dump2(crd.da.getChildObjectID(plugAm, id, c2), depth + 1)
-					}
-					dump2(cb, 0)
-					for (var l2 = 0; l2 < lines2.length; ++l2) out('[CubaseSixty UF1] METER:   ' + crd.name + ' ' + lines2[l2])
-				}
-			}
-		} catch (e) { out('[CubaseSixty UF1] METER: ' + crd.name + ' walk: ' + e) }
-	}
-	if (++meterScans <= 1 && !list.length) {
-		out('[CubaseSixty UF1] METER: SSL objects seen: ' + (ssl.length ? ssl.join(', ') : 'none'))
-		// The Control Room's tree, to see where a Meter there would be (13.11.2026: not found on Monitor 1).
-		if (meterCr) {
-			try {
-				var crBase = meterCr.getBaseObjectID(plugAm), lines = []
-				function dump(id, depth) {
-					if (lines.length >= 60) return
-					var ty = '', ti = '', np = 0, nc = 0
-					try { ty = meterCr.getObjectTypeName(plugAm, id) } catch (e) {}
-					try { ti = meterCr.getObjectTitle(plugAm, id) } catch (e) {}
-					try { np = meterCr.getNumberOfParameters(plugAm, id) } catch (e) {}
-					try { nc = meterCr.getNumberOfChildObjects(plugAm, id) } catch (e) {}
-					lines.push(new Array(depth + 1).join('  ') + '#' + id + ' [' + ty + '] "' + ti + '" ' + np + ' params, ' + nc + ' children')
-					if (depth < 5) for (var c = 0; c < nc && c < 40; ++c) dump(meterCr.getChildObjectID(plugAm, id, c), depth + 1)
-				}
-				dump(crBase, 0)
-				for (var li = 0; li < lines.length; ++li) out('[CubaseSixty UF1] METER: Control Room ' + lines[li])
-			} catch (e) { out('[CubaseSixty UF1] METER: Control Room tree: ' + e) }
-		}
-	}
+	if (++meterScans <= 1 && !list.length) out('[CubaseSixty UF1] METER: no SSL Meter in the MixConsole (SSL plug-ins seen: ' + (ssl.length ? ssl.join(', ') : 'none') + ')')
 	var pick = null
 	for (var i = 0; i < list.length && !pick; ++i) if (meter.index > 0 && list[i].index === meter.index && list[i].channel === meter.name) pick = list[i]
 	for (var j = 0; j < list.length && !pick; ++j) if (meter.name && list[j].channel === meter.name) pick = list[j]
 	for (var k = 0; k < list.length && !pick; ++k) if (meter.index > 0 && list[k].index === meter.index) pick = list[k]
-	if (!pick && list.length === 1) pick = list[0]
+	// The only Meter, if the instance shown has no name yet (never a Meter elsewhere for one that is named: the V-pots
+	// would change another Meter than the one drawn, e.g. one in the Control Room).
+	if (!pick && list.length === 1 && !meter.name) pick = list[0]
 	var obj = pick ? pick.obj : -1
 	var what = pick ? pick.title + ' on "' + pick.channel + '" (' + pick.where + ', ' + pick.index + ')' : 'none'
 	var logLine = list.length + ' Meter(s), shown ' + meter.index + ' "' + meter.name + '" -> ' + what
@@ -1742,7 +1667,16 @@ function meterIdle(activeDevice) {
 	if (!meter.active || !plugAm) return
 	var now = Date.now()
 	if (now >= meter.findAt) meterFind(activeDevice)
-	if (meter.obj < 0 || now < meter.reportAt) return
+	if (meter.obj < 0) {
+		// A Meter that is shown but out of reach (the Control Room): say so above the V-pots.
+		var note = meter.name ? '0Only in\u0000MixConsole' : ''
+		if (meter.sentSlots[1] !== note) {
+			meter.sentSlots[1] = note
+			meterSend(activeDevice, [0x60, 1, 0].concat(note ? toAscii7('Only in').concat([0], toAscii7('MixConsole')) : [0]))
+		}
+		return
+	}
+	if (now < meter.reportAt) return
 	meter.reportAt = now + 250   // the plug-in's own window changes these too
 	try { meterReport(activeDevice) } catch (e) { meter.obj = -1; meter.findAt = 0 }   // (the plug-in was removed)
 }
