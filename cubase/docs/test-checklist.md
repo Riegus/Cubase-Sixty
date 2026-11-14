@@ -62,6 +62,11 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
   drawn, its settings on the V-pots (over SSL's protocol), the plug-in's window and the UF1's screens follow; PLAY and
   PRESETS work; a change in the plug-in's window shows on the UF1. Loudness: the readouts as the plug-in's (True Peak
   Max holds, "---" after RESET), the time labels under the history as the plug-in's; PPM readouts not below 0.0.
+- UF1 soft keys in DAW / SENDS: labelled First / Prev / Next / Last Marker and do that (First: the earliest marker,
+  also when it is not marker 1); Settings > UF1 soft keys = the list: the chosen commands and labels, changed at once; = the
+  Mapping Assistant: USER 1-4, assignable in Cubase; in PLUGIN / METER / with MODE held the keys do what they did.
+- UF1: the pan knob's push centres the pan (also on MASTER, and with FLIP); ◀ ▶ left of CYCLE go to the previous /
+  next marker (with SHIFT still Read / Write).
 - CHANNEL encoder steps tracks (MixConsole mode skips folders and hidden tracks); push opens / closes the plug-in
   window; SHIFT + turn steps the plug-ins.
 - BYPASS: bypasses all inserts and restores them; an insert bypassed beforehand stays bypassed (Settings >

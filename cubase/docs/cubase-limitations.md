@@ -22,6 +22,10 @@ window follows and it reports the new value back). Other plug-ins in the Control
   numbered commands: To Marker 1–9, Recall Cycle Marker 1–9, Locate Previous / Next Marker. So Nav Mode works by
   marker ID (an ID the project does not use does nothing), and "Recall Cycle Marker" only sets the locators (the
   cursor needs To Left Locator after it).
+- **The first marker.** No command goes to it. The UF1's First Marker goes to the project start, then Locate Next
+  Marker, which passes over a marker exactly at the cursor; and Locate Previous Marker with no marker before goes to
+  the project start, so a step back cannot tell the two apart (14.11.2026). A marker right at the project start is
+  therefore passed over.
 - **Receives.** No access to a channel's receives (no Receive views).
 - **Send pan and send solo.** A send slot has level, on / off and pre / post only.
 - **Project-wide solo state.** No "anything soloed" value: the Helper script counts the soloed channels itself.

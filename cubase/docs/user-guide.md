@@ -291,7 +291,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 |---------|--------------|
 | Fader | The selected track's volume, with touch. |
 | SOLO, CUT | Solo and mute. SEL shows the track's colour; bright while its channel editor is open. |
-| Knob above the fader | Pan. |
+| Knob above the fader | Pan. Push: the pan to the centre. |
 | Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
 | MASTER | Puts the strip on the main output instead of the selected track. Press again to return. |
 | FLIP | Swaps the fader and the pan knob. |
@@ -306,6 +306,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
   Controls).
 - **BANK ◂ ▸**: banks the UF8. Without a UF8 it moves the selection by eight tracks.
 - **SHIFT + ARROW**: the cursor one bar back / forward.
+- **◀ ▶** (the two keys left of CYCLE): the previous / next marker.
 
 ### The four views
 
@@ -315,6 +316,18 @@ view the UF1 starts in is a setting.
 **DAW** — the everyday view. The V-pots are the selected track's **sends 1–4**: turn for the level, push to switch
 the send on / off. The **5–8** key puts them on sends 5–8. The small display shows the send and its level while you
 turn.
+
+**The soft keys in DAW and SENDS** (the four keys under the display) jump to the **first, previous, next and last
+marker**, labelled. (A marker exactly at the project start is passed over by First Marker, which then lands on the
+one after it; Prev Marker from there goes back to it.) Settings > UF1 soft keys can put commands of your choice on them instead (undo, save, the
+MixConsole, the locators and more), or leave them free for Cubase's **Mapping Assistant** (MIDI Remote): they are
+then labelled USER 1–4, and you assign them in Cubase:
+
+1. Open the MIDI Remote tab (lower zone), pick **CubaseSixty - UF1** and click **Open Mapping Assistant**.
+2. Press the soft key on the UF1 (in DAW): it shows under "UF1 Control".
+3. **Browse Functions** and pick a command: it shows under "Cubase Function".
+4. Click **Apply Mapping**. The mapping is added to the "Selected track" page, beside Cubase-Sixty's own. (Do not add
+   a mapping page with **+**: the UF1 would then use that page instead, and lose everything else.)
 
 **SENDS** — the same four sends, but the big display shows all four at all times: where each goes, its level, and a
 bar. They follow the mouse and automation too.

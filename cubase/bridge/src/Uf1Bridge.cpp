@@ -40,6 +40,7 @@
 #include "ScriptLog.h"
 #include "Uf1Meter.h"
 #include "Uf1MeterSsl.h"
+#include "Uf1SoftKeys.h"
 #include "SslCoreImpersonator.h"
 #include "Uf1EqCurve.h"
 #include "SslPresets.h"
@@ -260,6 +261,8 @@ std::string alignedValueLine(const std::string& t)
 void valueTemporary(const std::string& t);
 void barTemporary(uint8_t pos, uint8_t style);
 void paintSoftKeys();
+bool softKeysOwn();
+void softKeyPress(int k, bool pressed);
 // The V-pots' page, from the view and 5-8: 53 / 54 = sends 1-4 / 5-8, 88 / 89 = Quick Controls 1-4 / 5-8.
 void sendVpotPage_(int view)
 {
@@ -593,6 +596,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
+        // ◀ ▶ in the quick-key row (without SHIFT): the previous / next marker (14.11.2026; with SHIFT they are Read /
+        // Write, above). The same notes as SHIFT + jog: Locate Previous / Next Marker.
+        if (ev.id == 0x30 || ev.id == 0x31) {
+            if (ev.pressed) { note(ev.id == 0x31 ? 80 : 79, true); note(ev.id == 0x31 ? 80 : 79, false); }
+            break;
+        }
         // SCRUB toggles the jog between nudging the cursor and Cubase's jog (scrubbing). LED on = scrub.
         // BYPASS (the key above the display). The script reports the state as note 62 (see onMidiIn) for the LED. A
         // press goes to the script (SysEx 1F), which decides (it has each slot's state for the selected track): it
@@ -665,6 +674,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1C) { g_presetsOpen = true; break; }
             // PLUGIN with an SSL plug-in, without MODE: the plug-in's switches on this page.
             if (ev.pressed && !g_modeHeld && plugActive()) { plugEvent(2, uint8_t(ev.id - 0x19), 0); break; }
+            // DAW and SENDS: markers, the commands chosen in Settings, or free for the Mapping Assistant.
+            if (softKeysOwn()) { softKeyPress(ev.id - 0x19, ev.pressed); break; }
             if (!ev.pressed || !g_modeHeld) break;
             showView(ev.id - 0x19);
             break;
@@ -836,6 +847,45 @@ void softKeyLed(int i, uint32_t rgb)
     g_dev.send(::uf1::buildColourRgb(id, rgb));
     if (i != 0) g_dev.send(::uf1::buildLedLevel(id, 0x00));
 }
+// The display soft keys in DAW and SENDS (Uf1SoftKeys.h; the setting uf1-soft-keys): what key k does and its label.
+bool softKeysOwn() { return (g_view == kViewDaw || g_view == kViewSends) && !g_modeHeld && !g_presetsOpen && !g_noProject; }
+const uf1softkeys::Command* softKeyCommand(int k)
+{
+    const std::string mode = settings::get("uf1-soft-keys", "markers");
+    if (mode == "list")
+        return uf1softkeys::find(settings::get("uf1-soft-key-" + std::to_string(k + 1), uf1softkeys::listDefault(k)));
+    if (mode == "mapping") return nullptr;
+    return uf1softkeys::find(uf1softkeys::markerKey(k));
+}
+std::string softKeyLabel(int k)
+{
+    if (settings::get("uf1-soft-keys", "markers") == "mapping") return "USER " + std::to_string(k + 1);
+    const auto* c = softKeyCommand(k);
+    return c ? c->label : "";
+}
+void softKeyPress(int k, bool pressed)
+{
+    if (settings::get("uf1-soft-keys", "markers") == "mapping") {
+        // Channel 4, notes 0-3: nothing in the script uses them, so Cubase's Mapping Assistant can.
+        sendMidi({uint8_t(pressed ? 0x93 : 0x83), uint8_t(k), uint8_t(pressed ? 127 : 0)});
+        return;
+    }
+    if (!pressed) return;
+    const auto* c = softKeyCommand(k);
+    if (!c || c->steps[0] < 0) return;
+    std::printf("UF1 soft key %d: %s\n", k + 1, c->name);
+    std::vector<int> steps;
+    for (int st : c->steps) if (st >= 0) steps.push_back(st);
+    // Channel 3, one note per step, 40 ms apart (Cubase merges notes sent back to back; banking.md).
+    std::thread([steps] {
+        for (size_t i = 0; i < steps.size(); ++i) {
+            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            sendMidi({0x92, uint8_t(steps[i]), 127});
+            sendMidi({0x82, uint8_t(steps[i]), 0});
+        }
+    }).detach();
+}
+
 void paintSoftKeys()
 {
     if (!g_open) return;
@@ -848,7 +898,8 @@ void paintSoftKeys()
     const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen && !g_noProject;
     const bool browser = g_presetsOpen && !g_modeHeld;
     for (int i = 0; i < 4; ++i) {
-        const std::string label = g_noProject ? "" : g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i] : "";
+        const std::string label = g_noProject ? "" : g_modeHeld ? kPicker[i] : browser ? (i == 2 ? "Navigate Back" : "") : meter ? kMeterKeys[i]
+                                : softKeysOwn() ? softKeyLabel(i) : "";
         std::vector<uint8_t> p;
         p.push_back(uint8_t(i));
         uint32_t rgb = 0;   // dark
@@ -1158,6 +1209,11 @@ void startIdleCycle()
                 }
             }
             meterTarget(screenOpened);
+            {
+                // A setting changed (the soft keys' labels may have).
+                static unsigned gen = settings::generation();
+                if (settings::generation() != gen) { gen = settings::generation(); paintSoftKeys(); }
+            }
             static bool wasViaSsl = false;
             const bool viaSsl = inMeter && meterViaSsl();
             if (viaSsl) {
