@@ -117,6 +117,16 @@ void objTestSet(const char* name, int value);
 // answer is read off the log rather than out of someone watching a switch.
 void objTestRun(const char* name);
 
+// ⚠ EXPERIMENT (Cubase-Sixty, 14.11.2026). Write one of the SELECTED Meter's settings
+// (currentMeterPort) over the protocol, for a Meter the host cannot reach. `name` is
+// the wire id ("AnalogueMetersMode"); form 0 sends `09 <double>` (the shape the plug-in
+// reports its settings in), 1 `08 <varint>`. Logged as [mset] SENT, with whatever the
+// plug-in reports back on that object for 3 s as [mset] ECHO, and the instance's
+// declarations once. false = no instance / connection to send to.
+bool meterObjWrite(const char* name, double value, int form);
+// The selected Meter's current value of a meterFingerprintIds setting, as streamed.
+bool meterObjValue(const char* name, double& out);
+
 // Press a plug-in switch that is not a host parameter, over the protocol.
 // "HighQuality" is the strips' HQ Mode, "StateASelected" their A/B compare —
 // the two PluginChunkPatch reaches by rewriting base64 inside the track chunk,

@@ -118,6 +118,40 @@ struct MeterCell { bool nameOnly = false; std::string label, value; };
 std::array<MeterCell, 3> g_meterCells;      // under g_cellMx
 std::string g_meterTitle;                   // under g_cellMx
 std::atomic<bool> g_meterCellsDirty{true};
+
+// ⚠ EXPERIMENT (14.11.2026): a Meter that Cubase's Direct Access cannot reach (the Control Room's inserts; the script
+// found none, so there is no title) gets its settings written over SSL's own protocol instead, three fixed ones for
+// now: V-pot 2 Analogue Mode (VU / PPM), V-pot 3 Analogue Reference Level (1 dB a notch), V-pot 4 Digital Type. With
+// FINE on, the value goes as a whole number instead of a double (the other shape the protocol uses). What went out and
+// what the plug-in answered are in rea_sixty.log ([mset]). Returns false when the script's own route applies.
+bool meterProtocolTest(int id, int notches)
+{
+    { std::lock_guard<std::mutex> lk(g_cellMx); if (!g_meterTitle.empty()) return false; }
+    struct T { const char* name; double def, lo, hi; bool toggle; };
+    static const T kT[3] = {
+        {"AnalogueMetersMode", 0, 0, 1, true},
+        {"AnalogueMetersRefLevel", -18, -40, 0, false},
+        {"DigitalMetersType", 0, 0, 6, false},
+    };
+    if (id < 2 || id > 4) return false;
+    const T& t = kT[id - 2];
+    // What we sent last on this instance counts until the plug-in has reported something newer.
+    static std::map<std::string, double> lastSent;
+    static int lastPort = 0;
+    const int port = sslcore::currentMeterPort();
+    if (port != lastPort) { lastSent.clear(); lastPort = port; }
+    double cur = t.def;
+    if (auto it = lastSent.find(t.name); it != lastSent.end()) cur = it->second;
+    else sslcore::meterObjValue(t.name, cur);
+    const double nv = t.toggle ? (cur >= 0.5 ? 0.0 : 1.0) : std::clamp(cur + notches, t.lo, t.hi);
+    if (!sslcore::meterObjWrite(t.name, nv, g_meterFine ? 1 : 0)) {
+        std::printf("UF1 METER: no SSL connection to the Meter shown, nothing sent\n");
+        return true;
+    }
+    lastSent[t.name] = nv;
+    std::printf("UF1 METER: %s -> %g over SSL's protocol (test, %s)\n", t.name, nv, g_meterFine ? "varint" : "double");
+    return true;
+}
 std::array<int, 4> g_meterAcc{};           // V-pot counts not yet a notch (4 counts a notch, Rea-Sixty)   // METER: the RESET soft key was pressed (the cycle thread takes it)
 std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LED note from the script)
 // PLUGIN view: the SSL plug-in on the selected track, as the script reports it (SysEx 50). While one is there, the
@@ -529,6 +563,8 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 if (ev.id == 1) {
                     sslcore::cycleMeterSelection(notches > 0 ? 1 : -1);
                     turnOut(ev.id, "METER, instance");
+                } else if (meterProtocolTest(ev.id, notches)) {
+                    turnOut(ev.id, "METER, Meter setting over SSL's protocol (test)");
                 } else {
                     turnOut(ev.id, "METER, Meter setting");
                     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x61, uint8_t(ev.id - 2), uint8_t(std::clamp(64 + notches, 1, 127)), 0xF7});
