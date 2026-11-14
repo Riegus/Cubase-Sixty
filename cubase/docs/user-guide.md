@@ -320,7 +320,13 @@ turn.
 **The soft keys in DAW and SENDS** (the four keys under the display) jump to the **first, previous, next and last
 marker**, labelled. Settings > UF1 soft keys can put commands of your choice on them instead (undo, save, the
 MixConsole, the locators and more), or leave them free for Cubase's **Mapping Assistant** (MIDI Remote): they are
-then labelled USER 1–4, and you assign them in Cubase.
+then labelled USER 1–4, and you assign them in Cubase:
+
+1. Open the MIDI Remote tab (lower zone), pick **CubaseSixty - UF1** and click **Open Mapping Assistant**.
+2. Press the soft key on the UF1 (in DAW): it shows under "UF1 Control".
+3. **Browse Functions** and pick a command: it shows under "Cubase Function".
+4. Click **Apply Mapping**. The mapping is added to the "Selected track" page, beside Cubase-Sixty's own. (Do not add
+   a mapping page with **+**: the UF1 would then use that page instead, and lose everything else.)
 
 **SENDS** — the same four sends, but the big display shows all four at all times: where each goes, its level, and a
 bar. They follow the mouse and automation too.
