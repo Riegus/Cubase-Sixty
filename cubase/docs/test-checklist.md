@@ -21,6 +21,8 @@ Quick: Cubase starts, all surfaces show the project.
 - The idle texts: the Hub "No Project" (UF8 strips 1-2, UF1, UC1); Cubase quit "Waiting for Cubase" (within 2 s);
   Cubase ended in Task Manager with a project open: blanked, "Waiting for Cubase"; tray Quit "Bridge off" / "Off".
 - Restart the bridge from the tray: surfaces "Waiting for Cubase", then back by themselves.
+- A project open with no track selected (after opening it from the Hub, and after a bridge restart + Reload
+  Scripts): the UF1's small display blank, not "No Proj." / "Waiting".
 
 ## UF8
 
