@@ -342,9 +342,24 @@ steps through its screens; its label shows the one you are on:
   readouts.
 
 Soft key 2 (RESET) resets the holds (on LOUDNESS, the loudness measurement too). Put a Meter on the Stereo Out and
-it shows whatever you select; "NO METER" means no Meter plug-in was found. The screens use the Meter's default
-settings (VU, -18 dBFS reference, RTA scale 0 to -120 dB, loudness range -18 to +9 LU); changing them in the plug-in
-does not change the UF1's drawing yet.
+it shows whatever you select; "NO METER" means no Meter plug-in was found.
+
+The Meter's own settings are on the V-pots, as on SSL's UF1:
+
+- **V-pot 1** picks which Meter in the project is shown (AUTO follows the selected track).
+- **V-pots 2–4** are three of the Meter's settings for this screen, named above them with their values: on
+  OVERVIEW for example True Peak, Digital Type and the Lissajous fade; on ANALOGUE VU / PPM, the 0 VU line-up and
+  the reference. **◄ ►** page through more (three pages; ten on LOUDNESS).
+- **Soft key 3, FINE**, makes the settings that are not steps move a quarter as far; on LOUDNESS it is **PLAY**
+  (start / pause the loudness measurement, lit while it runs).
+- **Soft key 4, PRESETS**, opens the Meter's own presets: V-pot 4 scrolls, its push loads, soft key 3 goes back.
+
+The screens follow the Meter's settings: the bar scale (Digital Type), VU or PPM needles, the max needle, the RTA
+scale and selected band, and the loudness target, range and display type.
+
+The settings, FINE and PRESETS need the Meter in the **MixConsole** (on the Stereo Out, a group or a track). A Meter
+in the Control Room's inserts (Monitor 1, for example) is drawn on all screens, but Cubase does not let a controller
+reach its settings: the UF1 says "Only in MixConsole" above the V-pots.
 
 ### Transport and time
 
@@ -560,8 +575,6 @@ Cubase gives controllers less than REAPER does, so some things are missing or di
 - A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
 - The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there. On the UF8,
   **Q3** and **LAYER 1–3** do nothing.
-- In the METER view the V-pots, FINE, PRESETS and the Loudness PLAY key do nothing yet, and the screens are drawn
-  with the Meter's default settings.
 
 The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),
 [what Cubase does not allow](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md),

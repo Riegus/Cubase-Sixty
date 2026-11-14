@@ -107,7 +107,18 @@ bool g_modeHeld = false;     // MODE held: the four display soft keys show the v
 enum { kViewPlugin = 0, kViewDaw = 1, kViewMeter = 2, kViewSends = 3 };
 std::atomic<int> g_view{kViewDaw};
 std::atomic<int> g_meterScreen{0};       // METER: 0 Overview, 1 Analogue, 2 RTA, 3 Loudness (soft key 1 steps)
-std::atomic<bool> g_meterReset{false};   // METER: the RESET soft key was pressed (the cycle thread takes it)
+std::atomic<bool> g_meterReset{false};
+// METER, the Meter plug-in's settings on V-pots 2-4 (the UF1 script reads and writes them): the page of the screen
+// (◄ ►), FINE (soft key 3), the plug-in's title (for its presets), and the three V-pot cells as the script reports
+// them (SysEx 60), drawn by the cycle thread as one 0x010e group behind the instance label.
+std::atomic<int> g_meterPage{0};
+std::atomic<bool> g_meterFine{false};
+std::atomic<bool> g_meterPlaying{false};   // Loudness Play / Pause (row 50), for the PLAY key's light
+struct MeterCell { bool nameOnly = false; std::string label, value; };
+std::array<MeterCell, 3> g_meterCells;      // under g_cellMx
+std::string g_meterTitle;                   // under g_cellMx
+std::atomic<bool> g_meterCellsDirty{true};
+std::array<int, 4> g_meterAcc{};           // V-pot counts not yet a notch (4 counts a notch, Rea-Sixty)   // METER: the RESET soft key was pressed (the cycle thread takes it)
 std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LED note from the script)
 // PLUGIN view: the SSL plug-in on the selected track, as the script reports it (SysEx 50). While one is there, the
 // V-pots, the display soft keys and ◄ ► go to the script as SysEx 53 instead of Quick Controls / track steps.
@@ -506,7 +517,24 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         if (ev.id >= 1 && ev.id <= 4) {
             turnIn(ev.id, ev.delta);
             if (g_presetsOpen) { turnDropped(ev.id, "preset browser"); if (ev.id == 4) g_browserScroll += ev.delta; break; }   // the browser: V-pot 4 scrolls
-            if (g_view == kViewMeter) { turnDropped(ev.id, "METER view"); break; }   // METER: the V-pots have no meter settings yet (and would change sends unseen)
+            if (g_view == kViewMeter) {
+                // METER: V-pot 1 picks the Meter instance shown (all the project's), 2-4 the plug-in's settings on
+                // this page (the script writes them). A notch = 4 counts.
+                auto& acc = g_meterAcc[size_t(ev.id - 1)];
+                if ((acc > 0 && ev.delta < 0) || (acc < 0 && ev.delta > 0)) acc = 0;
+                acc += ev.delta;
+                const int notches = acc / 4;
+                acc -= notches * 4;
+                if (!notches) break;
+                if (ev.id == 1) {
+                    sslcore::cycleMeterSelection(notches > 0 ? 1 : -1);
+                    turnOut(ev.id, "METER, instance");
+                } else {
+                    turnOut(ev.id, "METER, Meter setting");
+                    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x61, uint8_t(ev.id - 2), uint8_t(std::clamp(64 + notches, 1, 127)), 0xF7});
+                }
+                break;
+            }
             if (plugActive()) { turnOut(ev.id, "PLUGIN, plug-in parameter"); plugEvent(0, uint8_t(ev.id - 1), uint8_t(std::clamp(64 + ev.delta, 1, 127))); break; }
             const size_t k = size_t(ev.id - 1);
             if (g_vpotPos[k] < 0) { turnDropped(ev.id, "position not known yet"); break; }   // position not known yet (comes from Cubase within a second)
@@ -607,9 +635,18 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1A) { g_meterReset = true; break; }
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x19) {
                 g_meterScreen = (g_meterScreen + 1) % uf1meter::screenCount();
+                g_meterPage = 0;
                 std::printf("UF1 METER screen: %s\n", uf1meter::screenName(g_meterScreen));
                 break;
             }
+            // METER: soft key 3 = FINE (the settings' V-pots a quarter as far), on Loudness PLAY (the plug-in's
+            // Play / Pause); soft key 4 = PRESETS (the Meter's own library).
+            if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1B) {
+                if (g_meterScreen == 3) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x62, 0x01, 0xF7});
+                else { g_meterFine = !g_meterFine; paintSoftKeys(); }
+                break;
+            }
+            if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1C) { g_presetsOpen = true; break; }
             // PLUGIN with an SSL plug-in, without MODE: the plug-in's switches on this page.
             if (ev.pressed && !g_modeHeld && plugActive()) { plugEvent(2, uint8_t(ev.id - 0x19), 0); break; }
             if (!ev.pressed || !g_modeHeld) break;
@@ -659,6 +696,13 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         if (ev.id == 0x24 || ev.id == 0x26) {
             if (!ev.pressed) break;
             if (g_presetsOpen) break;
+            // METER: ◄ ► page the Meter's settings on V-pots 2-4.
+            if (g_view == kViewMeter && !g_shift) {
+                const int n = uf1meter::pageCount(g_meterScreen);
+                g_meterPage = std::clamp(g_meterPage + (ev.id == 0x26 ? 1 : -1), 0, n - 1);
+                if (g_trace) std::printf("UF1 METER page %d/%d\n", g_meterPage.load() + 1, n);
+                break;
+            }
             // PLUGIN: ◄ ► page (as in Rea-Sixty): through the SSL plug-in's controls, or without one between
             // Quick Controls 1-4 and 5-8 (as the 5-8 key does). The channel encoder still steps the track.
             if (plugActive() && !g_shift) { plugEvent(3, ev.id == 0x26 ? 1 : 0, 0); break; }
@@ -782,6 +826,8 @@ void paintSoftKeys()
     static const char* const kPicker[4] = {"PLUGIN", "DAW", "METER", "SENDS"};
     const char* const kMeterKeys[4] = {uf1meter::screenName(g_meterScreen), "RESET",
                                        g_meterScreen == 3 ? "PLAY" : "FINE", "PRESETS"};   // the METER view's own keys
+    // FINE lit while on; PLAY lit while the loudness measurement runs.
+    const bool meterKey3Lit = g_meterScreen == 3 ? g_meterPlaying.load() : g_meterFine.load();
     const bool meter = g_view == kViewMeter;
     const bool plugin = plugActive() && !g_modeHeld && !g_presetsOpen && !g_noProject;
     const bool browser = g_presetsOpen && !g_modeHeld;
@@ -800,6 +846,7 @@ void paintSoftKeys()
             p.insert(p.end(), label.begin(), label.end());
         }
         g_dev.send(::uf1::buildScreen(::uf1::scr::kSoftKeyLabel, p));
+        if (meter && !g_modeHeld && !browser && !g_noProject && i == 2 && meterKey3Lit) rgb = 0xFFFFFF;
         if (g_modeHeld && !g_noProject) {
             const bool on = i == g_view;
             rgb = on ? 0xFFFF00 : 0x595900;   // the active view yellow, the other dim yellow (35 %)
@@ -938,6 +985,36 @@ void ensureSslCore()
 // window with the selection in the middle row, which the firmware highlights), the graph area cleared (0x0122) and
 // the scrollbar (0x011f). V-pot 4 scrolls (3 detents per preset), its push loads the preset into the plug-in and
 // closes the browser.
+// METER: tell the UF1 script what the meter view shows (SysEx 60 <active> <screen> <page> <index 14 bit> <fine>
+// <the instance's track name>), on a change and every 2 s (after the scripts are reloaded it knows again).
+void meterTarget(bool screenOpened)
+{
+    static std::string sent;
+    static long long sentAt = 0;
+    static int lastScreen = -1, lastPage = -1;
+    const bool active = g_view == kViewMeter && !g_presetsOpen && !g_noProject;
+    const int screen = g_meterScreen, page = g_meterPage;
+    const int index = active ? std::clamp(sslcore::currentMeterTrackIndex(), 0, 16383) : 0;
+    std::string name = active ? sslcore::currentMeterName() : std::string();
+    for (char& c : name) if (static_cast<unsigned char>(c) >= 0x80) c = '?';
+    if (name.size() > 32) name.resize(32);
+    std::vector<unsigned char> m{0xF0, 0x7D, 0x52, 0x36, 0x60, uint8_t(active ? 1 : 0), uint8_t(screen), uint8_t(page),
+                                 uint8_t((index >> 7) & 0x7F), uint8_t(index & 0x7F), uint8_t(g_meterFine ? 1 : 0)};
+    m.insert(m.end(), name.begin(), name.end());
+    m.push_back(0xF7);
+    const std::string key(m.begin(), m.end());
+    if (screenOpened || screen != lastScreen || page != lastPage) {
+        // A new screen or page: its cells come from the script; blank until then.
+        lastScreen = screen; lastPage = page;
+        { std::lock_guard<std::mutex> lk(g_cellMx); g_meterCells = {}; }
+        g_meterCellsDirty = true;
+    }
+    if (key == sent && nowMs() - sentAt < 2000) return;
+    sent = key;
+    sentAt = nowMs();
+    sendMidi(m);
+}
+
 void browserFrame(bool enter)
 {
     static std::vector<sslpresets::Entry> list;
@@ -946,8 +1023,10 @@ void browserFrame(bool enter)
     static std::map<std::string, int> lastSel;   // per plug-in: the preset last loaded
     static int scrollAcc = 0;
     static int barShown = -1;
+    // The METER view's browser is the Meter plug-in's (its own library, loaded by the plug-in itself).
+    const bool meter = g_view == kViewMeter;
     std::string title;
-    { std::lock_guard<std::mutex> lk(g_cellMx); title = g_plugPresent ? g_plugTitle : std::string(); }
+    { std::lock_guard<std::mutex> lk(g_cellMx); title = meter ? g_meterTitle : g_plugPresent ? g_plugTitle : std::string(); }
     if (enter || title != listFor) {
         listFor = title;
         list = title.empty() ? std::vector<sslpresets::Entry>{} : sslpresets::scan(sslpresets::dirFor(title));
@@ -975,7 +1054,12 @@ void browserFrame(bool enter)
     while (scrollAcc <= -3) { scrollAcc += 3; --sel; }
     sel = std::clamp(sel, 0, n > 0 ? n - 1 : 0);
     if (g_browserLoad.exchange(false)) {
-        if (n > 0) {
+        if (n > 0 && meter) {
+            // The plug-in's own load path (the property its browser writes), on the instance the view shows.
+            const bool ok = sslcore::setPresetSelection(list[size_t(sel)].path);
+            lastSel[title] = sel;
+            std::printf("UF1 presets: \"%s\" %s the Meter\n", list[size_t(sel)].name.c_str(), ok ? "sent to" : "could not be sent to");
+        } else if (n > 0) {
             const auto msgs = sslpresets::loadMessages(list[size_t(sel)], 0);
             for (const auto& m : msgs) sendMidi(m);
             lastSel[title] = sel;
@@ -1031,6 +1115,7 @@ void startIdleCycle()
             if (inBrowser) {
                 inBrowser = false;
                 if (!inMeter) restoreChannelView();
+                else { inMeter = false; shownScreen = -1; }   // the meter screen's entry again
             }
             // View changes are made here, between two cycles: the entry frames must not land inside one.
             const bool wantMeter = g_view == kViewMeter;
@@ -1053,6 +1138,7 @@ void startIdleCycle()
                     restoreChannelView();
                 }
             }
+            meterTarget(screenOpened);
             uf1pace::Parts p;
             if (inMeter) {
                 ensureSslCore();
@@ -1061,11 +1147,32 @@ void startIdleCycle()
                 if (reset) { flashUntil = nowMs() + 150; put(0x0102, {0x03}); }
                 else if (flashUntil && nowMs() >= flashUntil) { flashUntil = 0; if (!g_modeHeld) put(0x0102, {0x01}); }
                 const std::string l = uf1meter::instanceLabel();
-                if (l != label) {
+                // The V-pot cells, always as the whole group 0-3: the UF1 repaints them only when the group starts
+                // with cell 0 (Rea-Sixty, cap103 / 104). Cell 0 = the instance, 1-3 = the Meter's settings.
+                if (l != label || g_meterCellsDirty.exchange(false)) {
                     label = l;
                     std::vector<uint8_t> c{0x00};
                     c.insert(c.end(), l.begin(), l.end());
                     g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, c));
+                    std::array<MeterCell, 3> cells;
+                    { std::lock_guard<std::mutex> lk(g_cellMx); cells = g_meterCells; }
+                    for (int k = 0; k < 3; ++k) {
+                        std::vector<uint8_t> f{uint8_t(k + 1)};
+                        auto field = [&](const std::string& s, size_t width) {
+                            for (size_t q = 0; q < width; ++q) f.push_back(q < s.size() ? uint8_t(s[q]) : 0x00);
+                        };
+                        const auto& cell = cells[size_t(k)];
+                        if (cell.nameOnly && !cell.label.empty()) f.insert(f.end(), cell.value.begin(), cell.value.end());   // an enum whose value is its name
+                        else { field(cell.label, 8); field(cell.value, 10); }
+                        g_dev.send(::uf1::buildScreen(::uf1::scr::kFocusedParam, f));
+                    }
+                }
+                // The faceplate (Digital Type, VU / PPM) as the plug-in is set.
+                {
+                    static int selShown = -1;
+                    const int sel = uf1meter::scaleSelector(screen);
+                    if (screenOpened) selShown = -1;
+                    if (sel >= 0 && sel != selShown) { selShown = sel; put(0x011a, {uint8_t(sel)}); }
                 }
                 if (screen == 0)
                     uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
@@ -1467,6 +1574,35 @@ void onSysex(const std::vector<unsigned char>& m)
     if (m[4] == 0x7C) {   // the script's driver: 00 deactivated (no project), 01 active again
         if (m[5] == 0) uf1NoProject(); else uf1ProjectOpen();
         if (g_trace) std::printf("UF1 script %s\n", m[5] ? "active (project open)" : "inactive (no project)");
+        return;
+    }
+    if (m[4] == 0x60 && m.size() >= 9) {   // METER: a V-pot cell, 60 <cell 1-3> <name only> <label> 00 <value>
+        const size_t k = size_t(m[5] - 1);
+        if (k < 3) {
+            MeterCell c;
+            c.nameOnly = m[6] == 1;
+            size_t i = 7;
+            for (; i + 1 < m.size() && m[i] != 0x00; ++i) c.label.push_back(char(m[i]));
+            for (++i; i + 1 < m.size(); ++i) c.value.push_back(char(m[i]));
+            { std::lock_guard<std::mutex> lk(g_cellMx); g_meterCells[k] = c; }
+            g_meterCellsDirty = true;
+        }
+        return;
+    }
+    if (m[4] == 0x61 && m.size() >= 9) {   // METER: a setting the screens draw with, 61 <row> <hi> <lo> <text>
+        const double norm = double((m[6] << 7) | m[7]) / 16383.0;
+        std::string text;
+        for (size_t i = 8; i + 1 < m.size(); ++i) text.push_back(char(m[i]));
+        uf1meter::setSetting(m[5], norm, text);
+        if (m[5] == 50) { const bool on = norm >= 0.5; if (on != g_meterPlaying.exchange(on) && g_view == kViewMeter) paintSoftKeys(); }
+        return;
+    }
+    if (m[4] == 0x62 && m.size() >= 7) {   // METER: 62 <found> <the plug-in's title>
+        std::string t;
+        for (size_t i = 6; i + 1 < m.size(); ++i) t.push_back(char(m[i]));
+        { std::lock_guard<std::mutex> lk(g_cellMx); g_meterTitle = m[5] ? t : std::string(); }
+        if (!m[5]) uf1meter::clearSettings();
+        std::printf("UF1 METER: %s\n", m[5] ? ("the settings of \"" + t + "\"").c_str() : "no Meter plug-in found for the instance shown");
         return;
     }
     if (m[4] == 0x1E && m.size() >= 10) {

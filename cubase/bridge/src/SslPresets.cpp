@@ -16,6 +16,7 @@ std::string dirFor(const std::string& plugin)
         {"Channel Strip 2", "ChannelStrip2"}, {"360 Link Bus Compressor", "SSL360LinkBusCompressor"},
         {"360 Link", "SSL360Link"}, {"Bus Compressor 2", "BusCompressor2"},
         {"4K B", "SSL4KB"}, {"4K E", "SSL4KE"}, {"4K G", "SSL4KG"},
+        {"Meter Pro", "MeterPro"}, {"Meter", "Meter"},   // the UF1's METER view (Rea-Sixty's kDirs)
     };
     for (const auto& d : kDirs) {
         if (plugin.find(d.part) == std::string::npos) continue;
