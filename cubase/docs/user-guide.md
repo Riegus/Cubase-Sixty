@@ -551,6 +551,7 @@ compete for the SSL plug-ins' meters.
 | Red icon | Right-click > **Start bridge**. If it will not stay up: the virtual MIDI driver may be missing (install loopMIDI), or ports with the names `Cubase-Sixty ...` exist in loopMIDI (delete them there). |
 | An instrument plays when you touch a control | "In 'All MIDI Inputs'" is ticked for a Cubase-Sixty port (see setup). |
 | SCRUB only nudges | The Mackie Control device is missing (see setup). |
+| SCRUB moves the cursor but there is no sound | Cubase does not scrub audio played by an ARA extension such as SpectraLayers (Cubase's own Scrub tool is silent there too). Scrub over events without the extension, or render the extension into the event. |
 | The UC1's knobs do nothing on a track | The track has neither an SSL strip nor Cubase's strip reachable (an instrument return, for example), or loading modules is set to "never". |
 | A top soft key on the UF8 shows "-" | That track has no SSL channel strip. |
 | A surface is odd after *Reload Scripts* | Restart Cubase; a reload does not always set the scripts up fully. |
