@@ -429,6 +429,14 @@ std::vector<uint8_t> loudnessReadouts()
             const bool isMax = told && mi.legend.find("Max") != std::string::npos;
             if (isMax && !pk.empty() && std::isfinite(pk[0])) v = std::max(v, pk[0]);
             val = uf1FormatMeterDb_(v);
+            // Nothing measured (after RESET, or silence): the plug-in's window shows "---". Loudness bottoms out at
+            // -70 LUFS (the absolute gate), relative values at -70 less the target; a level at -inf.
+            const std::string u = told && !mi.unit.empty() ? mi.unit : s.unit;
+            double target = -23.0;
+            const bool rel = u == "LU" || u == "LK";
+            if (rel) settingNumber(36, target);
+            if (u == "dBFS" ? v <= -120.f : (u == "LUFS" || u == "LKFS") ? v <= -69.95f : rel && double(v) + target <= -69.95)
+                val = "---";
             static long long loggedAt[4] = {0, 0, 0, 0};
             const int k = int(&s - kSlots);
             const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -652,6 +660,27 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         const bool haveHist = sslcore::isRunning() &&
                               sslcore::getMeter(int(sslmeter::DataType::LoudScrollableHistory), hist, hp) && hist.size() > 16;
         if (haveHist) {
+            {
+                // MEASURING (14.11.2026): the time labels under the history (sf0 bytes 214-249, four "HH:MM:SS") are
+                // a frozen capture; the plug-in's own run from its measurement time. Whether the stream's trailer
+                // carries that time: logged every 5 s on this screen.
+                static long long trailerAt = 0;
+                const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                if (nowMs - trailerAt > 5000) {
+                    trailerAt = nowMs;
+                    std::string tr;
+                    char b[24];
+                    for (size_t q = hist.size() > 13 ? hist.size() - 13 : 0; q < hist.size(); ++q) {
+                        std::snprintf(b, sizeof(b), " %g", double(hist[q]));
+                        tr += b;
+                    }
+                    size_t valid = 0;
+                    for (size_t q = 0; q + 13 < hist.size(); ++q) if (hist[q] > -99.f && hist[q] < 60.f) ++valid;
+                    std::printf("UF1 METER loudness history: %zu values (%zu measured), trailer:%s\n", hist.size(), valid,
+                                tr.c_str());
+                }
+            }
             double target = -23.0;
             if (!settingNumber(36, target)) {
                 target = -23.0;
