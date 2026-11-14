@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.3-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.4-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -1553,7 +1553,16 @@ var meterCrs = []
 	for (var j = 0; j < 2; ++j) (function (j) { hosts.push(['Phones ' + (j + 1), function () { return cr.getPhonesChannelByIndex(j) }]) })(j)
 	for (var k = 0; k < 4; ++k) (function (k) { hosts.push(['Cue ' + (k + 1), function () { return cr.getCueChannelByIndex(k) }]) })(k)
 	for (var h = 0; h < hosts.length; ++h) {
-		try { meterCrs.push({ name: hosts[h][0], da: page.mHostAccess.makeDirectAccess(hosts[h][1]()) }) }
+		try {
+			var host = hosts[h][1]()
+			// A Control Room channel by index had no object (#-1) on the first test, 13.11.2026: perhaps it is only
+			// resolved once something is bound to it. A value variable on its insert bypass, read only (never set).
+			if (h > 0 && host.mBypassInserts) {
+				var watch = surface.makeCustomValueVariable('meterCrWatch' + h)
+				page.makeValueBinding(watch, host.mBypassInserts)
+			}
+			meterCrs.push({ name: hosts[h][0], host: host, da: page.mHostAccess.makeDirectAccess(host) })
+		}
 		catch (e) { out('[CubaseSixty UF1] METER: no Direct Access to ' + hosts[h][0] + ': ' + e) }
 	}
 })()
@@ -1611,7 +1620,23 @@ function meterFind(activeDevice) {
 				var cb = crd.da.getBaseObjectID(plugAm), cty = '', cti = ''
 				try { cty = crd.da.getObjectTypeName(plugAm, cb) } catch (e) {}
 				try { cti = crd.da.getObjectTitle(plugAm, cb) } catch (e) {}
-				out('[CubaseSixty UF1] METER: ' + crd.name + ': #' + cb + ' [' + cty + '] "' + cti + '", ' + (list.length - before) + ' Meter(s)')
+				var rid = '?'
+				try { rid = crd.host.getRuntimeID(plugAm) } catch (e) {}
+				out('[CubaseSixty UF1] METER: ' + crd.name + ': #' + cb + ' [' + cty + '] "' + cti + '" (runtime ID ' + rid + '), ' + (list.length - before) + ' Meter(s)')
+				if (cb >= 0) {   // its tree, for the first test
+					var lines2 = []
+					var dump2 = function (id, depth) {
+						if (lines2.length >= 40) return
+						var ty = '', ti = '', nc = 0
+						try { ty = crd.da.getObjectTypeName(plugAm, id) } catch (e) {}
+						try { ti = crd.da.getObjectTitle(plugAm, id) } catch (e) {}
+						try { nc = crd.da.getNumberOfChildObjects(plugAm, id) } catch (e) {}
+						lines2.push(new Array(depth + 1).join('  ') + '#' + id + ' [' + ty + '] "' + ti + '" ' + nc + ' children')
+						if (depth < 4) for (var c2 = 0; c2 < nc && c2 < 30; ++c2) dump2(crd.da.getChildObjectID(plugAm, id, c2), depth + 1)
+					}
+					dump2(cb, 0)
+					for (var l2 = 0; l2 < lines2.length; ++l2) out('[CubaseSixty UF1] METER:   ' + crd.name + ' ' + lines2[l2])
+				}
 			}
 		} catch (e) { out('[CubaseSixty UF1] METER: ' + crd.name + ' walk: ' + e) }
 	}
