@@ -14,8 +14,9 @@
 #   -NoScriptLog          Start the bridge with --no-script-log (the scripts' lines are not written to cubase\logs\scripts.log).
 #   -Force                If Cubase does not close within 60 seconds, kill it. Unsaved changes are LOST.
 #   -NoStartCubase        Do everything except start Cubase.
-#   -BridgeOnly           Leave Cubase running: stop the bridge, (with -Build) rebuild it, start it again. Cubase
-#                         connects to the new ports by itself after a few seconds (cubase\docs\development.md).
+#   -BridgeOnly           Leave Cubase running: stop the bridge, (with -Build) rebuild it, start it again. With the
+#                         tray app running, the tray app (and the MIDI ports it holds) stays: the bridge is rebuilt
+#                         beside the running programs and the tray app restarts it, so Cubase keeps its ports.
 #   -Tray                 Start the bridge through the tray app (CubaseSixty.exe: no console, restarts the bridge if
 #                         it stops) instead of in a console window.
 #   -ScriptsOnly          Only install the MIDI Remote scripts; then reload them in Cubase (MIDI Remote: Reload
@@ -96,6 +97,31 @@ if ($cubase -and -not $BridgeOnly) {
         if ($Force) { Write-Warning 'Cubase did not close; killing it.'; $left | Stop-Process -Force; Start-Sleep -Seconds 2 }
         else { throw 'Cubase is still running (a dialog may be waiting). Close it, or run again with -Force.' }
     }
+}
+
+# --- -BridgeOnly with the tray app running: keep it (it holds the MIDI ports Cubase uses) -----------------------
+# The running programs' files cannot be overwritten, but they can be renamed: the build then writes new ones beside
+# them, and the tray app restarts the bridge from the new file. (Changes to the tray app itself need the full round.)
+$trayRunning = [bool](Get-Process -Name 'CubaseSixty' -ErrorAction SilentlyContinue)
+if ($BridgeOnly -and $trayRunning) {
+    $releaseDir = Split-Path $bridgeExe
+    if ($Build) {
+        foreach ($name in 'cubase_sixty_bridge', 'CubaseSixty') {
+            $exe = Join-Path $releaseDir "$name.exe"
+            $old = Join-Path $releaseDir "$name.old.exe"
+            if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
+            if (Test-Path $exe) { Rename-Item $exe "$name.old.exe" -ErrorAction SilentlyContinue }
+        }
+        Write-Host 'Building the bridge...'
+        & cmake --build (Join-Path $bridgeDir 'build') --config Release
+        if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
+    }
+    Write-Host 'Restarting the bridge through the tray app (the MIDI ports stay)...'
+    $tray = Join-Path $releaseDir 'CubaseSixty.exe'
+    if (-not (Test-Path $tray)) { $tray = Join-Path $releaseDir 'CubaseSixty.old.exe' }
+    Start-Process -FilePath $tray -ArgumentList '--restart' -WorkingDirectory $releaseDir
+    Write-Host 'Done (bridge restarted; Cubase left running).'
+    return
 }
 
 # --- 2. Stop the bridge --------------------------------------------------------------------------------
