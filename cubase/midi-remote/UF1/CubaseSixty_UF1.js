@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.7-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.8-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -89,7 +89,13 @@ function cmdButton() {
 function panel(x, y, w, h) { surface.makeBlindPanel(px(x), px(y), px(w), px(h)) }
 panel(34, 22, 54, 20)        // SOFT
 panel(26, 48, 124, 106)      // the small screen
-for (var ds = 0; ds < 4; ++ds) panel(242.5 + ds * 95 - 38, 22, 76, 20)   // the display soft keys
+// The display soft keys: buttons, so that Cubase's Mapping Assistant can take them. The bridge sends them (channel 4,
+// notes 0-3) only when Settings > UF1 soft keys is set to the Mapping Assistant; nothing here is bound to them.
+var userKeys = []
+for (var ds = 0; ds < 4; ++ds) {
+	userKeys.push(surface.makeButton(px(242.5 + ds * 95 - 38), px(22), px(76), px(20)))
+	userKeys[ds].mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(3, ds)
+}
 panel(195, 50, 380, 150)     // the screen
 panel(228, 296, 80, 80)      // CHANNEL encoder
 panel(360, 266, 52, 24); panel(416, 266, 52, 24); panel(490, 266, 38, 24); panel(530, 266, 38, 24)   // MODE, 5-8, ARROW
@@ -867,6 +873,25 @@ function pulseButton(x, note) {
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
 	return button
 }
+// The display soft keys' commands in DAW / SENDS (the bridge's Uf1SoftKeys.h: the same notes, MIDI channel 3; it
+// sends one, or a few in a row, for what the key is set to in Settings > UF1 soft keys).
+var SOFT_KEY_COMMANDS = [
+	['Transport', 'Return to Zero'], ['Transport', 'Goto End'], ['Transport', 'Locate Previous Marker'],
+	['Transport', 'Locate Next Marker'], ['Transport', 'Insert Marker'], ['Transport', 'To Left Locator'],
+	['Transport', 'To Right Locator'], ['Transport', 'Locators to Selection'], ['Transport', 'Locate Previous Event'],
+	['Transport', 'Locate Next Event'], ['Transport', 'Play Selection Range'], ['Transport', 'Metronome On'],
+	['Transport', 'Precount On'], ['Transport', 'Use Pre-/Post-Roll'], ['Transport', 'Auto Punch In'],
+	['Transport', 'Auto Punch Out'], ['Edit', 'Undo'], ['Edit', 'Redo'], ['Edit', 'Split at Cursor'],
+	['Edit', 'Duplicate'], ['Edit', 'Glue'], ['Edit', 'Snap On/Off'], ['Edit', 'Autoscroll'], ['Edit', 'Unmute All'],
+	['File', 'Save'], ['File', 'Save New Version'], ['File', 'Export Audio Mixdown'], ['Devices', 'Mixer'],
+	['Devices', 'Control Room Mixer'], ['Devices', 'VST Instruments'], ['Project', 'Open Markers'],
+	['Zoom', 'Zoom Full'], ['Zoom', 'Zoom to Selection'], ['Windows', 'Close All Plug-in Windows']]
+for (var skc = 0; skc < SOFT_KEY_COMMANDS.length; ++skc) {
+	var skButton = cmdButton()
+	skButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(2, skc)
+	page.makeCommandBinding(skButton.mSurfaceValue, SOFT_KEY_COMMANDS[skc][0], SOFT_KEY_COMMANDS[skc][1])
+}
+
 var panPush = pulseButton(0, 32)
 panPush.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
 	if (value < 0.5) return

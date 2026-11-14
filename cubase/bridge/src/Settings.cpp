@@ -1,5 +1,6 @@
 #include "Settings.h"
 #include "ScriptLog.h"
+#include "Uf1SoftKeys.h"
 
 #include <atomic>
 #include <cctype>
@@ -17,6 +18,14 @@ std::mutex g_mx;
 std::map<std::string, std::string> g_values;
 std::filesystem::file_time_type g_stamp{};
 bool g_quietReload = false;
+
+// The UF1 soft keys' commands to choose from (Uf1SoftKeys.h).
+std::vector<Choice> softKeyChoices()
+{
+    std::vector<Choice> c;
+    for (const auto& k : uf1softkeys::commands()) c.push_back({k.key, k.name});
+    return c;
+}
 
 // The settings, in the order the Settings page and settings.txt show them. Add new ones here (the page and the file
 // follow); docs/settings-wishlist.md lists what is still fixed in code.
@@ -80,6 +89,20 @@ const std::vector<Def>& defs()
          {{"remember", "They stay bypassed (only the inserts the key bypassed are switched on again)"},
           {"all", "All inserts are switched on"}},
          "remember", true},
+        {"uf1-soft-keys", "UF1 soft keys", "The soft keys in DAW and SENDS",
+         "What the four keys under the UF1's display do in the DAW and SENDS views (in PLUGIN and METER they have jobs of their own; with MODE held they pick the view). Their labels show what they do.",
+         {{"markers", "First, previous, next and last marker"},
+          {"list", "The commands chosen below, one for each key"},
+          {"mapping", "Free for Cubase's Mapping Assistant (MIDI Remote: assign them yourself; labelled USER 1-4)"}},
+         "markers", true},
+        {"uf1-soft-key-1", "UF1 soft keys", "Soft key 1", "Its command when the soft keys are set to the commands chosen here.",
+         softKeyChoices(), uf1softkeys::listDefault(0), true},
+        {"uf1-soft-key-2", "UF1 soft keys", "Soft key 2", "Its command when the soft keys are set to the commands chosen here.",
+         softKeyChoices(), uf1softkeys::listDefault(1), true},
+        {"uf1-soft-key-3", "UF1 soft keys", "Soft key 3", "Its command when the soft keys are set to the commands chosen here.",
+         softKeyChoices(), uf1softkeys::listDefault(2), true},
+        {"uf1-soft-key-4", "UF1 soft keys", "Soft key 4", "Its command when the soft keys are set to the commands chosen here.",
+         softKeyChoices(), uf1softkeys::listDefault(3), true},
         {"uc1-key-magnifier", "UC1 keys", "Magnifier key",
          "What the magnifier key (next to the 360 key) does.",
          {{"next-strip", "Next channel strip on the track"}, {"prev-strip", "Previous channel strip on the track"},
