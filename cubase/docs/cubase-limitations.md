@@ -6,6 +6,13 @@ in [Missing features](missing-features.md); where it made Cubase-Sixty behave di
 [On second thought](on-second-thought.md). Everything about banking and track stepping (timings, folders, what was tried)
 is collected in [Banking and track stepping](banking.md).
 
+## Plug-ins in the Control Room (14.11.2026)
+
+MIDI Remote's Direct Access does not reach plug-ins in the Control Room's inserts: on `mHostAccess.mControlRoom` it
+gives the VST Mixer (tracks, buses, the Stereo Out), and on `getMonitorChannelByIndex` / phones / cues it gives no
+object at all (#-1, runtime ID 0), even with a value bound to the channel. So the UF1's METER settings work only for a
+Meter in the MixConsole. The insert bypass, level and mute of those channels are reachable as values.
+
 ## Not available to scripts at all
 
 - **Markers.** No list of markers or cycle markers: no names, positions, colours, or which IDs exist. Only Cubase's

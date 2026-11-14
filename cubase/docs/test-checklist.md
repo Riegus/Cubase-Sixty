@@ -54,7 +54,8 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
   Pro); each draws and moves with the audio; RESET clears the holds; the key's label names the screen. V-pot 1
   picks the instance; V-pots 2-4 change the Meter's settings (labels and values above them, the plug-in window
   follows), ◄ ► page; FINE lit and finer; PLAY on Loudness; PRESETS lists the Meter's presets and loads one;
-  Digital Type / VU-PPM / RTA scale changed in the plug-in show on the UF1.
+  Digital Type / VU-PPM / RTA scale changed in the plug-in show on the UF1. A Meter in the Control Room: drawn,
+  "Only in MixConsole" above the V-pots.
 - CHANNEL encoder steps tracks (MixConsole mode skips folders and hidden tracks); push opens / closes the plug-in
   window; SHIFT + turn steps the plug-ins.
 - BYPASS: bypasses all inserts and restores them; an insert bypassed beforehand stays bypassed (Settings >
