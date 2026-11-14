@@ -1596,17 +1596,19 @@ void uf1NoProject(const char* label = "No Proj.")
 // (14.11.2026: "No Proj." stayed on the small display with a project open).
 void blankIdleName()
 {
+    // What is SHOWN, not the last name message: the script sends an empty name when nothing is selected, which
+    // leaves the display as it was (onSysex) but replaced "Waiting" in the cache (14.11.2026, after Reload Scripts).
     std::string shown;
-    {
-        std::lock_guard<std::mutex> lk(g_cacheMx);
-        auto it = g_cache.find(0x101);
-        if (it != g_cache.end() && it->second.size() > 7) shown.assign(it->second.begin() + 6, it->second.end() - 1);
-    }
+    { std::lock_guard<std::mutex> lk(g_cellMx); shown = g_trackName; }
     if (shown != "No Proj." && shown != "Waiting" && shown != "Off") return;
     // Drawn here: an empty name from Cubase keeps the last track shown (onSysex), which is what is wrong.
     { std::lock_guard<std::mutex> lk(g_cacheMx); g_cache[0x101] = {0xF0, 0x7D, 0x52, 0x36, 0x01, 0x00, 0xF7}; }
     { std::lock_guard<std::mutex> lk(g_cellMx); g_trackName.clear(); }
     screenText(::uf1::scr::kTrackName, "");
+    // "for Cubase" under "Waiting" goes too.
+    bool waitingLine = false;
+    { std::lock_guard<std::mutex> lk(g_lineMx); waitingLine = g_homeText == "for Cubase"; }
+    if (waitingLine) valueHome("");
     paintHeader(true);
 }
 // A project is open again: the strip display's own parts back (Cubase sends the rest).
