@@ -420,10 +420,26 @@ std::vector<uint8_t> loudnessReadouts()
     for (const auto& s : kSlots) {
         std::string val;
         std::vector<float> cur, pk;
-        if (sslcore::isRunning() && sslcore::getMeter(s.dt, cur, pk) && !cur.empty() && std::isfinite(cur[0]))
-            val = uf1FormatMeterDb_(cur[0]);
         sslcore::MeterInfo mi;
         const bool told = sslcore::isRunning() && sslcore::getMeterInfo(s.dt, mi) && !mi.legend.empty();
+        if (sslcore::isRunning() && sslcore::getMeter(s.dt, cur, pk) && !cur.empty() && std::isfinite(cur[0])) {
+            float v = cur[0];
+            // A "... Max" readout (True Peak Max): the plug-in's window shows the held maximum, which the stream
+            // carries as the peak; the current value kept changing on the UF1 (14.11.2026).
+            const bool isMax = told && mi.legend.find("Max") != std::string::npos;
+            if (isMax && !pk.empty() && std::isfinite(pk[0])) v = std::max(v, pk[0]);
+            val = uf1FormatMeterDb_(v);
+            static long long loggedAt[4] = {0, 0, 0, 0};
+            const int k = int(&s - kSlots);
+            const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (isMax && nowMs - loggedAt[k] > 10000) {   // to check the rule against what the plug-in shows
+                loggedAt[k] = nowMs;
+                std::printf("UF1 METER loudness readout %d \"%s\": current %.1f, peak %s, overload mode %d -> %s\n", k + 1,
+                            mi.legend.c_str(), double(cur[0]),
+                            pk.empty() ? "none" : std::to_string(pk[0]).c_str(), mi.overloadMode, val.c_str());
+            }
+        }
         const char* unit = told && !mi.unit.empty() ? mi.unit.c_str() : s.unit;
         const char* caption = told ? mi.legend.c_str() : s.caption;
         const uint8_t style = std::strcmp(unit, "dBFS") == 0 ? 0x02 : s.style;
