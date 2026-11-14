@@ -31,6 +31,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <objbase.h>
+#include <mmsystem.h>
 
 #include <chrono>
 #include <cmath>
@@ -122,6 +123,23 @@ bool makePorts()
         g_ports.push_back(p);
     }
     g_portsOurs = true;
+    return true;
+}
+
+// Whether Windows lists all ten ports yet, as inputs and as outputs. A new port shows up a moment after it is made
+// (14.11.2026: the bridge started at once did not find a single one).
+bool portsVisible()
+{
+    auto listed = [](bool input, const wchar_t* name) {
+        const UINT n = input ? midiInGetNumDevs() : midiOutGetNumDevs();
+        for (UINT i = 0; i < n; ++i) {
+            if (input) { MIDIINCAPSW c{}; if (midiInGetDevCapsW(i, &c, sizeof c) == MMSYSERR_NOERROR && wcscmp(c.szPname, name) == 0) return true; }
+            else { MIDIOUTCAPSW c{}; if (midiOutGetDevCapsW(i, &c, sizeof c) == MMSYSERR_NOERROR && wcscmp(c.szPname, name) == 0) return true; }
+        }
+        return false;
+    };
+    for (const wchar_t* name : kPortNames)
+        if (!listed(true, name) || !listed(false, name)) return false;
     return true;
 }
 
@@ -623,6 +641,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     if (!g_loopMidi && makePorts()) {
         g_bridgeArgs += L" --loopmidi";
         g_loopMidi = true;
+        // Up to 10 s for Windows to list them (the bridge also waits for each one it opens).
+        for (int i = 0; i < 50 && !portsVisible(); ++i) Sleep(200);
     }
 
     WNDCLASSW wc{};
