@@ -47,19 +47,43 @@ function flushLog(activeDevice) {
 			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
 		}
 		body.push(0xF7)
-		midiOutput.sendMidi(activeDevice, body)
+		sendMidi(activeDevice, body)
 	}
 }
 
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.3.1-dev'
+var SCRIPT_VERSION = '0.3.2-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
 var midiInput = deviceDriver.mPorts.makeMidiInput()
 var midiOutput = deviceDriver.mPorts.makeMidiOutput()
+
+// ---------------------------------------------------------------------------------------------------------------
+// A new bridge (SysEx 7F 01 from it, 14.11.2026): the bridge was restarted while the tray app kept the ports, so
+// Cubase did not activate this script again and sends nothing until something changes. The script sends again the
+// last of each kind of state it sent (RESEND: command -> how many index bytes follow it), in the order sent. Requests,
+// events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
+// positions and LEDs, the tray app gives the new bridge.)
+// ---------------------------------------------------------------------------------------------------------------
+var RESEND = { 0x1D: 0 }
+var resendLast = {}, resendSeq = 0
+function sendMidi(activeDevice, bytes) {
+	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
+		var key = bytes.slice(4, 5 + RESEND[bytes[4]]).join(',')
+		resendLast[key] = { seq: ++resendSeq, bytes: bytes.slice() }
+	}
+	midiOutput.sendMidi(activeDevice, bytes)
+}
+function resendAll(activeDevice) {
+	var list = []
+	for (var k in resendLast) list.push(resendLast[k])
+	list.sort(function (a, b) { return a.seq - b.seq })
+	for (var i = 0; i < list.length; ++i) midiOutput.sendMidi(activeDevice, list[i].bytes)
+	return list.length
+}
 deviceDriver
 	.makeDetectionUnit()
 	.detectPortPair(midiInput, midiOutput)
@@ -85,10 +109,10 @@ function encodeName(text) {
 	return out
 }
 function sendAll(activeDevice, index) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x18, (index >> 7) & 0x7F, index & 0x7F], encodeName(allTitles[index]), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x18, (index >> 7) & 0x7F, index & 0x7F], encodeName(allTitles[index]), [0xF7]))
 }
 function sendRec(activeDevice, slot) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x19, slot & 0x7F], encodeName(recTitles[slot]), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x19, slot & 0x7F], encodeName(recTitles[slot]), [0xF7]))
 }
 
 var soloed = {}, soloCount = 0, soloSent = -1
@@ -96,7 +120,7 @@ function sendSolo(activeDevice) {
 	var any = soloCount > 0 ? 1 : 0
 	if (any === soloSent) return
 	soloSent = any
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1D, any, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x1D, any, 0xF7]))
 }
 // Track steps: which channel is selected (-1: none of the list, e.g. a folder or the Stereo Out), the last one that
 // was, and the last step's target (a quick next press counts from it: Cubase reports the selection late).
@@ -179,6 +203,7 @@ for (var k = 0; k < REC_CHANNELS; ++k) {
 // The UF8 script asks for everything (SysEx 1B): send both lists, empty slots included.
 var resends = 0
 midiInput.mOnSysex = function (activeDevice, message) {
+	if (message.length >= 7 && message[4] === 0x7F && message[5] === 0x01) { out('[CubaseSixty Helper] a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if (message.length >= 7 && message[4] === 0x5C) {
 		try { stepSelect(activeDevice, message[5] ? 1 : -1) } catch (e) { out('[CubaseSixty Helper] step: ' + e) }
 		return
@@ -193,5 +218,5 @@ midiInput.mOnSysex = function (activeDevice, message) {
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
 deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
-deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); flushLog(activeDevice) }
+deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); resendLast = {}; flushLog(activeDevice) }
 deviceDriver.mOnIdle = function (activeDevice) { flushLog(activeDevice) }

@@ -1460,6 +1460,15 @@ int main(int argc, char** argv)
         try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
     });
     if (!g_helperOpen) std::fprintf(stderr, "Helper ports not available: the UF8 does not follow the selection, and its record keys stay dark.\n");
+    {
+        // A new bridge (SysEx 7F 01): scripts that are already running (the tray app kept the ports, so Cubase did not
+        // activate them again) send their state again. Before any script talks, so the UF8's bank trick below is
+        // not needed then.
+        std::vector<unsigned char> hello{0xF0, 0x7D, 0x52, 0x36, 0x7F, 0x01, 0xF7};
+        std::lock_guard<std::mutex> lk(g_outMx);
+        if (uf8Ports) { auto h = hello; g_out.send(h); }
+        if (g_helperOpen) { auto h = hello; g_helperOut.send(h); }
+    }
     const bool uf1Ports = cs::uf1Start();
     const bool uc1Ports = cs::uc1Start();
     if (!uf8Ports && !uf1Ports && !uc1Ports) {

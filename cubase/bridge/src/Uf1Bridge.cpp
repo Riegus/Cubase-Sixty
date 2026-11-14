@@ -2105,6 +2105,8 @@ bool uf1Start()
     const bool ports = g_out.open(kPortTo) && g_in.open(kPortFrom, &onMidiIn);
     g_portsOpen = ports;
     if (!ports) std::fprintf(stderr, "UF1: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortTo, kPortFrom);
+    // A new bridge: a script that is already running (the tray app kept the ports) sends its state again.
+    if (ports) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x7F, 0x01, 0xF7});
     g_mcuOpen = g_mcuOut.open(kMcuTo) && g_mcuIn.open(kMcuFrom, &onMcuIn);
     if (!g_mcuOpen) std::fprintf(stderr, "Mackie ports for scrubbing not available; SCRUB falls back to fast nudging.\n");
     return ports;

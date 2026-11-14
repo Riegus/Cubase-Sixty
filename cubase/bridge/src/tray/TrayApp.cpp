@@ -38,6 +38,9 @@
 #include <cstdio>
 #include <deque>
 #include <filesystem>
+#include <map>
+#include <mutex>
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -94,17 +97,60 @@ const wchar_t* const kPortNames[] = {
     L"Cubase-Sixty UC1 to Cubase",    L"Cubase-Sixty UC1 from Cubase",
 };
 
+// What Cubase last sent on each "from Cubase" port, for a new bridge: Cubase's own values (fader positions, LEDs,
+// meters: what the scripts' bindings send, which the scripts cannot send again) and whether a project is open (7C).
+// The scripts send their own state again when the new bridge says hello (SysEx 7F 01). Keyed by kind: a note by
+// channel and number, a controller by channel and number, pitch bend by channel.
+struct Kept { unsigned long long seq = 0; std::vector<BYTE> msg; };
+std::mutex g_keptMx;
+std::map<VmPort*, std::map<unsigned, Kept>> g_kept;
+std::vector<VmPort*> g_fromPorts;   // the "... from Cubase" ports
+unsigned long long g_keptSeq = 0;
+
+unsigned keptKey(const BYTE* d, DWORD n)
+{
+    const BYTE st = d[0], hi = st & 0xF0;
+    if (st == 0xF0) return (n >= 6 && d[4] == 0x7C) ? 0xF07Cu : 0u;   // the project open / closed
+    if (n >= 3 && (hi == 0x80 || hi == 0x90)) return (0x90u | (st & 0x0F)) << 8 | d[1];
+    if (n >= 3 && (hi == 0xA0 || hi == 0xB0)) return unsigned(st) << 8 | d[1];
+    if (n >= 3 && hi == 0xE0) return unsigned(st) << 8;
+    if (n >= 2 && hi == 0xD0) return unsigned(st) << 8;
+    return 0;
+}
+
 // What a program writes to a port goes back out of it, to the programs reading it. Whole messages (parsed), so a
 // SysEx is passed on in one piece. (length 0: the port is being closed.)
 void CALLBACK loopBack(VmPort* port, LPBYTE data, DWORD length, DWORD_PTR)
 {
-    if (port && data && length && g_vmSend) g_vmSend(port, data, length);
+    if (!port || !data || !length || !g_vmSend) return;
+    g_vmSend(port, data, length);
+    if (std::find(g_fromPorts.begin(), g_fromPorts.end(), port) == g_fromPorts.end()) return;
+    if (const unsigned key = keptKey(data, length)) {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        Kept& k = g_kept[port][key];
+        k.seq = ++g_keptSeq;
+        k.msg.assign(data, data + length);
+    }
+}
+
+// A new bridge has opened the ports: what Cubase last sent, in the order it was sent.
+void replayKept()
+{
+    std::vector<std::pair<VmPort*, Kept>> all;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (auto& p : g_kept) for (auto& k : p.second) all.emplace_back(p.first, k.second);
+    }
+    std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.second.seq < b.second.seq; });
+    for (auto& a : all) g_vmSend(a.first, a.second.msg.data(), DWORD(a.second.msg.size()));
 }
 
 void closePorts()
 {
     if (g_vmClose) for (VmPort* p : g_ports) if (p) g_vmClose(p);
     g_ports.clear();
+    g_fromPorts.clear();
+    { std::lock_guard<std::mutex> lk(g_keptMx); g_kept.clear(); }
     g_portsOurs = false;
 }
 
@@ -121,6 +167,7 @@ bool makePorts()
         VmPort* p = g_vmCreate(name, &loopBack, 0, kMaxSysex, kBoth | kParseRx);
         if (!p) { closePorts(); return false; }   // all or none
         g_ports.push_back(p);
+        if (wcsstr(name, L"from Cubase")) g_fromPorts.push_back(p);
     }
     g_portsOurs = true;
     return true;
@@ -364,6 +411,8 @@ void readLogLine(const std::string& line)
         while (!url.empty() && (url.back() == '\r' || url.back() == ' ')) url.pop_back();
         g_status.settingsUrl = url;
     }
+    // The bridge is up with its ports open: what Cubase last sent, for it (nothing yet on the first start).
+    if (has("Bridging; Ctrl+C to stop") && g_portsOurs) replayKept();
     if (has("Cubase connected")) { g_status.cubase = "connected"; g_status.projectOpen = true; }
     if (has("Cubase: project open")) { g_status.cubase = "project open"; g_status.projectOpen = true; }
     if (has("Cubase: no project")) { g_status.cubase = "no project (the Hub)"; g_status.projectOpen = false; }

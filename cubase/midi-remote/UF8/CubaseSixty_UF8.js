@@ -30,7 +30,7 @@ function flushLog(activeDevice) {
 			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
 		}
 		body.push(0xF7)
-		midiOutput.sendMidi(activeDevice, body)
+		sendMidi(activeDevice, body)
 	}
 }
 
@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.16.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.16.1-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -54,6 +54,30 @@ var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF8', 'Riegus
 
 var midiInput = deviceDriver.mPorts.makeMidiInput()
 var midiOutput = deviceDriver.mPorts.makeMidiOutput()
+
+// ---------------------------------------------------------------------------------------------------------------
+// A new bridge (SysEx 7F 01 from it, 14.11.2026): the bridge was restarted while the tray app kept the ports, so
+// Cubase did not activate this script again and sends nothing until something changes. The script sends again the
+// last of each kind of state it sent (RESEND: command -> how many index bytes follow it), in the order sent. Requests,
+// events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
+// positions and LEDs, the tray app gives the new bridge.)
+// ---------------------------------------------------------------------------------------------------------------
+var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x20: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
+var resendLast = {}, resendSeq = 0
+function sendMidi(activeDevice, bytes) {
+	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
+		var key = bytes.slice(4, 5 + RESEND[bytes[4]]).join(',')
+		resendLast[key] = { seq: ++resendSeq, bytes: bytes.slice() }
+	}
+	midiOutput.sendMidi(activeDevice, bytes)
+}
+function resendAll(activeDevice) {
+	var list = []
+	for (var k in resendLast) list.push(resendLast[k])
+	list.sort(function (a, b) { return a.seq - b.seq })
+	for (var i = 0; i < list.length; ++i) midiOutput.sendMidi(activeDevice, list[i].bytes)
+	return list.length
+}
 
 deviceDriver
 	.makeDetectionUnit()
@@ -309,7 +333,7 @@ for (var i = 0; i < STRIPS; ++i) {
 				var v = meterToMidi(value)
 				if (v === last) return
 				last = v
-				midiOutput.sendMidi(activeDevice, [0xB0, cc, v])
+				sendMidi(activeDevice, [0xB0, cc, v])
 			}
 		}
 		try {
@@ -368,14 +392,14 @@ for (var i = 0; i < STRIPS; ++i) {
 			var text = String(value) + (units ? units : '')
 			if (text === lastPanText) return
 			lastPanText = text
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
+			sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
 		}
 		function panPos(activeDevice, value) {
 			if (stripOwnsPan(index)) return
 			var pos = Math.max(0, Math.min(127, Math.round(value * 127)))
 			if (pos === lastPanPos) return
 			lastPanPos = pos
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, pos, 0xF7]))
+			sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, pos, 0xF7]))
 		}
 		function dbText(activeDevice, value) {
 			var text = String(value)
@@ -383,7 +407,7 @@ for (var i = 0; i < STRIPS; ++i) {
 			if (stripOwnsDb(index)) return   // strip mode: the dB field shows the plug-in's control
 			if (text === lastDb) return
 			lastDb = text
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
+			sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 		}
 		dbResend[index] = function (activeDevice) { lastDb = null; if (trackDb[index] !== undefined) dbText(activeDevice, trackDb[index]) }
 		// Strip mode: the V-pot on the SSL strip's pan; Cubase's track pan is kept for the way back.
@@ -393,8 +417,8 @@ for (var i = 0; i < STRIPS; ++i) {
 		}
 		stripPanShow[index] = function (activeDevice, text, pos) {
 			lastPanText = null; lastPanPos = null
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, Math.max(0, Math.min(127, Math.round(pos * 127))), 0xF7]))
+			sendMidi(activeDevice, SYSEX_HEADER.concat([0x07, index], toAscii7(text), [0xF7]))
+			sendMidi(activeDevice, SYSEX_HEADER.concat([0x06, index, Math.max(0, Math.min(127, Math.round(pos * 127))), 0xF7]))
 		}
 		function vpotDisplay(activeDevice, value, units) {
 			vpotShown.value = value; vpotShown.units = units
@@ -491,11 +515,11 @@ function to7bit(value) {
 }
 
 function sendStripName(activeDevice, index, text) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_NAME, index], toAscii7(text), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_NAME, index], toAscii7(text), [0xF7]))
 }
 
 function sendStripColor(activeDevice, index, r, g, b) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_COLOR, index, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([SYSEX_COLOR, index, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +553,7 @@ function updateArmable(activeDevice, index) {
 	var armable = isRecordable(stripTitles[index])
 	if (armableSent[index] === armable) return
 	armableSent[index] = armable
-	midiOutput.sendMidi(activeDevice, [0x90, 64 + index, armable ? 0 : 127])
+	sendMidi(activeDevice, [0x90, 64 + index, armable ? 0 : 127])
 }
 
 // The recordable tracks' names come from the helper script (SysEx 19 via the bridge, see the end of this
@@ -584,7 +608,7 @@ function seekCheck(activeDevice) {
 	// Setting a hidden control from the script did not move the bank, so ask the bridge to send a
 	// bank-right key press (SysEx 0B), exactly as if the key had been pressed.
 	seek.ownPresses++
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0B, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x0B, 0xF7]))
 }
 
 function seekOnTitle(activeDevice) {
@@ -743,7 +767,7 @@ var followQuietUntil = 0
 	function startupFreeze(activeDevice, on) {
 		if (startupFrozen === on) return
 		startupFrozen = on
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, on ? 1 : 0, 0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, on ? 1 : 0, 0xF7]))
 	}
 	function nowMs() {
 		try { var t = Date.now(); if (typeof t === 'number' && t > 0) return t } catch (e) {}
@@ -810,7 +834,7 @@ var followQuietUntil = 0
 			var c = currentTitle.charCodeAt(n)
 			name.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
 		}
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1C, rank & 0x7F], name, [0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1C, rank & 0x7F], name, [0xF7]))
 	}
 	function currentOffset() {
 		// The bank position: where the strips' names appear in the full list.
@@ -848,7 +872,7 @@ var followQuietUntil = 0
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
 			out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps')
-			midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x10, banks, 0xF7]))
+			sendMidi(activeDevice, SYSEX_HEADER.concat([0x10, banks, 0xF7]))
 			dueMs = now + banks * 100 + 1000   // the bridge spaces the presses 100 ms apart and shows the end 400 ms later
 			return
 		}
@@ -857,7 +881,7 @@ var followQuietUntil = 0
 		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
 		steps = Math.max(1, Math.min(steps, 64))
 		out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right'))
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
 		dueMs = now + steps * 100 + 800
 	}
 	deviceDriver.mOnIdle = function (activeDevice) {
@@ -889,7 +913,7 @@ var followQuietUntil = 0
 		sentTotal = total
 		sentOffset = offset
 		function two(v) { return v < 0 ? [0x7F, 0x7F] : [(v >> 7) & 0x7F, v & 0x7F] }
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x12]).concat(two(total)).concat(two(offset)).concat([0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x12]).concat(two(total)).concat(two(offset)).concat([0xF7]))
 	}
 	followOnStripTitle = function (activeDevice) { reportBank(activeDevice) }
 	var resetKey = cmdButton()
@@ -919,11 +943,12 @@ var listRequestAt = 0
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	out('[CubaseSixty] inactive (no project)')
 	try { followStop(activeDevice) } catch (e) {}
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x00, 0xF7]))
+	resendLast = {}   // the project's state goes with it
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x00, 0xF7]))
 	flushLog(activeDevice)
 }
 deviceDriver.mOnActivate = function (activeDevice) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7]))
 	if (!driverActivations++) return   // the first activation is Cubase's start: everything starts anyway
 	out('[CubaseSixty] active again (a project is open)')
 	listNamesSeen = 0
@@ -933,7 +958,7 @@ deviceDriver.mOnActivate = function (activeDevice) {
 function requestListsIfNeeded(activeDevice, now) {
 	if (listNamesSeen > 0 || now < listRequestAt) return
 	listRequestAt = now + 2000
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1B, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x1B, 0xF7]))
 }
 function decodeName(m, from) {
 	var s = ''
@@ -944,6 +969,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
 	if (m.length < 6 || m[0] !== 0xF0 || m[1] !== 0x7D || m[2] !== 0x52 || m[3] !== 0x36) return
+	if (m[4] === 0x7F && m[5] === 0x01) { out('[CubaseSixty] a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if (m[4] >= 0x21 && m[4] <= 0x2D) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
@@ -1085,7 +1111,7 @@ function skReport(activeDevice, index) {
 	var key = body.join(',')
 	if (key === skStrip[index].sent) return   // unchanged
 	skStrip[index].sent = key
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7]))
 }
 function skReportAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) skReport(activeDevice, i) }
 // ---------------------------------------------------------------------------
@@ -1198,7 +1224,7 @@ function stripModeUpdate(activeDevice, index) {
 	st.vOn = vOn
 	if (changed) { st.fPolled = st.vPolled = st.vOnPolled = null }
 	if (changed) {
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
 		flipResets[index](activeDevice)   // the track's own values where the script no longer has them
 	}
 	if (on) stripFaderSend(activeDevice, index)
@@ -1224,10 +1250,10 @@ function daUnits(da, obj, tag) {
 // The fader's target shown: a plug-in's fader level or a send level in the dB field, a plug-in's pan on the value line.
 function stripFaderShow(activeDevice, index) {
 	var st = skStrip[index]
-	if (st.fObj < 0) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(''), [0xF7])); return }
+	if (st.fObj < 0) { sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(''), [0xF7])); return }
 	var text = daText(skDa[index], st.fObj, st.fTag)
 	if (st.fKind === 'plugin' && st.fTag === st.panTag) stripPanShow[index](activeDevice, text, skDa[index].getParameterProcessValue(skAm, st.fObj, st.fTag))
-	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
+	else sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 }
 // The V-pot's target shown: a send on the value line ("Send" + level) and a unipolar ring; a plug-in's pan on the
 // value line, its fader level in the dB field.
@@ -1251,19 +1277,19 @@ function stripPanSend(activeDevice, index) {
 			var p14 = Math.round(Math.max(0, Math.min(1, read)) * 16383)
 			exact = [(p14 >> 7) & 0x7F, p14 & 0x7F]
 		}
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(text), [0xF7]))
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos], exact || [], [0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0D, index], toAscii7(text), [0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, index, pos], exact || [], [0xF7]))
 		return
 	}
 	var text2 = daText(st.vDa, st.vObj, st.vTag)
 	if (st.vTag === st.panTag) stripPanShow[index](activeDevice, text2, st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag))
-	else midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text2), [0xF7]))
+	else sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text2), [0xF7]))
 }
 function stripModeUpdateAll(activeDevice) { for (var i = 0; i < STRIPS; ++i) stripModeUpdate(activeDevice, i) }
 function stripFaderSend(activeDevice, index) {
 	var st = skStrip[index]
 	var v = st.fObj < 0 ? 0 : Math.round(Math.max(0, Math.min(1, skDa[index].getParameterProcessValue(skAm, st.fObj, st.fTag))) * 16383)
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x27, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x27, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
 	stripFaderShow(activeDevice, index)
 }
 // The selected track's sends changed elsewhere (the mouse, automation, our own writes): the V-pots show them.
@@ -1296,7 +1322,7 @@ function selWindowOpen(activeDevice, index) {
 	if (st && st.obj >= 0) { try { title = String(skDa[index].getObjectTitle(skAm, st.obj)) } catch (e) {} }
 	if (!st || st.obj < 0 || st.slot < 0 || !title || !selWin.viewer || !skAm) {
 		out('[CubaseSixty] SEL on the selected track, strip ' + (index + 1) + ': ' + (st && st.obj >= 0 ? 'SSL strip slot not known' : 'no SSL channel strip') + ', channel editor')
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x2C, index, 0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x2C, index, 0xF7]))
 		return
 	}
 	try {
