@@ -752,6 +752,9 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (ev.id >= 0x09 && ev.id <= 0x0C && g_presetsOpen) { if (ev.pressed && ev.id == 0x0C) g_browserLoad = true; break; }   // V-pot 4 = Select
+        // METER: the V-pot pushes do nothing (as Rea-Sixty's uf1_vpot_reset in the meter view). Passed on, they were the
+        // DAW view's send on / off: a send of the selected track switched, out of sight (14.11.2026).
+        if (ev.id >= 0x09 && ev.id <= 0x0C && g_view == kViewMeter) break;
         if (ev.id >= 0x09 && ev.id <= 0x0C && plugActive()) { if (ev.pressed) plugEvent(1, uint8_t(ev.id - 0x09), 0); break; }
         // Quick key 1 (without SHIFT): clear every solo (MIDI channel 2, note 20; the script runs Cubase's
         // "Deactivate All Solo").
