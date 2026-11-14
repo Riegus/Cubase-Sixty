@@ -2892,12 +2892,16 @@ socket_t currentMeterConnLocked_(uint16_t* portOut = nullptr)
 }
 // A value body: field 1 a double (09), a whole number (08: a switch, 1 = off, 2 = on)
 // or a float (0d); field 2 the plug-in's own text, which switches carry. An empty
-// body is the protobuf default, 0.
+// body is the protobuf default, 0. MEASURED 14.11.2026: the type-0x22 objects (LED
+// overload, loudness target, alerts, history window) report `0a <text> 1a <09 double>
+// 22 <unit>` instead: the text ("-23", "Off", "30 secs"), the number nested in field 3
+// (Off = 999), the unit ("LUFS").
 void parseObjValue_(const std::vector<uint8_t>& b, ObjValue& out)
 {
     out.num = 0.0;
     out.form = 0;
     out.text.clear();
+    out.unit.clear();
     pbWalk_(b.data(), b.size(), [&](uint32_t f, uint32_t w, const uint8_t* v, size_t n) {
         if (f == 1 && w == 1 && n == 8) { std::memcpy(&out.num, v, 8); out.form = 1; }
         else if (f == 1 && w == 5 && n == 4) { float x; std::memcpy(&x, v, 4); out.num = x; out.form = 3; }
@@ -2906,7 +2910,14 @@ void parseObjValue_(const std::vector<uint8_t>& b, ObjValue& out)
             uint64_t x = 0; int sh = 0;
             for (size_t k = 0; k < n && sh < 64; ++k, sh += 7) x |= uint64_t(v[k] & 0x7f) << sh;
             out.num = double(x);
-        } else if (f == 2 && w == 2) out.text.assign(reinterpret_cast<const char*>(v), n);
+        } else if ((f == 1 || f == 2) && w == 2) out.text.assign(reinterpret_cast<const char*>(v), n);
+        else if (f == 4 && w == 2) out.unit.assign(reinterpret_cast<const char*>(v), n);
+        else if (f == 3 && w == 2) {
+            out.form = 4;
+            pbWalk_(v, n, [&](uint32_t f2, uint32_t w2, const uint8_t* v2, size_t n2) {
+                if (f2 == 1 && w2 == 1 && n2 == 8) std::memcpy(&out.num, v2, 8);
+            });
+        }
     });
 }
 std::string hexOf_(const std::vector<uint8_t>& b)
@@ -2959,6 +2970,11 @@ bool meterObjWrite(const char* name, double value, int form)
     if (form == 1) {
         v.push_back(0x08);
         putVarint(v, uint64_t(std::llround(value < 0 ? 0 : value)));
+    } else if (form == 2) {
+        v = {0x1a, 0x09, 0x09};
+        uint8_t b[8];
+        std::memcpy(b, &value, 8);
+        v.insert(v.end(), b, b + 8);
     } else {
         v.push_back(0x09);
         uint8_t b[8];
@@ -2998,7 +3014,8 @@ bool meterObjWrite(const char* name, double value, int form)
         std::lock_guard<std::mutex> lk(g_cmdMx);
         g_cmdQueue.emplace_back(port, propFrame(obj, v));
     }
-    slogAlways("[mset] SENT %s = %g  as %s  port=%u", name, value, form == 1 ? "varint" : "double",
+    slogAlways("[mset] SENT %s = %g  as %s  port=%u", name, value,
+               form == 1 ? "varint" : form == 2 ? "nested double" : "double",
                unsigned(port));
     if (!dump.empty()) {
         slogAlways("[mset] port %u: %zu objects and their values:", unsigned(port), dump.size());

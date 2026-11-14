@@ -4,8 +4,9 @@
 // setting, the plug-in's own window follows, and the plug-in answers with the new value. Enums go as their index
 // (the reconstructed SSL 360 enums, analysis/ssl360-protobuf), numbers in their own units (-18.0 = -18.0 dBFS),
 // switches as `08 2` on / `08 1` off (the shape SSL's own RESET commands use), unless the plug-in reports them as
-// doubles. The declaration type 0x22 (LED overload, loudness target, alerts, history window, dialogue content) has
-// not been seen with a value yet: read as a number, logged ([mset]) to check.
+// doubles. The declaration type 0x22 (LED overload, loudness target, alerts, history window, dialogue content)
+// reports its own text, the number nested in field 3 and a unit (`0a "-23" 1a {09 -23.0} 22 "LUFS"`; Off = 999):
+// shown with the plug-in's text, written in the same nested shape.
 
 #include "Uf1MeterSsl.h"
 
@@ -20,7 +21,8 @@ namespace cs::uf1meterssl {
 
 namespace {
 
-enum Kind { kNone, kEnum, kSwitch, kNum };
+enum Kind { kNone, kEnum, kSwitch, kNum, kText };   // kText: type 0x22, a number with the plug-in's own text
+constexpr double kOff = 999.0;                        // what a type-0x22 object reports for "Off"
 
 struct Spec {
     const char* wire = nullptr;
@@ -31,6 +33,9 @@ struct Spec {
     int decimals = 0;
     const char* unit = "";
     bool fixedStep = false;                // FINE does not apply (a number with fixed steps)
+    bool off = false;                      // kText: one step past hi is Off (999)
+    const double* list = nullptr;          // kText: the values it steps through, instead of lo / hi / step
+    int listCount = 0;
 };
 
 const char* const kOffOn[] = {"Off", "On"};
@@ -73,6 +78,23 @@ Spec num(const char* w, double lo, double hi, double step, int dec, const char* 
     return s;
 }
 
+Spec txt(const char* w, double lo, double hi, double step, int dec, const char* unit, bool off)
+{
+    Spec s = num(w, lo, hi, step, dec, unit, true);
+    s.kind = kText;
+    s.off = off;
+    return s;
+}
+// The loudness history window, in seconds (0 = Auto Condense; the plug-in's own list is not known, these are tried).
+const double kHistory[] = {0, 10, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 43200, 86400};
+Spec history()
+{
+    Spec s = txt("LoudnessHistoryViewSize", 0, 86400, 1, 0, "s", false);
+    s.list = kHistory;
+    s.listCount = int(sizeof(kHistory) / sizeof(kHistory[0]));
+    return s;
+}
+
 // By row: the script's METER_PARAMS order (the plug-in's parameter list).
 const Spec& spec(int row)
 {
@@ -93,7 +115,7 @@ const Spec& spec(int row)
         en("AnalogueMetersDualFormat", kDualFormat),                         // 12
         en("AnalogueCustomMeterLeft", kSource),                              // 13
         en("AnalogueCustomMeterRight", kSource),                             // 14
-        num("AnalogueMetersLedOverload", 0, 25, 1, 0, "dB", true),           // 15 (type 0x22)
+        txt("AnalogueMetersLedOverload", 0, 24, 1, 0, "dB", true),           // 15 (type 0x22)
         en("LissajousFadeTime", kFade),                                      // 16
         sw("SumCompensation", kOffOn),                                       // 17
         en("RtaPeakHold", kRtaPeakHold),                                     // 18
@@ -103,28 +125,28 @@ const Spec& spec(int row)
         en("RtaScaleTop", kScaleTop),                                        // 22
         en("RtaScaleBottom", kScaleBottom),                                  // 23
         en("LoudnessOperation", kOperation),                                 // 24
-        num("LoudnessHistoryViewSize", 0, 86400, 1, 0, "", true),            // 25 (type 0x22)
+        history(),                                                           // 25 (type 0x22)
         sw("LoudnessHistoryAutoScroll", kScroll),                            // 26
         sw("LoudnessTruePeakEnabled", kOffOn),                               // 27
         sw("LoudnessDialogueDetection", kOffOn),                             // 28
-        num("LoudnessMinDialogueContent", 0, 100, 2, 0, "%"),                // 29 (type 0x22)
+        txt("LoudnessMinDialogueContent", 0, 100, 2, 0, "%", false),         // 29 (type 0x22)
         en("LoudnessGateModeI", kGate),                                      // 30
         sw("LoudnessOverlapIEnabled", kOffOn),                               // 31
         num("LoudnessIntegrationTimeM", 10, 1000, 20, 1, "ms"),              // 32
         num("LoudnessIntegrationTimeS", 1, 60, 1, 1, "s"),                   // 33
         sw("LoudnessModeLeqm", kLoudMode),                                   // 34
         num("LoudnessSurroundWeighting", -1.5, 1.5, 0.5, 1, "dB", true),     // 35
-        num("LoudnessTargetI", -36, 0, 1, 0, "LUFS"),                        // 36 (type 0x22)
+        txt("LoudnessTargetI", -36, 0, 1, 0, "LUFS", false),                 // 36 (type 0x22)
         num("LoudnessTargetIVariance", 0, 20, 0.5, 1, "LU"),                 // 37
         sw("LoudnessAlertI", kOffOn),                                        // 38
         sw("LoudnessAlertDialogueI", kOffOn),                                // 39
-        num("LoudnessAlertS", -70, 30, 1, 1, ""),                            // 40 (type 0x22)
-        num("LoudnessAlertM", -70, 30, 1, 1, ""),                            // 41 (type 0x22)
+        txt("LoudnessAlertS", -70, 30, 1, 1, "", true),                      // 40 (type 0x22)
+        txt("LoudnessAlertM", -70, 30, 1, 1, "", true),                      // 41 (type 0x22)
         num("LoudnessAlertRangeMin", 0, 29, 0.5, 1, "LU"),                   // 42
         num("LoudnessAlertRangeMax", 1, 30, 0.5, 1, "LU"),                   // 43
         num("LoudnessAlertDialogueRangeMin", 0, 29, 0.5, 1, "LU"),           // 44
         num("LoudnessAlertDialogueRangeMax", 1, 30, 0.5, 1, "LU"),           // 45
-        num("LoudnessAlertTruePeak", -20, 0, 0.5, 1, "dBFS"),                // 46 (type 0x22)
+        txt("LoudnessAlertTruePeak", -20, 0, 0.5, 1, "dBFS", true),          // 46 (type 0x22)
         en("LoudnessMeterScaleRange", kScaleRange),                          // 47
         sw("LoudnessMeterDisplayRelative", kDisplay),                        // 48
         sw("LoudnessTerminologyK", kTerms),                                  // 49
@@ -169,7 +191,7 @@ const Slot& slotOf(int screen, int page, int k)
     }
 }
 
-struct Value { bool ok = false; double v = 0; int index = 0; bool on = false; bool varint = true; std::string text; };
+struct Value { bool ok = false; double v = 0; int index = 0; bool on = false; bool varint = true; std::string text, unit; };
 
 Value read(const Spec& s)
 {
@@ -179,6 +201,7 @@ Value read(const Spec& s)
     r.ok = true;
     r.v = o.num;
     r.text = o.text;
+    r.unit = o.unit;
     if (s.kind == kEnum) r.index = std::clamp(int(std::lround(o.num)), 0, s.count - 1);
     if (s.kind == kSwitch) {
         // A switch reported as a whole number is 1 off / 2 on (as SSL's RESET commands); as a double, 0 / 1. Not
@@ -195,6 +218,10 @@ std::string format(const Spec& s, const Value& v)
     switch (s.kind) {
         case kEnum: return s.labels[v.index];
         case kSwitch: return s.labels[v.on ? 1 : 0];
+        case kText:
+            if (!v.text.empty()) return v.unit.empty() ? v.text : v.text + " " + v.unit;   // the plug-in's own
+            if (s.off && v.v >= kOff - 0.5) return "Off";
+            [[fallthrough]];
         case kNum: {
             char b[32];
             std::snprintf(b, sizeof(b), "%.*f%s%s", s.decimals, v.v, *s.unit ? " " : "", s.unit);
@@ -209,7 +236,8 @@ double norm(const Spec& s, const Value& v)
     switch (s.kind) {
         case kEnum: return s.count > 1 ? double(v.index) / double(s.count - 1) : 0.0;
         case kSwitch: return v.on ? 1.0 : 0.0;
-        case kNum: return s.hi > s.lo ? std::clamp((v.v - s.lo) / (s.hi - s.lo), 0.0, 1.0) : 0.0;
+        case kNum:
+        case kText: return s.hi > s.lo ? std::clamp((v.v - s.lo) / (s.hi - s.lo), 0.0, 1.0) : 0.0;
         default: return 0.0;
     }
 }
@@ -237,6 +265,31 @@ void write(const Spec& s, const Value& cur, int notches, bool fine)
             nv = std::clamp(cur.v + notches * step, s.lo, s.hi);
             nv = std::round(nv / step) * step;   // on the step grid, so FINE lands back on whole steps
             nv = std::clamp(nv, s.lo, s.hi);
+            if (std::fabs(nv - cur.v) < 1e-9) return;
+            break;
+        }
+        case kText: {
+            form = 2;
+            if (s.list) {
+                // The nearest value in the list, then one a notch.
+                int i = 0;
+                for (int k = 1; k < s.listCount; ++k) if (std::fabs(s.list[k] - cur.v) < std::fabs(s.list[i] - cur.v)) i = k;
+                const int j = std::clamp(i + notches, 0, s.listCount - 1);
+                if (j == i && std::fabs(s.list[i] - cur.v) < 1e-9) return;
+                nv = s.list[j];
+                break;
+            }
+            const bool isOff = s.off && cur.v >= kOff - 0.5;
+            const double step = s.step;   // the plug-in's own steps (whole dB / LU): no FINE
+            (void)fine;
+            if (isOff) {
+                if (notches > 0) return;
+                nv = s.hi + (notches + 1) * step;   // the first notch down from Off is the top of the range
+            } else {
+                nv = cur.v + notches * step;
+                if (s.off && nv > s.hi + 1e-9) nv = kOff;
+            }
+            if (nv != kOff) nv = std::clamp(std::round(nv / step) * step, s.lo, s.hi);
             if (std::fabs(nv - cur.v) < 1e-9) return;
             break;
         }
