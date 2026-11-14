@@ -127,6 +127,11 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   send level) takes a quarter step; values Cubase or the script counts (pan, a focused parameter, strip pan) get
   one whole step for every four, the rest kept until the direction changes.
 
+- **UF1 METER V-pots** (13.–14.11.2026): a notch is 4 counts; an enum or switch moves one value a notch, a number
+  2 % of its range (a quarter with FINE), as Rea-Sixty. A Meter in the Control Room (set over SSL's protocol) steps in
+  the plug-in's own units instead: 1 dB for the reference level and loudness target, 10–20 ms for times, 0.5 LU for
+  loudness ranges; RTA scale top / bottom one value a notch (they are lists on the wire).
+
 - The UC1's knob step is a setting (SysEx 4E to the script).
 - The CHANNEL encoders step tracks by selecting the next channel directly (the Helper script), not by counting
   Cubase's next / previous track: see banking.md.

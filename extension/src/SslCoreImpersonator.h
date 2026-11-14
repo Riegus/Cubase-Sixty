@@ -117,15 +117,27 @@ void objTestSet(const char* name, int value);
 // answer is read off the log rather than out of someone watching a switch.
 void objTestRun(const char* name);
 
-// ⚠ EXPERIMENT (Cubase-Sixty, 14.11.2026). Write one of the SELECTED Meter's settings
-// (currentMeterPort) over the protocol, for a Meter the host cannot reach. `name` is
-// the wire id ("AnalogueMetersMode"); form 0 sends `09 <double>` (the shape the plug-in
-// reports its settings in), 1 `08 <varint>`. Logged as [mset] SENT, with whatever the
-// plug-in reports back on that object for 3 s as [mset] ECHO, and the instance's
-// declarations once. false = no instance / connection to send to.
+// The SELECTED Meter's settings over the protocol (Cubase-Sixty, 14.11.2026), for a
+// Meter the host cannot reach (Cubase's Control Room inserts). Objects are named by
+// their wire id ("AnalogueMetersMode"); only objects the plug-in declared are read or
+// written. Thread-safe.
+struct ObjValue {
+    bool        declared = false;
+    int         type = -1;     // the declaration's type code: 01 switch, 02 number, 11.. enums
+    bool        seen = false;  // a value has been reported (else num is the default, 0)
+    int         form = 0;      // how field 1 came: 0 absent (the default), 1 double, 2 varint, 3 float
+    double      num  = 0.0;    // a double, or a whole number (switches: 1 off, 2 on)
+    std::string text;          // the plug-in's own text, where it sends one (switches)
+};
+bool meterObjGet(const char* name, ObjValue& out);
+// Whether the selected Meter has a connection that declared its settings.
+bool meterObjAvailable();
+// Counts every change of any reported value: poll it to know when to redraw.
+uint64_t meterObjSeq();
+// Write: form 0 `09 <double>` (numbers and enum indices), 1 `08 <varint>` (switches:
+// 2 on, 1 off). Logged as [mset] SENT, the plug-in's answer for 3 s as [mset] ECHO, and
+// the instance's objects with their values once. false = nothing to send to.
 bool meterObjWrite(const char* name, double value, int form);
-// The selected Meter's current value of a meterFingerprintIds setting, as streamed.
-bool meterObjValue(const char* name, double& out);
 
 // Press a plug-in switch that is not a host parameter, over the protocol.
 // "HighQuality" is the strips' HQ Mode, "StateASelected" their A/B compare —
