@@ -4,7 +4,9 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## Bridge
 
-- **Cubase does not reconnect reliably after a bridge restart** (14.11.2026). Bridge down about 6 s with Cubase and
+- **Fixed (14.11.2026, wip/bridge-reconnect): the tray app holds the ports; a new bridge says hello, the scripts
+  send their state again and the tray app gives it Cubase's own values. Back within a second, tested.**
+  **Cubase does not reconnect reliably after a bridge restart** (14.11.2026). Bridge down about 6 s with Cubase and
   a project open: Cubase sent nothing for over 2 minutes; Reload Scripts brought back only Cubase → surfaces (the
   displays updated, faders, keys and the UF1 reached nothing); a Cubase restart fixed it. Matters for the release:
   the tray app restarts a bridge that stops. To measure first: how long Cubase takes to see the new ports, in each
