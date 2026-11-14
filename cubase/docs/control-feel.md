@@ -122,6 +122,7 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
 - **UF8 FOCUS / the value under the mouse** (13.11.2026): Cubase's increment is about 0.4 % of the range; one a
   notch felt like FINE held. Four a notch (about 1.6 %, near the V-pots' 1 %); FINE one.
 - **UF8 V-pot push** (13.11.2026): centres the pan, as Rea-Sixty (a setting gives back the channel editor).
+- **UF1 pan knob push** (14.11.2026): centres the pan, as Rea-Sixty; it did nothing before.
 
 - **UF8 FINE** (13.11.2026): a quarter of the way while held (double press latches). A value the bridge keeps (a
   send level) takes a quarter step; values Cubase or the script counts (pan, a focused parameter, strip pan) get

@@ -62,6 +62,8 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
   drawn, its settings on the V-pots (over SSL's protocol), the plug-in's window and the UF1's screens follow; PLAY and
   PRESETS work; a change in the plug-in's window shows on the UF1. Loudness: the readouts as the plug-in's (True Peak
   Max holds, "---" after RESET), the time labels under the history as the plug-in's; PPM readouts not below 0.0.
+- UF1: the pan knob's push centres the pan (also on MASTER, and with FLIP); ◀ ▶ left of CYCLE go to the previous /
+  next marker (with SHIFT still Read / Write).
 - CHANNEL encoder steps tracks (MixConsole mode skips folders and hidden tracks); push opens / closes the plug-in
   window; SHIFT + turn steps the plug-ins.
 - BYPASS: bypasses all inserts and restores them; an insert bypassed beforehand stays bypassed (Settings >

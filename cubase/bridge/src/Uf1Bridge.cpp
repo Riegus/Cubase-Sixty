@@ -593,6 +593,12 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             break;
         }
         if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
+        // ◀ ▶ in the quick-key row (without SHIFT): the previous / next marker (14.11.2026; with SHIFT they are Read /
+        // Write, above). The same notes as SHIFT + jog: Locate Previous / Next Marker.
+        if (ev.id == 0x30 || ev.id == 0x31) {
+            if (ev.pressed) { note(ev.id == 0x31 ? 80 : 79, true); note(ev.id == 0x31 ? 80 : 79, false); }
+            break;
+        }
         // SCRUB toggles the jog between nudging the cursor and Cubase's jog (scrubbing). LED on = scrub.
         // BYPASS (the key above the display). The script reports the state as note 62 (see onMidiIn) for the LED. A
         // press goes to the script (SysEx 1F), which decides (it has each slot's state for the selected track): it

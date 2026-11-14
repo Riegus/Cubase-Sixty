@@ -33,7 +33,7 @@ function flushLog(activeDevice) {
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.6-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.7-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
@@ -153,7 +153,14 @@ var stripMaster = stripArea.makeSubPage('Main output')
 var stripSelectedFlip = stripArea.makeSubPage('Selected track, flipped')
 var stripMasterFlip = stripArea.makeSubPage('Main output, flipped')
 
+// The pan knob's push (note 32, 14.11.2026): the pan to the centre, as Rea-Sixty (uf1_above_vpot_push), of what the
+// strip is on (the selected track or the main output, flipped or not). Through this variable, bound to the pan and
+// only written (as the UF8's V-pot push without Direct Access).
+var panCentre = surface.makeCustomValueVariable('panCentre')
+
 function bindStrip(values, normal, flipped) {
+	page.makeValueBinding(panCentre, values.mPan).setSubPage(normal)
+	page.makeValueBinding(panCentre, values.mPan).setSubPage(flipped)
 	page.makeValueBinding(fader.mSurfaceValue, values.mVolume).setValueTakeOverModeJump().setSubPage(normal)
 	page.makeValueBinding(vpot.mSurfaceValue, values.mPan).setSubPage(normal)
 	page.makeValueBinding(fader.mSurfaceValue, values.mPan).setValueTakeOverModeJump().setSubPage(flipped)
@@ -859,6 +866,13 @@ function pulseButton(x, note) {
 	var button = cmdButton()
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
 	return button
+}
+var panPush = pulseButton(0, 32)
+panPush.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+	if (value < 0.5) return
+	// Twice: a variable that already holds 0.5 (from the last time) may not pass the same value on.
+	panCentre.setProcessValue(activeDevice, 0.5001)
+	panCentre.setProcessValue(activeDevice, 0.5)
 }
 var trackPrev = pulseButton(0, 40)
 var trackNext = pulseButton(1, 41)

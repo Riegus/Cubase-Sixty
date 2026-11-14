@@ -291,7 +291,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 |---------|--------------|
 | Fader | The selected track's volume, with touch. |
 | SOLO, CUT | Solo and mute. SEL shows the track's colour; bright while its channel editor is open. |
-| Knob above the fader | Pan. |
+| Knob above the fader | Pan. Push: the pan to the centre. |
 | Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
 | MASTER | Puts the strip on the main output instead of the selected track. Press again to return. |
 | FLIP | Swaps the fader and the pan knob. |
@@ -306,6 +306,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
   Controls).
 - **BANK ◂ ▸**: banks the UF8. Without a UF8 it moves the selection by eight tracks.
 - **SHIFT + ARROW**: the cursor one bar back / forward.
+- **◀ ▶** (the two keys left of CYCLE): the previous / next marker.
 
 ### The four views
 
