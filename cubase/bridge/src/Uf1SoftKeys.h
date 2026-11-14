@@ -26,9 +26,10 @@ struct Command {
 inline const std::vector<Command>& commands()
 {
     static const std::vector<Command> c = {
-        // The first marker: project start, then the next marker, then back one, so a marker right at the start is
-        // not skipped (from the start, "next" passes it). The last: project end, then the previous marker.
-        {"first-marker", "First marker", "First Marker", {0, 3, 2}},
+        // The first marker: project start, then the next marker. (Then back one, so that a marker right at the start
+        // would not be skipped, went to the project start instead: with no marker before, Cubase's Locate Previous
+        // Marker goes to the project start, 14.11.2026.) The last: project end, then the previous marker.
+        {"first-marker", "First marker", "First Marker", {0, 3, -1}},
         {"prev-marker", "Previous marker", "Prev Marker", {2, -1, -1}},
         {"next-marker", "Next marker", "Next Marker", {3, -1, -1}},
         {"last-marker", "Last marker", "Last Marker", {1, 2, -1}},
