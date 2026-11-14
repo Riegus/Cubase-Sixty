@@ -10,8 +10,8 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 1. UF1 PLUGIN: jump to the page of a control touched in the plug-in window.
 2. UF8 strip mode: the SSL strip's name in the colour bar.
 3. UF1 METER: done (13.11.2026: the four screens, the Meter's settings on the V-pots, FINE, PRESETS, PLAY, the
-   drawing following the settings). Not possible through Cubase: the settings of a Meter in the Control Room's inserts (MIDI Remote's Direct Access
-   does not reach them, 14.11.2026; to try: SSL's own protocol). Not ported: the analogue reference in the fallback needle (without the
+   drawing following the settings). A Meter in the Control Room's inserts, which MIDI Remote's Direct Access does not
+   reach, is set over SSL's own protocol (14.11.2026); its value texts are the bridge's own. Not ported: the analogue reference in the fallback needle (without the
    plug-in's VU stream) and Rea-Sixty's chunk route for presets (Cubase-Sixty uses only the plug-in's own load).
 
 

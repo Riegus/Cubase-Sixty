@@ -401,6 +401,22 @@ std::map<socket_t, std::map<uint64_t, int>> g_clientMfObj;  // conn: objId -> sl
 std::map<socket_t, MeterFpSet>              g_clientMf;   // conn -> values (g_meterMx)
 std::map<uint16_t, MeterFpSet>              g_portMf;     // port -> values (g_meterMx)
 
+// A Meter's settings over this protocol (Cubase-Sixty, 14.11.2026), for a Meter the
+// host cannot reach (Cubase's Control Room inserts). MEASURED: a `09 <double>` write
+// on a declared object changes the setting (the plug-in's own window follows) and the
+// plug-in answers with the new value on that object.
+// Every object each connection DECLARED, by name: its id, its type code (field 1 of
+// the declaration: 01 a switch, 02 a number, 11.. the Meter's own enums) and the
+// declaration's first bytes. The values it reports (type 18), raw. Under g_meterMx.
+struct DeclRec { uint64_t id = 0; int type = -1; std::string hex; };
+std::map<socket_t, std::map<std::string, DeclRec>> g_clientDecl;
+std::map<socket_t, std::map<uint64_t, std::string>> g_clientDeclById;
+std::map<socket_t, std::map<uint64_t, std::vector<uint8_t>>> g_clientVal;
+std::atomic<uint64_t> g_objValSeq{0};   // +1 on every value that changed
+// Writes waiting for the plug-in's answer: connection + object -> name, until when.
+struct EchoWait { std::string name; long long until = 0; };
+std::map<std::pair<socket_t, uint64_t>, EchoWait> g_echoWait;
+
 // ── The plug-in's OWN EQ curve ───────────────────────────────────────────────
 // PluginEQCurveDataValueEventArgs { repeated float m_dBValues = 1; } — the
 // reconstructed schema (analysis/ssl360-protobuf) settles what the numbers are:
@@ -1221,6 +1237,12 @@ void workerMain(uint16_t tcpPort, uint16_t dataPort) {
             g_clientMf.erase(c);
             g_clientEq.erase(c);
             g_clientEqObj.erase(c);
+            g_clientDecl.erase(c);
+            g_clientDeclById.erase(c);
+            g_clientVal.erase(c);
+            g_objValSeq.fetch_add(1);
+            for (auto it = g_echoWait.begin(); it != g_echoWait.end(); )
+                it = (it->first.first == c) ? g_echoWait.erase(it) : std::next(it);
         }
         // Tear down this connection's dedicated UDP data socket.
         for (auto it = dataFdConn.begin(); it != dataFdConn.end(); ++it) {
@@ -1997,6 +2019,19 @@ void workerMain(uint16_t tcpPort, uint16_t dataPort) {
                                     if (sl == 0 || k + 2 + sl > avail) break;
                                     const std::string nm(
                                         reinterpret_cast<const char*>(pay + k + 2), sl);
+                                    {
+                                        DeclRec dr;
+                                        std::memcpy(&dr.id, pay, 8);
+                                        if (pay[8] == 0x08) dr.type = pay[9] & 0x7f;
+                                        char bb[4];
+                                        for (size_t q = 8; q < avail && q < 160; ++q) {
+                                            std::snprintf(bb, sizeof(bb), "%02x", pay[q]);
+                                            dr.hex += bb;
+                                        }
+                                        std::lock_guard<std::mutex> lk(g_meterMx);
+                                        g_clientDeclById[c][dr.id] = nm;
+                                        g_clientDecl[c][nm] = std::move(dr);
+                                    }
                                     if (g_objDump.load(std::memory_order_relaxed)) {
                                         char line[640];
                                         std::snprintf(line, sizeof(line),
@@ -2132,6 +2167,45 @@ void workerMain(uint16_t tcpPort, uint16_t dataPort) {
                             // fingerprint ids are read here, and those are
                             // doubles, so an empty body is unambiguous.
                             // Reported by sollapse in issue #8, finding 2.
+                            // The value of a declared object, kept (meterObjGet), and
+                            // what the plug-in reports back on an object we just
+                            // wrote (meterObjWrite), logged for 3 s.
+                            if (ftype == 18 && avail >= 8) {
+                                std::string echo;
+                                {
+                                    uint64_t oid = 0;
+                                    std::memcpy(&oid, pay, 8);
+                                    std::lock_guard<std::mutex> lk(g_meterMx);
+                                    if (avail - 8 <= 64) {   // settings, not the preset list or meter data
+                                        auto itN = g_clientDeclById.find(c);
+                                        if (itN != g_clientDeclById.end() && itN->second.count(oid)) {
+                                            std::vector<uint8_t> body(pay + 8, pay + avail);
+                                            auto& slot = g_clientVal[c][oid];
+                                            if (slot != body) { slot = std::move(body); g_objValSeq.fetch_add(1); }
+                                        }
+                                    }
+                                    auto itW = g_echoWait.find({c, oid});
+                                    if (itW != g_echoWait.end()) {
+                                        if (nowMs() > itW->second.until) g_echoWait.erase(itW);
+                                        else {
+                                            echo = itW->second.name + "  body=";
+                                            char bb[4];
+                                            for (size_t q = 8; q < avail && q < 48; ++q) {
+                                                std::snprintf(bb, sizeof(bb), "%02x", pay[q]);
+                                                echo += bb;
+                                            }
+                                            if (avail >= 17 && pay[8] == 0x09) {
+                                                double d = 0.0;
+                                                std::memcpy(&d, pay + 9, 8);
+                                                char dv[48];
+                                                std::snprintf(dv, sizeof(dv), "  (double %g)", d);
+                                                echo += dv;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (!echo.empty()) slogAlways("[mset] ECHO %s", echo.c_str());
+                            }
                             if (ftype == 18 && avail >= 8) {
                                 double v = 0.0;
                                 bool   isDouble = false, other = false;
@@ -2803,6 +2877,151 @@ int pressSwitchOnTrack(const char* name, int trackIndex)
     slogAlways("[sw] %s pressed on %zu plug-in(s) of track %d",
                name, ports.size(), trackIndex);
     return int(ports.size());
+}
+
+namespace {
+// The connection of the Meter the view shows. Under g_meterMx.
+socket_t currentMeterConnLocked_(uint16_t* portOut = nullptr)
+{
+    const uint16_t port = currentMeterPortLocked_();
+    if (portOut) *portOut = port;
+    if (!port) return kInvalid;
+    for (const auto& kv : g_connPort)
+        if (kv.second == port) return kv.first;
+    return kInvalid;
+}
+// A value body: field 1 a double (09), a whole number (08: a switch, 1 = off, 2 = on)
+// or a float (0d); field 2 the plug-in's own text, which switches carry. An empty
+// body is the protobuf default, 0. MEASURED 14.11.2026: the type-0x22 objects (LED
+// overload, loudness target, alerts, history window) report `0a <text> 1a <09 double>
+// 22 <unit>` instead: the text ("-23", "Off", "30 secs"), the number nested in field 3
+// (Off = 999), the unit ("LUFS").
+void parseObjValue_(const std::vector<uint8_t>& b, ObjValue& out)
+{
+    out.num = 0.0;
+    out.form = 0;
+    out.text.clear();
+    out.unit.clear();
+    pbWalk_(b.data(), b.size(), [&](uint32_t f, uint32_t w, const uint8_t* v, size_t n) {
+        if (f == 1 && w == 1 && n == 8) { std::memcpy(&out.num, v, 8); out.form = 1; }
+        else if (f == 1 && w == 5 && n == 4) { float x; std::memcpy(&x, v, 4); out.num = x; out.form = 3; }
+        else if (f == 1 && w == 0) {
+            out.form = 2;
+            uint64_t x = 0; int sh = 0;
+            for (size_t k = 0; k < n && sh < 64; ++k, sh += 7) x |= uint64_t(v[k] & 0x7f) << sh;
+            out.num = double(x);
+        } else if ((f == 1 || f == 2) && w == 2) out.text.assign(reinterpret_cast<const char*>(v), n);
+        else if (f == 4 && w == 2) out.unit.assign(reinterpret_cast<const char*>(v), n);
+        else if (f == 3 && w == 2) {
+            out.form = 4;
+            pbWalk_(v, n, [&](uint32_t f2, uint32_t w2, const uint8_t* v2, size_t n2) {
+                if (f2 == 1 && w2 == 1 && n2 == 8) std::memcpy(&out.num, v2, 8);
+            });
+        }
+    });
+}
+std::string hexOf_(const std::vector<uint8_t>& b)
+{
+    std::string h;
+    char bb[4];
+    for (uint8_t x : b) { std::snprintf(bb, sizeof(bb), "%02x", x); h += bb; }
+    return h;
+}
+}  // namespace
+
+bool meterObjGet(const char* name, ObjValue& out)
+{
+    out = ObjValue{};
+    if (!name || !*name) return false;
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    const socket_t conn = currentMeterConnLocked_();
+    if (conn == kInvalid) return false;
+    auto itD = g_clientDecl.find(conn);
+    if (itD == g_clientDecl.end()) return false;
+    auto it = itD->second.find(name);
+    if (it == itD->second.end()) return false;
+    out.declared = true;
+    out.type = it->second.type;
+    if (auto itV = g_clientVal.find(conn); itV != g_clientVal.end())
+        if (auto v = itV->second.find(it->second.id); v != itV->second.end()) {
+            out.seen = true;
+            parseObjValue_(v->second, out);
+        }
+    return true;
+}
+
+bool meterObjAvailable()
+{
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    const socket_t conn = currentMeterConnLocked_();
+    if (conn == kInvalid) return false;
+    auto itD = g_clientDecl.find(conn);
+    return itD != g_clientDecl.end() && itD->second.count("DigitalMetersType");
+}
+
+uint64_t meterObjSeq() { return g_objValSeq.load(); }
+
+bool meterObjWrite(const char* name, double value, int form)
+{
+    if (!name || !*name || !g_running.load()) return false;
+    uint16_t port = 0;
+    uint64_t id = 0;
+    std::vector<uint8_t> v;
+    if (form == 1) {
+        v.push_back(0x08);
+        putVarint(v, uint64_t(std::llround(value < 0 ? 0 : value)));
+    } else if (form == 2) {
+        v = {0x1a, 0x09, 0x09};
+        uint8_t b[8];
+        std::memcpy(b, &value, 8);
+        v.insert(v.end(), b, b + 8);
+    } else {
+        v.push_back(0x09);
+        uint8_t b[8];
+        std::memcpy(b, &value, 8);
+        v.insert(v.end(), b, b + 8);
+    }
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> dump;   // the instance's values, once, for the log
+    {
+        std::lock_guard<std::mutex> lk(g_meterMx);
+        const socket_t conn = currentMeterConnLocked_(&port);
+        if (conn == kInvalid) return false;
+        auto itD = g_clientDecl.find(conn);
+        if (itD == g_clientDecl.end()) return false;
+        auto it = itD->second.find(name);
+        if (it == itD->second.end()) return false;   // never write an object the plug-in did not declare
+        id = it->second.id;
+        // Taken as set at once (the plug-in's answer follows), so quick turns count from here.
+        g_clientVal[conn][id] = v;
+        g_objValSeq.fetch_add(1);
+        g_echoWait[{conn, id}] = { std::string(name), nowMs() + 3000 };
+        static std::set<uint16_t> dumped;
+        if (dumped.insert(port).second) {
+            auto itV = g_clientVal.find(conn);
+            for (const auto& d : itD->second) {
+                std::vector<uint8_t> b;
+                if (itV != g_clientVal.end())
+                    if (auto x = itV->second.find(d.second.id); x != itV->second.end()) b = x->second;
+                char t[8];
+                std::snprintf(t, sizeof(t), "%02x", d.second.type & 0xff);
+                dump.emplace_back(d.first + " (type " + t + ")", std::move(b));
+            }
+        }
+    }
+    uint8_t obj[8];
+    for (int i = 0; i < 8; ++i) obj[i] = uint8_t(id >> (8 * i));
+    {
+        std::lock_guard<std::mutex> lk(g_cmdMx);
+        g_cmdQueue.emplace_back(port, propFrame(obj, v));
+    }
+    slogAlways("[mset] SENT %s = %g  as %s  port=%u", name, value,
+               form == 1 ? "varint" : form == 2 ? "nested double" : "double",
+               unsigned(port));
+    if (!dump.empty()) {
+        slogAlways("[mset] port %u: %zu objects and their values:", unsigned(port), dump.size());
+        for (const auto& d : dump) slogAlways("[mset]   %s = %s", d.first.c_str(), hexOf_(d.second).c_str());
+    }
+    return true;
 }
 
 void objTestRun(const char* name)

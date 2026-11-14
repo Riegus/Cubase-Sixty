@@ -11,7 +11,10 @@ is collected in [Banking and track stepping](banking.md).
 MIDI Remote's Direct Access does not reach plug-ins in the Control Room's inserts: on `mHostAccess.mControlRoom` it
 gives the VST Mixer (tracks, buses, the Stereo Out), and on `getMonitorChannelByIndex` / phones / cues it gives no
 object at all (#-1, runtime ID 0), even with a value bound to the channel. So the UF1's METER settings work only for a
-Meter in the MixConsole. The insert bypass, level and mute of those channels are reachable as values.
+Meter in the MixConsole. The insert bypass, level and mute of those channels are reachable as values. What
+Cubase-Sixty does instead: the SSL Meter's settings are written over SSL's own protocol (the SSL 360 Core stand-in,
+which already reads its meters): a `09 <double>` on an object the plug-in declared, measured 14.11.2026 (the plug-in's
+window follows and it reports the new value back). Other plug-ins in the Control Room stay out of reach.
 
 ## Not available to scripts at all
 

@@ -117,6 +117,30 @@ void objTestSet(const char* name, int value);
 // answer is read off the log rather than out of someone watching a switch.
 void objTestRun(const char* name);
 
+// The SELECTED Meter's settings over the protocol (Cubase-Sixty, 14.11.2026), for a
+// Meter the host cannot reach (Cubase's Control Room inserts). Objects are named by
+// their wire id ("AnalogueMetersMode"); only objects the plug-in declared are read or
+// written. Thread-safe.
+struct ObjValue {
+    bool        declared = false;
+    int         type = -1;     // the declaration's type code: 01 switch, 02 number, 11.. enums
+    bool        seen = false;  // a value has been reported (else num is the default, 0)
+    int         form = 0;      // how the number came: 0 absent (the default), 1 double, 2 varint, 3 float,
+                               // 4 a double inside field 3 (the "value with text" objects, type 0x22)
+    double      num  = 0.0;    // a double, or a whole number (switches: 1 off, 2 on)
+    std::string text;          // the plug-in's own text, where it sends one (switches, type 0x22)
+    std::string unit;          // its unit (type 0x22: "LUFS", "dB")
+};
+bool meterObjGet(const char* name, ObjValue& out);
+// Whether the selected Meter has a connection that declared its settings.
+bool meterObjAvailable();
+// Counts every change of any reported value: poll it to know when to redraw.
+uint64_t meterObjSeq();
+// Write: form 0 `09 <double>` (numbers and enum indices), 1 `08 <varint>` (switches:
+// 2 on, 1 off), 2 `1a 09 09 <double>` (type 0x22, the shape it reports them in). Logged as [mset] SENT, the plug-in's answer for 3 s as [mset] ECHO, and
+// the instance's objects with their values once. false = nothing to send to.
+bool meterObjWrite(const char* name, double value, int form);
+
 // Press a plug-in switch that is not a host parameter, over the protocol.
 // "HighQuality" is the strips' HQ Mode, "StateASelected" their A/B compare —
 // the two PluginChunkPatch reaches by rewriting base64 inside the track chunk,

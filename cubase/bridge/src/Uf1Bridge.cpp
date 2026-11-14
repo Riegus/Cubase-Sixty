@@ -39,6 +39,7 @@
 #include "Uf1Pacer.h"
 #include "ScriptLog.h"
 #include "Uf1Meter.h"
+#include "Uf1MeterSsl.h"
 #include "SslCoreImpersonator.h"
 #include "Uf1EqCurve.h"
 #include "SslPresets.h"
@@ -118,6 +119,15 @@ struct MeterCell { bool nameOnly = false; std::string label, value; };
 std::array<MeterCell, 3> g_meterCells;      // under g_cellMx
 std::string g_meterTitle;                   // under g_cellMx
 std::atomic<bool> g_meterCellsDirty{true};
+
+// A Meter that Cubase's Direct Access cannot reach (the Control Room's inserts: the script found none, so there is no
+// title) is set over SSL's own protocol instead (Uf1MeterSsl): its V-pot cells, turns, PLAY, the settings the screens
+// are drawn with and the presets are the bridge's own then.
+bool meterViaSsl()
+{
+    { std::lock_guard<std::mutex> lk(g_cellMx); if (!g_meterTitle.empty()) return false; }
+    return uf1meterssl::available();
+}
 std::array<int, 4> g_meterAcc{};           // V-pot counts not yet a notch (4 counts a notch, Rea-Sixty)   // METER: the RESET soft key was pressed (the cycle thread takes it)
 std::atomic<bool> g_playing{false};      // Cubase's transport runs (the PLAY LED note from the script)
 // PLUGIN view: the SSL plug-in on the selected track, as the script reports it (SysEx 50). While one is there, the
@@ -529,6 +539,9 @@ void onUf1Event(const ::uf1::InputEvent& ev)
                 if (ev.id == 1) {
                     sslcore::cycleMeterSelection(notches > 0 ? 1 : -1);
                     turnOut(ev.id, "METER, instance");
+                } else if (meterViaSsl()) {
+                    turnOut(ev.id, "METER, Meter setting over SSL's protocol");
+                    uf1meterssl::turn(g_meterScreen, g_meterPage, ev.id - 2, notches, g_meterFine);
                 } else {
                     turnOut(ev.id, "METER, Meter setting");
                     sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x61, uint8_t(ev.id - 2), uint8_t(std::clamp(64 + notches, 1, 127)), 0xF7});
@@ -642,7 +655,10 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             // METER: soft key 3 = FINE (the settings' V-pots a quarter as far), on Loudness PLAY (the plug-in's
             // Play / Pause); soft key 4 = PRESETS (the Meter's own library).
             if (ev.pressed && !g_modeHeld && g_view == kViewMeter && ev.id == 0x1B) {
-                if (g_meterScreen == 3) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x62, 0x01, 0xF7});
+                if (g_meterScreen == 3) {
+                    if (meterViaSsl()) uf1meterssl::togglePlay();
+                    else sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x62, 0x01, 0xF7});
+                }
                 else { g_meterFine = !g_meterFine; paintSoftKeys(); }
                 break;
             }
@@ -1027,6 +1043,9 @@ void browserFrame(bool enter)
     const bool meter = g_view == kViewMeter;
     std::string title;
     { std::lock_guard<std::mutex> lk(g_cellMx); title = meter ? g_meterTitle : g_plugPresent ? g_plugTitle : std::string(); }
+    // A Meter out of Cubase's reach: its presets by what it streams (a Meter Pro streams loudness).
+    if (meter && title.empty() && uf1meterssl::available())
+        title = sslcore::meterProAvailable() ? "SSL Meter Pro" : "SSL Meter";
     if (enter || title != listFor) {
         listFor = title;
         list = title.empty() ? std::vector<sslpresets::Entry>{} : sslpresets::scan(sslpresets::dirFor(title));
@@ -1139,6 +1158,41 @@ void startIdleCycle()
                 }
             }
             meterTarget(screenOpened);
+            static bool wasViaSsl = false;
+            const bool viaSsl = inMeter && meterViaSsl();
+            if (viaSsl) {
+                // A Meter out of Cubase's reach: the cells and the screens' settings from SSL's protocol, again
+                // whenever the plug-in reports a change (its own window changes them too), another instance is
+                // picked, or the screen / page changes.
+                static uint64_t seqShown = ~0ull;
+                static int pageShown = -1, screenShown = -1, fineShown = -1, portShown = -1;
+                const uint64_t seq = sslcore::meterObjSeq();
+                const int port = sslcore::currentMeterPort();
+                if (screenOpened || !wasViaSsl || seq != seqShown || g_meterPage != pageShown || screen != screenShown ||
+                    int(g_meterFine.load()) != fineShown || port != portShown) {
+                    seqShown = seq; pageShown = g_meterPage; screenShown = screen; fineShown = int(g_meterFine.load());
+                    portShown = port;
+                    if (!wasViaSsl) std::printf("UF1 METER: the Meter shown is out of Cubase's reach, its settings over SSL's protocol\n");
+                    uf1meterssl::Cell c[3];
+                    uf1meterssl::cells(screen, g_meterPage, c);
+                    std::array<MeterCell, 3> cells;
+                    for (int k = 0; k < 3; ++k) cells[size_t(k)] = MeterCell{c[k].nameOnly, c[k].label, c[k].value};
+                    bool changed = false;
+                    {
+                        std::lock_guard<std::mutex> lk(g_cellMx);
+                        for (int k = 0; k < 3 && !changed; ++k)
+                            changed = cells[size_t(k)].label != g_meterCells[size_t(k)].label ||
+                                      cells[size_t(k)].value != g_meterCells[size_t(k)].value ||
+                                      cells[size_t(k)].nameOnly != g_meterCells[size_t(k)].nameOnly;
+                        if (changed) g_meterCells = cells;
+                    }
+                    if (changed) g_meterCellsDirty = true;
+                    uf1meterssl::publishSettings();
+                    const bool on = uf1meterssl::playing();
+                    if (on != g_meterPlaying.exchange(on)) paintSoftKeys();
+                }
+            }
+            wasViaSsl = viaSsl;
             uf1pace::Parts p;
             if (inMeter) {
                 ensureSslCore();
@@ -1577,6 +1631,7 @@ void onSysex(const std::vector<unsigned char>& m)
         return;
     }
     if (m[4] == 0x60 && m.size() >= 9) {   // METER: a V-pot cell, 60 <cell 1-3> <name only> <label> 00 <value>
+        if (meterViaSsl()) return;   // the bridge's own cells (a Meter out of Cubase's reach)
         const size_t k = size_t(m[5] - 1);
         if (k < 3) {
             MeterCell c;

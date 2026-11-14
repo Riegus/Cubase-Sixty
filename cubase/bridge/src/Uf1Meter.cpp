@@ -420,10 +420,24 @@ std::vector<uint8_t> loudnessReadouts()
     for (const auto& s : kSlots) {
         std::string val;
         std::vector<float> cur, pk;
-        if (sslcore::isRunning() && sslcore::getMeter(s.dt, cur, pk) && !cur.empty() && std::isfinite(cur[0]))
-            val = uf1FormatMeterDb_(cur[0]);
         sslcore::MeterInfo mi;
         const bool told = sslcore::isRunning() && sslcore::getMeterInfo(s.dt, mi) && !mi.legend.empty();
+        if (sslcore::isRunning() && sslcore::getMeter(s.dt, cur, pk) && !cur.empty() && std::isfinite(cur[0])) {
+            float v = cur[0];
+            // A "... Max" readout (True Peak Max): the plug-in's window shows the held maximum, which the stream
+            // carries as the peak; the current value kept changing on the UF1 (14.11.2026).
+            const bool isMax = told && mi.legend.find("Max") != std::string::npos;
+            if (isMax && !pk.empty() && std::isfinite(pk[0])) v = std::max(v, pk[0]);
+            val = uf1FormatMeterDb_(v);
+            // Nothing measured (after RESET, or silence): the plug-in's window shows "---". Loudness bottoms out at
+            // -70 LUFS (the absolute gate), relative values at -70 less the target; a level at -inf.
+            const std::string u = told && !mi.unit.empty() ? mi.unit : s.unit;
+            double target = -23.0;
+            const bool rel = u == "LU" || u == "LK";
+            if (rel) settingNumber(36, target);
+            if (u == "dBFS" ? v <= -120.f : (u == "LUFS" || u == "LKFS") ? v <= -69.95f : rel && double(v) + target <= -69.95)
+                val = "---";
+        }
         const char* unit = told && !mi.unit.empty() ? mi.unit.c_str() : s.unit;
         const char* caption = told ? mi.legend.c_str() : s.caption;
         const uint8_t style = std::strcmp(unit, "dBFS") == 0 ? 0x02 : s.style;
@@ -465,6 +479,9 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
             r = std::isfinite(c[1]) ? c[1] : -120.f;
             if (k.size() >= 2) { hl = std::isfinite(k[0]) ? k[0] : -120.f; hr = std::isfinite(k[1]) ? k[1] : -120.f; }
             have = true;
+            // PPM: the readout is in marks, and the plug-in's own window does not go below 0.0 (14.11.2026: the
+            // stream said -2.4 after the transport stopped, the plug-in showed 0.0).
+            if (settingIndex(8, 2, 0) == 1) { l = std::max(l, 0.f); r = std::max(r, 0.f); hl = std::max(hl, 0.f); hr = std::max(hr, 0.f); }
         }
         readouts = fieldsBytes({have ? uf1FormatMeterDb_(l) : std::string(), have ? uf1FormatMeterDb_(hl) : std::string(),
                                 have ? uf1FormatMeterDb_(r) : std::string(), have ? uf1FormatMeterDb_(hr) : std::string(),
@@ -666,6 +683,24 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
             const uint8_t* csf2 = ri == 0 ? kLoudR0Sf2 : ri == 1 ? kLoudR1Sf2 : kLoudR2Sf2;
             const uint8_t* csf3 = ri == 0 ? kLoudR0Sf3 : ri == 1 ? kLoudR1Sf3 : kLoudR2Sf3;
             for (int i = 0; i < 251; ++i) sf0[size_t(i)] = csf0[i];
+            // The time labels under the history (bytes 214-249: four "HH:MM:SS", NUL after each), from the stream's
+            // trailer: the window's start and end in ms (hist[n-9], hist[n-5]; measured 14.11.2026: 40504 / 70504
+            // where the plug-in's window showed 00:00:40 ... 00:01:10). Evenly spaced, cut toward zero as the
+            // plug-in does (-29.5 s shows -00:00:29; here -0:00:29, the field holds eight characters).
+            if (hist.size() >= 13) {
+                const double a = hist[hist.size() - 9], b = hist[hist.size() - 5];
+                if (std::isfinite(a) && std::isfinite(b) && b > a) {
+                    for (int k = 0; k < 4; ++k) {
+                        const long long ms = std::llround(a + (b - a) * k / 3.0);
+                        const long long sec = (ms < 0 ? -ms : ms) / 1000;
+                        char lab[16];
+                        if (ms < 0) std::snprintf(lab, sizeof lab, "-%lld:%02lld:%02lld", sec / 3600, sec / 60 % 60, sec % 60);
+                        else std::snprintf(lab, sizeof lab, "%02lld:%02lld:%02lld", sec / 3600, sec / 60 % 60, sec % 60);
+                        for (int c = 0; c < 8; ++c) sf0[size_t(214 + 9 * k + c)] = lab[c] ? uint8_t(lab[c]) : 0;
+                        sf0[size_t(214 + 9 * k + 8)] = 0;
+                    }
+                }
+            }
             static const int kTicksLU[8] = {9, 6, 3, 0, -3, -6, -12, -18};
             for (int k = 0; k < 8; ++k) {
                 char lab[16];
