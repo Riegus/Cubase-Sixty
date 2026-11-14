@@ -437,16 +437,6 @@ std::vector<uint8_t> loudnessReadouts()
             if (rel) settingNumber(36, target);
             if (u == "dBFS" ? v <= -120.f : (u == "LUFS" || u == "LKFS") ? v <= -69.95f : rel && double(v) + target <= -69.95)
                 val = "---";
-            static long long loggedAt[4] = {0, 0, 0, 0};
-            const int k = int(&s - kSlots);
-            const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
-            if (isMax && nowMs - loggedAt[k] > 10000) {   // to check the rule against what the plug-in shows
-                loggedAt[k] = nowMs;
-                std::printf("UF1 METER loudness readout %d \"%s\": current %.1f, peak %s, overload mode %d -> %s\n", k + 1,
-                            mi.legend.c_str(), double(cur[0]),
-                            pk.empty() ? "none" : std::to_string(pk[0]).c_str(), mi.overloadMode, val.c_str());
-            }
         }
         const char* unit = told && !mi.unit.empty() ? mi.unit.c_str() : s.unit;
         const char* caption = told ? mi.legend.c_str() : s.caption;
@@ -660,27 +650,6 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
         const bool haveHist = sslcore::isRunning() &&
                               sslcore::getMeter(int(sslmeter::DataType::LoudScrollableHistory), hist, hp) && hist.size() > 16;
         if (haveHist) {
-            {
-                // MEASURING (14.11.2026): the time labels under the history (sf0 bytes 214-249, four "HH:MM:SS") are
-                // a frozen capture; the plug-in's own run from its measurement time. Whether the stream's trailer
-                // carries that time: logged every 5 s on this screen.
-                static long long trailerAt = 0;
-                const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now().time_since_epoch()).count();
-                if (nowMs - trailerAt > 5000) {
-                    trailerAt = nowMs;
-                    std::string tr;
-                    char b[24];
-                    for (size_t q = hist.size() > 13 ? hist.size() - 13 : 0; q < hist.size(); ++q) {
-                        std::snprintf(b, sizeof(b), " %g", double(hist[q]));
-                        tr += b;
-                    }
-                    size_t valid = 0;
-                    for (size_t q = 0; q + 13 < hist.size(); ++q) if (hist[q] > -99.f && hist[q] < 60.f) ++valid;
-                    std::printf("UF1 METER loudness history: %zu values (%zu measured), trailer:%s\n", hist.size(), valid,
-                                tr.c_str());
-                }
-            }
             double target = -23.0;
             if (!settingNumber(36, target)) {
                 target = -23.0;
@@ -714,6 +683,24 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
             const uint8_t* csf2 = ri == 0 ? kLoudR0Sf2 : ri == 1 ? kLoudR1Sf2 : kLoudR2Sf2;
             const uint8_t* csf3 = ri == 0 ? kLoudR0Sf3 : ri == 1 ? kLoudR1Sf3 : kLoudR2Sf3;
             for (int i = 0; i < 251; ++i) sf0[size_t(i)] = csf0[i];
+            // The time labels under the history (bytes 214-249: four "HH:MM:SS", NUL after each), from the stream's
+            // trailer: the window's start and end in ms (hist[n-9], hist[n-5]; measured 14.11.2026: 40504 / 70504
+            // where the plug-in's window showed 00:00:40 ... 00:01:10). Evenly spaced, cut toward zero as the
+            // plug-in does (-29.5 s shows -00:00:29; here -0:00:29, the field holds eight characters).
+            if (hist.size() >= 13) {
+                const double a = hist[hist.size() - 9], b = hist[hist.size() - 5];
+                if (std::isfinite(a) && std::isfinite(b) && b > a) {
+                    for (int k = 0; k < 4; ++k) {
+                        const long long ms = std::llround(a + (b - a) * k / 3.0);
+                        const long long sec = (ms < 0 ? -ms : ms) / 1000;
+                        char lab[16];
+                        if (ms < 0) std::snprintf(lab, sizeof lab, "-%lld:%02lld:%02lld", sec / 3600, sec / 60 % 60, sec % 60);
+                        else std::snprintf(lab, sizeof lab, "%02lld:%02lld:%02lld", sec / 3600, sec / 60 % 60, sec % 60);
+                        for (int c = 0; c < 8; ++c) sf0[size_t(214 + 9 * k + c)] = lab[c] ? uint8_t(lab[c]) : 0;
+                        sf0[size_t(214 + 9 * k + 8)] = 0;
+                    }
+                }
+            }
             static const int kTicksLU[8] = {9, 6, 3, 0, -3, -6, -12, -18};
             for (int k = 0; k < 8; ++k) {
                 char lab[16];
