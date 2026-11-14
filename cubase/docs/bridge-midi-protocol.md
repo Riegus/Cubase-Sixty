@@ -206,7 +206,13 @@ The UC1 script finds the SSL plug-ins on the selected track and drives their par
 |------|---------|-----------|-------|
 | Log line | `F0 7D 52 36 7E <source> <text> F7` | Cubase → bridge (any script's port) | Source 1 UF8, 2 UF1, 3 UC1, 4 Helper; text 3 × 7 bits per character. Written to `cubase\logs\scripts.log` (dropped with `--no-script-log`). At most 20 per idle tick. |
 
+## A new bridge
+
+| Item | Message | Direction | Notes |
+|------|---------|-----------|-------|
+| Hello | `F0 7D 52 36 7F 01 F7` | bridge → Cubase (every script's port) | Sent when the bridge has opened its ports. The tray app holds the ports while the bridge restarts (14.11.2026), so Cubase does not activate the scripts again and would send nothing until something changes: each script answers by sending again the last of each kind of state it sent (its `RESEND` list: command → index bytes), in the order sent. Requests, events, temporary lines and log lines are not repeated. Cubase's own values (fader positions, LEDs, meters) and the last 7C the tray app keeps and gives the new bridge itself. A script's list is emptied when its driver is deactivated (no project). |
+
 ## Not yet covered
 
 - The UF1 MODE view METER (soft key 3).
-- A version or ping message. Add one (`F0 7D 52 36 7F …`) before the protocol grows.
+- A version message (`F0 7D 52 36 7F 02 …`, next to the hello below) before the protocol grows.

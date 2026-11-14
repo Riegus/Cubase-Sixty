@@ -85,7 +85,9 @@ window follows and it reports the new value back). Other plug-ins in the Control
   14.11.2026: a short restart is not always fine either. Bridge down about 6 s (dev-restart -BridgeOnly): nothing
   from Cubase for over 2 minutes; Reload Scripts brought back Cubase → surfaces only (the UF8 updated, its faders
   and the UF1 reached nothing); a Cubase restart was needed. 13.11.2026: 9 minutes without Cubase after a restart.
-  To be investigated before the release (known-issues.md).
+  What Cubase-Sixty does instead: the tray app makes the ports and keeps them while the bridge restarts, so Cubase
+  never loses them; the new bridge gets the state back from the scripts (hello, SysEx 7F 01) and from the tray app
+  (Cubase's own values). A bridge started without the tray app still makes its own ports, with this catch.
 - **Mackie Control's cursor keys do not select tracks**; its SELECT keys do, within its bank of eight
   (10.11.2026, timing test: see [banking.md](banking.md)).
 - **Send levels through MIDI Remote value bindings are slow.** While a bound send level keeps changing, Cubase

@@ -29,16 +29,41 @@ function flushLog(activeDevice) {
 			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
 		}
 		body.push(0xF7)
-		midiOutput.sendMidi(activeDevice, body)
+		sendMidi(activeDevice, body)
 	}
 }
 
-out('[CubaseSixty UF1] script loaded, version 0.26.5-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
+out('[CubaseSixty UF1] script loaded, version 0.26.6-dev (MODE: PLUGIN = SSL plug-in pages or Quick Controls, DAW / SENDS = sends)')
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UF1', 'Riegus')
 
 var midiInput = deviceDriver.mPorts.makeMidiInput()
 var midiOutput = deviceDriver.mPorts.makeMidiOutput()
+
+// ---------------------------------------------------------------------------------------------------------------
+// A new bridge (SysEx 7F 01 from it, 14.11.2026): the bridge was restarted while the tray app kept the ports, so
+// Cubase did not activate this script again and sends nothing until something changes. The script sends again the
+// last of each kind of state it sent (RESEND: command -> how many index bytes follow it), in the order sent. Requests,
+// events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
+// positions and LEDs, the tray app gives the new bridge.)
+// ---------------------------------------------------------------------------------------------------------------
+var RESEND = { 0x01: 0, 0x02: 0, 0x03: 0, 0x08: 0, 0x09: 0, 0x0D: 0, 0x0E: 0, 0x15: 1, 0x17: 1, 0x50: 0, 0x51: 1, 0x52: 1,
+	0x55: 0, 0x56: 0, 0x58: 0, 0x5A: 0, 0x5B: 0, 0x60: 1, 0x61: 1, 0x62: 0, 0x7C: 0 }
+var resendLast = {}, resendSeq = 0
+function sendMidi(activeDevice, bytes) {
+	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
+		var key = bytes.slice(4, 5 + RESEND[bytes[4]]).join(',')
+		resendLast[key] = { seq: ++resendSeq, bytes: bytes.slice() }
+	}
+	midiOutput.sendMidi(activeDevice, bytes)
+}
+function resendAll(activeDevice) {
+	var list = []
+	for (var k in resendLast) list.push(resendLast[k])
+	list.sort(function (a, b) { return a.seq - b.seq })
+	for (var i = 0; i < list.length; ++i) midiOutput.sendMidi(activeDevice, list[i].bytes)
+	return list.length
+}
 
 deviceDriver
 	.makeDetectionUnit()
@@ -185,7 +210,7 @@ var vpotPositions = [-1, -1, -1, -1]
 function reportVpotPosition(activeDevice, index, value) {
 	var v = Math.max(0, Math.min(16383, Math.round(value * 16383)))
 	vpotPositions[index] = v
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, index, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
 }
 var vpotIdleLast = 0
 deviceDriver.mOnIdle = function (activeDevice) {
@@ -202,7 +227,7 @@ deviceDriver.mOnIdle = function (activeDevice) {
 	vpotIdleLast = now
 	for (var i = 0; i < 4; ++i) {
 		var v = vpotPositions[i]
-		if (v >= 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, i, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
+		if (v >= 0) sendMidi(activeDevice, SYSEX_HEADER.concat([0x17, i, (v >> 7) & 0x7F, v & 0x7F, 0xF7]))
 	}
 }
 var sendNames = ['', '', '', '', '', '', '', '']
@@ -234,7 +259,7 @@ function sendCellInfo(activeDevice, index, cell) {
 	var key = cell.pos + '/' + text
 	if (key === cell.sent) return
 	cell.sent = key
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x15, index, cell.pos], toAscii7(text), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x15, index, cell.pos], toAscii7(text), [0xF7]))
 }
 // A Quick Control's cell from what its callbacks last reported (name, value, position). Built again on each of
 // them, because Cubase reports a new name and a new value separately (and not at all when it did not change).
@@ -246,7 +271,7 @@ function sendQcSource(activeDevice) {
 	for (var i = 0; i < 4 && !src; ++i) if (sendCells[i] && sendCells[i].qcObject) src = sendCells[i].qcObject
 	if (src === qcSourceSent) return
 	qcSourceSent = src
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x56], toAscii7(src || '-'), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x56], toAscii7(src || '-'), [0xF7]))
 }
 function sendQcCell(activeDevice, index) {
 	var c = sendCells[index]
@@ -256,7 +281,7 @@ function sendQcCell(activeDevice, index) {
 	// A Quick Control with nothing assigned (Cubase sends no name and no value): "QC1" and a dash, so the cell does not
 	// look broken (10.11.2026).
 	qcCells[index] = [0x51, index, c.qcPos || 0, 2].concat(toAscii7(cellName(name || 'QC' + (index + 1 + sendOffset)) + '|' + (name || v ? v : '-')))
-	if (plug.obj < 0) midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
+	if (plug.obj < 0) sendMidi(activeDevice, SYSEX_HEADER.concat(qcCells[index], [0xF7]))
 }
 function attachSendFeedback(surfaceValue, number) {
 	var title = ''
@@ -553,22 +578,22 @@ function to7bit(value) {
 }
 
 function sendName(activeDevice, text) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x01, 0], toAscii7(text), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x01, 0], toAscii7(text), [0xF7]))
 }
 function sendColor(activeDevice, r, g, b) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x02, 0, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x02, 0, to7bit(r), to7bit(g), to7bit(b), 0xF7]))
 }
 function sendLevel(activeDevice, text) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x03], toAscii7(text), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x03], toAscii7(text), [0xF7]))
 }
 
 // home = true: pan (the line's normal content, 08/09); false: a send, shown for a few seconds (04/05).
 function sendValueLine(activeDevice, text, home) {
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([home ? 0x08 : 0x04], toAscii7(text), [0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([home ? 0x08 : 0x04], toAscii7(text), [0xF7]))
 }
 function sendBar(activeDevice, position01, style, home) {
 	var pos = Math.max(0, Math.min(100, Math.round(position01 * 100)))
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([home ? 0x09 : 0x05, pos, style || 0x02, 0xF7]))
+	sendMidi(activeDevice, SYSEX_HEADER.concat([home ? 0x09 : 0x05, pos, style || 0x02, 0xF7]))
 }
 
 // The fader is bound to the selected track's volume, so its surface value reports that
@@ -604,7 +629,7 @@ function showStrip(activeDevice) {
 	var info = masterActive ? masterInfo : selectedInfo
 	sendName(activeDevice, info.title)
 	sendColor(activeDevice, info.r, info.g, info.b)
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new strip: show its pan
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new strip: show its pan
 }
 
 var trackNumberForTitle = function () {}   // set by the track-number block
@@ -613,6 +638,7 @@ var sameNameHint = function () {}          // set by the track-number block
 midiInput.mOnSysex = function (activeDevice, message) {
 	var m = []
 	for (var i = 0; i < message.length; ++i) m.push(message[i])
+	if (m.length >= 7 && m[4] === 0x7F && m[5] === 0x01) { out('[CubaseSixty UF1] a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if (m.length >= 9 && m[0] === 0xF0 && m[4] === 0x53) {
 		try { plugEvent(activeDevice, m[5], m[6], m[7], m.length >= 10 && m[8] === 1) } catch (e) { out('[CubaseSixty UF1] PLUGIN event failed: ' + e) }
 		return
@@ -800,7 +826,7 @@ selected.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	if (stepPending) stepPending.settleAt = Date.now() + 450
 	if (masterActive) return
 	sendName(activeDevice, title)
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x0A, 0xF7]))   // new track: show its pan
 	trackNumberForTitle(activeDevice, title)
 }
 if (mainOut) {
@@ -956,7 +982,7 @@ function uf1MeterSide(name, cc, selectedValue, mainValue) {
 		var v = meterToMidi(value)
 		if (v === last) return
 		last = v
-		midiOutput.sendMidi(activeDevice, [0xB0, cc, v])
+		sendMidi(activeDevice, [0xB0, cc, v])
 	}
 }
 // Left = CC 80, right = CC 81 (a mono channel only reports the left side; the bridge then mirrors it).
@@ -997,7 +1023,7 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 		var vel = !present ? 0 : active ? 64 : 127
 		if (vel === ledOn) return
 		ledOn = vel
-		midiOutput.sendMidi(activeDevice, [0x90, 62, vel])
+		sendMidi(activeDevice, [0x90, 62, vel])
 	}
 	function mask(test) {
 		var text = ''
@@ -1055,7 +1081,7 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 		// ones written on the track before (log 13.11.2026).
 		var to = active.length ? 1 : 0, bits = 0
 		for (k = 0; k < set.length; ++k) bits |= 1 << set[k]
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, to, bits & 0x7F, (bits >> 7) & 0x7F, (bits >> 14) & 0x03, 0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, to, bits & 0x7F, (bits >> 7) & 0x7F, (bits >> 14) & 0x03, 0xF7]))
 	}
 	try {
 		for (var k = 0; k < SLOTS; ++k) {
@@ -1110,7 +1136,7 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 		var time = strings.length ? strings[0] : null
 		if (time === null || time === lastTime) return
 		lastTime = time
-		midiOutput.sendMidi(arguments[0], SYSEX_HEADER.concat([0x0D], toAscii7(time), [0xF7]))
+		sendMidi(arguments[0], SYSEX_HEADER.concat([0x0D], toAscii7(time), [0xF7]))
 	}
 	var formatKey = surface.makeButton(px(490), px(300), px(38), px(24))   // the 360 key
 	formatKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 55)
@@ -1176,7 +1202,7 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 		var n = selectedIndex + 1
 		if (n === sentNumber) return
 		sentNumber = n
-		midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
 	}
 	try {
 		var zone = page.mHostAccess.mMixConsole.makeMixerBankZone('Track numbers').excludeInputChannels().excludeOutputChannels()
@@ -1510,7 +1536,7 @@ var METER_DRAW_ROWS = [6, 8, 9, 10, 22, 23, 36, 47, 48, 50, 51]
 var meter = { da: null, active: false, screen: 0, page: 0, fine: false, index: 0, name: '', obj: -1, title: '', tags: {},
 	findAt: 0, reportAt: 0, sentSlots: ['', '', '', ''], sentRows: {}, missing: {}, logged: '' }
 
-function meterSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
+function meterSend(activeDevice, body) { sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
 
 function meterOnSysex(activeDevice, m) {
 	if (m[4] === 0x60 && m.length >= 11) {
@@ -1695,7 +1721,7 @@ function meterTurn(activeDevice, slot, notches) {
 	meter.reportAt = Date.now() + 60
 }
 
-function plugSend(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
+function plugSend(activeDevice, body) { sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
 // The insert slot of the plug-in the PLUGIN view is on (SysEx 58 <slot 0-15, 7F = none>): the CHANNEL encoder's push
 // opens / closes its window (PLUGIN event kind 5: the script moves an insert viewer there), or the track's channel
 // editor without one.
@@ -2199,10 +2225,11 @@ function asciiAll(text) {
 // "No Project" meanwhile (SysEx 7C 00 / 01); what the scripts send on the next project paints the surface again.
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	out('[CubaseSixty UF1] inactive (no project)')
-	midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x00, 0xF7]))
+	resendLast = {}   // the project's state goes with it
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x00, 0xF7]))
 	try { flushLog(activeDevice) } catch (e) {}
 }
-deviceDriver.mOnActivate = function (activeDevice) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7])) }
+deviceDriver.mOnActivate = function (activeDevice) { sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7])) }
 
 // The last line: if this is not in scripts.log after a (re)load, the script stopped part way (an error at load).
 out('[CubaseSixty UF1] loaded to the end')

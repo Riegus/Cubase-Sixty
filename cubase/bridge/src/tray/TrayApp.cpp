@@ -10,11 +10,16 @@
 //   - USB driver (a sub menu, when the driver scripts are installed beside the program in driver\): installs or removes
 //     the WinUSB driver binding the bridge needs to open the controllers (Rea-Sixty's scripts, run elevated: one
 //     administrator prompt). The bridge is stopped meanwhile and started again after.
-//   - CubaseSixty.exe --quit asks the running copy to quit and waits for it (the installer uses it).
+//   - CubaseSixty.exe --quit asks the running copy to quit and waits for it (the installer uses it); --restart asks it
+//     to restart the bridge (dev-restart.ps1 -BridgeOnly).
 //   - One instance only. Not a Windows service on purpose (see docs\release-plan.md, step 3).
 //
-// When the bridge is started again, its MIDI ports are made anew; Cubase connects the scripts to them again by
-// itself after a little while (seen 9.11.2026), so Cubase does not need a restart.
+// The MIDI ports (14.11.2026): this program makes the ten Cubase-Sixty ports itself, as loopback ports (what one
+// program writes, the others read: the way loopMIDI makes them), and starts the bridge with --loopmidi so it opens
+// them as ordinary ports. They stay while the bridge restarts, so Cubase never loses them. Made by the bridge, they
+// went away with it, and Cubase did not reliably find the new ones: minutes, or never, and Reload Scripts brought
+// back only one direction (known-issues.md). If they cannot be made (no teVirtualMIDI driver, or a bridge running
+// on its own holds the names), the bridge makes its own as before.
 
 #ifndef UNICODE
 #define UNICODE
@@ -26,12 +31,16 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <objbase.h>
+#include <mmsystem.h>
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <deque>
 #include <filesystem>
+#include <map>
+#include <mutex>
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -65,6 +74,121 @@ std::chrono::steady_clock::time_point g_expectCubaseBy{};
 bool g_expectCubase = false;
 // The bridge is held stopped (a driver install / removal is running): checkBridge does not start it again.
 bool g_paused = false;
+
+// ---------------------------------------------------------------------------------------------- the MIDI ports
+
+// The teVirtualMIDI entry points (the bridge's MidiPorts.cpp loads the same ones).
+struct VmPort;
+using VmDataCb = void(CALLBACK*)(VmPort*, LPBYTE, DWORD, DWORD_PTR);
+using FnCreate = VmPort*(CALLBACK*)(LPCWSTR, VmDataCb, DWORD_PTR, DWORD, DWORD);
+using FnClose  = void(CALLBACK*)(VmPort*);
+using FnSend   = BOOL(CALLBACK*)(VmPort*, LPBYTE, DWORD);
+FnCreate g_vmCreate = nullptr;
+FnClose  g_vmClose  = nullptr;
+FnSend   g_vmSend   = nullptr;
+std::vector<VmPort*> g_ports;
+bool g_portsOurs = false;   // the ports are this program's (the bridge started with --loopmidi)
+
+const wchar_t* const kPortNames[] = {
+    L"Cubase-Sixty UF8 to Cubase",    L"Cubase-Sixty UF8 from Cubase",
+    L"Cubase-Sixty Helper to Cubase", L"Cubase-Sixty Helper from Cubase",
+    L"Cubase-Sixty UF1 to Cubase",    L"Cubase-Sixty UF1 from Cubase",
+    L"Cubase-Sixty MCU to Cubase",    L"Cubase-Sixty MCU from Cubase",
+    L"Cubase-Sixty UC1 to Cubase",    L"Cubase-Sixty UC1 from Cubase",
+};
+
+// What Cubase last sent on each "from Cubase" port, for a new bridge: Cubase's own values (fader positions, LEDs,
+// meters: what the scripts' bindings send, which the scripts cannot send again) and whether a project is open (7C).
+// The scripts send their own state again when the new bridge says hello (SysEx 7F 01). Keyed by kind: a note by
+// channel and number, a controller by channel and number, pitch bend by channel.
+struct Kept { unsigned long long seq = 0; std::vector<BYTE> msg; };
+std::mutex g_keptMx;
+std::map<VmPort*, std::map<unsigned, Kept>> g_kept;
+std::vector<VmPort*> g_fromPorts;   // the "... from Cubase" ports
+unsigned long long g_keptSeq = 0;
+
+unsigned keptKey(const BYTE* d, DWORD n)
+{
+    const BYTE st = d[0], hi = st & 0xF0;
+    if (st == 0xF0) return (n >= 6 && d[4] == 0x7C) ? 0xF07Cu : 0u;   // the project open / closed
+    if (n >= 3 && (hi == 0x80 || hi == 0x90)) return (0x90u | (st & 0x0F)) << 8 | d[1];
+    if (n >= 3 && (hi == 0xA0 || hi == 0xB0)) return unsigned(st) << 8 | d[1];
+    if (n >= 3 && hi == 0xE0) return unsigned(st) << 8;
+    if (n >= 2 && hi == 0xD0) return unsigned(st) << 8;
+    return 0;
+}
+
+// What a program writes to a port goes back out of it, to the programs reading it. Whole messages (parsed), so a
+// SysEx is passed on in one piece. (length 0: the port is being closed.)
+void CALLBACK loopBack(VmPort* port, LPBYTE data, DWORD length, DWORD_PTR)
+{
+    if (!port || !data || !length || !g_vmSend) return;
+    g_vmSend(port, data, length);
+    if (std::find(g_fromPorts.begin(), g_fromPorts.end(), port) == g_fromPorts.end()) return;
+    if (const unsigned key = keptKey(data, length)) {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        Kept& k = g_kept[port][key];
+        k.seq = ++g_keptSeq;
+        k.msg.assign(data, data + length);
+    }
+}
+
+// A new bridge has opened the ports: what Cubase last sent, in the order it was sent.
+void replayKept()
+{
+    std::vector<std::pair<VmPort*, Kept>> all;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (auto& p : g_kept) for (auto& k : p.second) all.emplace_back(p.first, k.second);
+    }
+    std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) { return a.second.seq < b.second.seq; });
+    for (auto& a : all) g_vmSend(a.first, a.second.msg.data(), DWORD(a.second.msg.size()));
+}
+
+void closePorts()
+{
+    if (g_vmClose) for (VmPort* p : g_ports) if (p) g_vmClose(p);
+    g_ports.clear();
+    g_fromPorts.clear();
+    { std::lock_guard<std::mutex> lk(g_keptMx); g_kept.clear(); }
+    g_portsOurs = false;
+}
+
+bool makePorts()
+{
+    HMODULE lib = LoadLibraryW(L"teVirtualMIDI64.dll");
+    if (!lib) return false;
+    g_vmCreate = reinterpret_cast<FnCreate>(GetProcAddress(lib, "virtualMIDICreatePortEx2"));
+    g_vmClose  = reinterpret_cast<FnClose>(GetProcAddress(lib, "virtualMIDIClosePort"));
+    g_vmSend   = reinterpret_cast<FnSend>(GetProcAddress(lib, "virtualMIDISendData"));
+    if (!g_vmCreate || !g_vmClose || !g_vmSend) return false;
+    constexpr DWORD kParseRx = 1, kBoth = 12, kMaxSysex = 65535;
+    for (const wchar_t* name : kPortNames) {
+        VmPort* p = g_vmCreate(name, &loopBack, 0, kMaxSysex, kBoth | kParseRx);
+        if (!p) { closePorts(); return false; }   // all or none
+        g_ports.push_back(p);
+        if (wcsstr(name, L"from Cubase")) g_fromPorts.push_back(p);
+    }
+    g_portsOurs = true;
+    return true;
+}
+
+// Whether Windows lists all ten ports yet, as inputs and as outputs. A new port shows up a moment after it is made
+// (14.11.2026: the bridge started at once did not find a single one).
+bool portsVisible()
+{
+    auto listed = [](bool input, const wchar_t* name) {
+        const UINT n = input ? midiInGetNumDevs() : midiOutGetNumDevs();
+        for (UINT i = 0; i < n; ++i) {
+            if (input) { MIDIINCAPSW c{}; if (midiInGetDevCapsW(i, &c, sizeof c) == MMSYSERR_NOERROR && wcscmp(c.szPname, name) == 0) return true; }
+            else { MIDIOUTCAPSW c{}; if (midiOutGetDevCapsW(i, &c, sizeof c) == MMSYSERR_NOERROR && wcscmp(c.szPname, name) == 0) return true; }
+        }
+        return false;
+    };
+    for (const wchar_t* name : kPortNames)
+        if (!listed(true, name) || !listed(false, name)) return false;
+    return true;
+}
 
 // What bridge.log says.
 struct Status {
@@ -287,6 +411,8 @@ void readLogLine(const std::string& line)
         while (!url.empty() && (url.back() == '\r' || url.back() == ' ')) url.pop_back();
         g_status.settingsUrl = url;
     }
+    // The bridge is up with its ports open: what Cubase last sent, for it (nothing yet on the first start).
+    if (has("Bridging; Ctrl+C to stop") && g_portsOurs) replayKept();
     if (has("Cubase connected")) { g_status.cubase = "connected"; g_status.projectOpen = true; }
     if (has("Cubase: project open")) { g_status.cubase = "project open"; g_status.projectOpen = true; }
     if (has("Cubase: no project")) { g_status.cubase = "no project (the Hub)"; g_status.projectOpen = false; }
@@ -542,6 +668,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
         }
         return 0;
     }
+    // --restart (dev-restart.ps1 -BridgeOnly): asks the running copy to restart the bridge, as its menu does; the
+    // ports stay.
+    if (cmdLine && wcsstr(cmdLine, L"--restart")) {
+        if (HWND running = FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr))
+            PostMessageW(running, WM_COMMAND, kCmdRestart, 0);
+        return 0;
+    }
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\CubaseSixtyTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   // already running
 
@@ -553,6 +686,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     // Arguments are passed on to the bridge (e.g. --loopmidi, --trace).
     if (cmdLine && *cmdLine) g_bridgeArgs = std::wstring(L" ") + cmdLine;
     g_loopMidi = g_bridgeArgs.find(L"--loopmidi") != std::wstring::npos;
+    // The ports, before the bridge (they outlive it); the bridge then opens them as ordinary ports.
+    if (!g_loopMidi && makePorts()) {
+        g_bridgeArgs += L" --loopmidi";
+        g_loopMidi = true;
+        // Up to 10 s for Windows to list them (the bridge also waits for each one it opens).
+        for (int i = 0; i < 50 && !portsVisible(); ++i) Sleep(200);
+    }
 
     WNDCLASSW wc{};
     wc.lpfnWndProc = wndProc;
@@ -588,6 +728,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
         DispatchMessageW(&msg);
     }
     stopBridge();
+    closePorts();   // (Cubase loses them now: the tray app is quitting)
     for (HICON i : g_icons) DestroyIcon(i);
     if (single) CloseHandle(single);
     return 0;

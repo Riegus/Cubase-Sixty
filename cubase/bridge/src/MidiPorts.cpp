@@ -1,6 +1,8 @@
 #include "MidiPorts.h"
 
 #include <atomic>
+#include <chrono>
+#include <thread>
 #include <cstdio>
 
 #include "RtMidi.h"
@@ -106,11 +108,24 @@ void CALLBACK onVmData(VmPort*, LPBYTE data, DWORD length, DWORD_PTR user)
 }
 #endif
 
-int findPort(RtMidi& api, const std::string& needle)
+int findPortNow(RtMidi& api, const std::string& needle)
 {
     for (unsigned i = 0; i < api.getPortCount(); ++i)
         if (api.getPortName(i).find(needle) != std::string::npos) return int(i);
     return -1;
+}
+
+// A port made just before the bridge started (by the tray app, which holds them) shows up a moment later: wait for
+// it, up to 10 s counted from the first port asked for, so missing ports do not add up to minutes.
+int findPort(RtMidi& api, const std::string& needle)
+{
+    using clock = std::chrono::steady_clock;
+    static const clock::time_point deadline = clock::now() + std::chrono::seconds(10);
+    for (;;) {
+        const int p = findPortNow(api, needle);
+        if (p >= 0 || clock::now() >= deadline) return p;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    }
 }
 
 } // namespace

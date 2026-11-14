@@ -124,8 +124,9 @@ Cubase-Sixty runs in the tray, whether Cubase is open or not. The icon's colour 
   Cubase"** while Cubase is not running (or has not connected yet), **"Bridge off"** (UF1: "Off") when Cubase-Sixty
   quits. The faders go to 0 dB. (Cubase-Sixty learns where 0 dB is from a track at 0.00 dB; until it has seen one,
   the faders stay where they are.)
-- After **Restart bridge**, Cubase finds it again by itself within some seconds. If the controllers stay on "Waiting
-  for Cubase" for long, restart Cubase.
+- After **Restart bridge**, the controllers are back within a second, showing what they showed before: the tray app
+  keeps Cubase-Sixty's MIDI ports open while the bridge restarts, so Cubase does not lose them. After **Quit** (or
+  an update), Cubase has lost the ports: restart Cubase once Cubase-Sixty runs again.
 - After Cubase's own *Reload Scripts*, a surface can behave oddly: restart Cubase.
 - With *Sleep when idle* set (Settings > Devices), the surfaces go dark after that time without a touch while the
   transport is stopped. The first touch wakes them and does nothing else.

@@ -40,11 +40,11 @@ function flushLog(activeDevice) {
 			body.push((c >> 14) & 0x7F, (c >> 7) & 0x7F, c & 0x7F)
 		}
 		body.push(0xF7)
-		midiOutput.sendMidi(activeDevice, body)
+		sendMidi(activeDevice, body)
 	}
 }
 
-var SCRIPT_VERSION = '0.16.2-dev'
+var SCRIPT_VERSION = '0.16.3-dev'
 out('[CubaseSixty UC1] script loaded, version ' + SCRIPT_VERSION)
 function log(text) { out('[CubaseSixty UC1] ' + text) }
 
@@ -53,6 +53,31 @@ var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'UC1', 'Riegus')
 var midiInput = deviceDriver.mPorts.makeMidiInput()
 var midiOutput = deviceDriver.mPorts.makeMidiOutput()
+
+// ---------------------------------------------------------------------------------------------------------------
+// A new bridge (SysEx 7F 01 from it, 14.11.2026): the bridge was restarted while the tray app kept the ports, so
+// Cubase did not activate this script again and sends nothing until something changes. The script sends again the
+// last of each kind of state it sent (RESEND: command -> how many index bytes follow it), in the order sent. Requests,
+// events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
+// positions and LEDs, the tray app gives the new bridge.)
+// ---------------------------------------------------------------------------------------------------------------
+var RESEND = { 0x30: 0, 0x31: 0, 0x32: 0, 0x33: 1, 0x34: 1, 0x35: 1, 0x36: 1, 0x37: 0, 0x38: 0, 0x3B: 0, 0x3F: 0, 0x40: 0,
+	0x7C: 0 }
+var resendLast = {}, resendSeq = 0
+function sendMidi(activeDevice, bytes) {
+	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
+		var key = bytes.slice(4, 5 + RESEND[bytes[4]]).join(',')
+		resendLast[key] = { seq: ++resendSeq, bytes: bytes.slice() }
+	}
+	midiOutput.sendMidi(activeDevice, bytes)
+}
+function resendAll(activeDevice) {
+	var list = []
+	for (var k in resendLast) list.push(resendLast[k])
+	list.sort(function (a, b) { return a.seq - b.seq })
+	for (var i = 0; i < list.length; ++i) midiOutput.sendMidi(activeDevice, list[i].bytes)
+	return list.length
+}
 deviceDriver
 	.makeDetectionUnit()
 	.detectPortPair(midiInput, midiOutput)
@@ -199,7 +224,7 @@ function encodeName(text) {
 	}
 	return out
 }
-function sysex(activeDevice, body) { midiOutput.sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
+function sysex(activeDevice, body) { sendMidi(activeDevice, SYSEX_HEADER.concat(body, [0xF7])) }
 var ledShown = {}
 function setLed(activeDevice, button, state) {
 	if (ledShown[button] === state) return
@@ -1671,6 +1696,7 @@ var sysexErrors = 0
 midiInput.mOnSysex = function (activeDevice, message) {
 	if (message.length < 7 || message[4] === undefined) return
 	var cmd = message[4]
+	if (cmd === 0x7F && message[5] === 0x01) { log('a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if ((cmd === 0x3C || cmd === 0x3D) && am) { onPresetMessage(activeDevice, message); return }
 	if (cmd === 0x43) { onFavList(message); return }
 	if (cmd === 0x45 && am) { followUf1(activeDevice, message[5], message[6]); return }
@@ -1807,6 +1833,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 // "No Project" meanwhile (SysEx 7C 00 / 01); what the scripts send on the next project paints the surface again.
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	log('inactive (no project)')
+	resendLast = {}   // the project's state goes with it
 	sysex(activeDevice, [0x7C, 0x00])
 	try { flushLog(activeDevice) } catch (e) {}
 }

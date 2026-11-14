@@ -20,7 +20,9 @@ Quick: Cubase starts, all surfaces show the project.
   faders on the tracks' levels. Quit from the tray: faders at 0 dB.
 - The idle texts: the Hub "No Project" (UF8 strips 1-2, UF1, UC1); Cubase quit "Waiting for Cubase" (within 2 s);
   Cubase ended in Task Manager with a project open: blanked, "Waiting for Cubase"; tray Quit "Bridge off" / "Off".
-- Restart the bridge from the tray: surfaces "Waiting for Cubase", then back by themselves.
+- Restart the bridge from the tray (or dev-restart -BridgeOnly -Tray): within a second every display as before (UF8
+  names, levels, LEDs, faders; UF1 name, time; UC1), the surfaces work in Cubase without Reload Scripts; scripts.log
+  "a new bridge: N messages sent again" from each script.
 - A project open with no track selected (after opening it from the Hub, and after a bridge restart + Reload
   Scripts): the UF1's small display blank, not "No Proj." / "Waiting".
 

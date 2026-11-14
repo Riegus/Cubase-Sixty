@@ -1204,6 +1204,8 @@ bool uc1Start()
     g_nextTry = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     const bool ports = g_out.open(kPortTo) && g_in.open(kPortFrom, &onMidiIn);
     if (!ports) std::fprintf(stderr, "UC1: could not open the MIDI ports \"%s\" / \"%s\".\n", kPortTo, kPortFrom);
+    // A new bridge: a script that is already running (the tray app kept the ports) sends its state again.
+    if (ports) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x7F, 0x01, 0xF7});
     if (!g_grThread.joinable()) { g_grRun = true; g_grThread = std::thread(grLoop); }
     return ports;
 }
