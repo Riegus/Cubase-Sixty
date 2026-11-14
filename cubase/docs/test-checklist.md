@@ -62,6 +62,8 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
   drawn, its settings on the V-pots (over SSL's protocol), the plug-in's window and the UF1's screens follow; PLAY and
   PRESETS work; a change in the plug-in's window shows on the UF1. Loudness: the readouts as the plug-in's (True Peak
   Max holds, "---" after RESET), the time labels under the history as the plug-in's; PPM readouts not below 0.0.
+- UF1 METER: a V-pot push does nothing (no send of the selected track switches); in the presets browser V-pot 4's
+  push still loads.
 - UF1 soft keys in DAW / SENDS: labelled First / Prev / Next / Last Marker and do that (First: the earliest marker,
   also when it is not marker 1); Settings > UF1 soft keys = the list: the chosen commands and labels, changed at once; = the
   Mapping Assistant: USER 1-4, assignable in Cubase; in PLUGIN / METER / with MODE held the keys do what they did.

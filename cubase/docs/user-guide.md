@@ -360,7 +360,8 @@ it shows whatever you select; "NO METER" means no Meter plug-in was found.
 
 The Meter's own settings are on the V-pots, as on SSL's UF1:
 
-- **V-pot 1** picks which Meter in the project is shown (AUTO follows the selected track).
+- **V-pot 1** picks which Meter in the project is shown (AUTO follows the selected track). The V-pot pushes do
+  nothing in METER.
 - **V-pots 2–4** are three of the Meter's settings for this screen, named above them with their values: on
   OVERVIEW for example True Peak, Digital Type and the Lissajous fade; on ANALOGUE VU / PPM, the 0 VU line-up and
   the reference. **◄ ►** page through more (three pages; ten on LOUDNESS).
