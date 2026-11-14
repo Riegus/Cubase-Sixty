@@ -117,9 +117,10 @@ if ($BridgeOnly -and $trayRunning) {
         if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
     }
     Write-Host 'Restarting the bridge through the tray app (the MIDI ports stay)...'
-    $tray = Join-Path $releaseDir 'CubaseSixty.exe'
-    if (-not (Test-Path $tray)) { $tray = Join-Path $releaseDir 'CubaseSixty.old.exe' }
-    Start-Process -FilePath $tray -ArgumentList '--restart' -WorkingDirectory $releaseDir
+    # (Not $tray: PowerShell names ignore case, and that is the -Tray switch.)
+    $trayExe = Join-Path $releaseDir 'CubaseSixty.exe'
+    if (-not (Test-Path $trayExe)) { $trayExe = Join-Path $releaseDir 'CubaseSixty.old.exe' }
+    Start-Process -FilePath $trayExe -ArgumentList '--restart' -WorkingDirectory $releaseDir
     Write-Host 'Done (bridge restarted; Cubase left running).'
     return
 }
