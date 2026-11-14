@@ -465,6 +465,9 @@ void buildOther(int screen, uf1pace::Parts& parts, uint8_t lvL, uint8_t lvR, int
             r = std::isfinite(c[1]) ? c[1] : -120.f;
             if (k.size() >= 2) { hl = std::isfinite(k[0]) ? k[0] : -120.f; hr = std::isfinite(k[1]) ? k[1] : -120.f; }
             have = true;
+            // PPM: the readout is in marks, and the plug-in's own window does not go below 0.0 (14.11.2026: the
+            // stream said -2.4 after the transport stopped, the plug-in showed 0.0).
+            if (settingIndex(8, 2, 0) == 1) { l = std::max(l, 0.f); r = std::max(r, 0.f); hl = std::max(hl, 0.f); hr = std::max(hr, 0.f); }
         }
         readouts = fieldsBytes({have ? uf1FormatMeterDb_(l) : std::string(), have ? uf1FormatMeterDb_(hl) : std::string(),
                                 have ? uf1FormatMeterDb_(r) : std::string(), have ? uf1FormatMeterDb_(hr) : std::string(),

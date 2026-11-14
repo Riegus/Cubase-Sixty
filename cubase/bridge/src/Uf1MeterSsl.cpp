@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 #include "SslCoreImpersonator.h"
 #include "Uf1Meter.h"
@@ -225,7 +226,9 @@ std::string format(const Spec& s, const Value& v)
         case kNum: {
             char b[32];
             std::snprintf(b, sizeof(b), "%.*f%s%s", s.decimals, v.v, *s.unit ? " " : "", s.unit);
-            return b;
+            std::string t = b;
+            if (t.size() > 9 && *s.unit) t.erase(t.size() - std::strlen(s.unit) - 1, 1);   // "-18.0dBFS": fits the cell
+            return t;
         }
         default: return {};
     }
