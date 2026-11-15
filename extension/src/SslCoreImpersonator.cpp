@@ -3498,6 +3498,26 @@ long long msSinceLastNewConn() {
 // whether its CompGain / GateGain streams have values, to tie the instances to
 // Cubase's tracks. Thread-safe.
 namespace sslcore {
+int stripPluginTypeOnTrack(int trackIndex)
+{
+    if (trackIndex <= 0) return -1;
+    std::lock_guard<std::mutex> lk(g_meterMx);
+    const long long now = nowMs();
+    int bus = -1;
+    for (const auto& kv : g_inst) {
+        auto pi = g_portIndex.find(kv.first);
+        if (pi == g_portIndex.end() || pi->second != trackIndex) continue;
+        if (now - kv.second.lastMs > 10000) continue;   // gone (removed, or the project closed)
+        const int t = kv.second.pluginType;
+        using PT = sslmeter::PluginType;
+        if (t == int(PT::NativeChannelStrip) || t == int(PT::K4_B) || t == int(PT::K4_E) || t == int(PT::K4_G) ||
+            t == int(PT::GenericChannelStrip))
+            return t;
+        if (bus < 0 && (t == int(PT::NativeBusComp) || t == int(PT::GenericBusComp))) bus = t;
+    }
+    return bus;
+}
+
 std::string debugSummary()
 {
     std::lock_guard<std::mutex> lk(g_meterMx);

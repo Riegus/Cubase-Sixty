@@ -379,6 +379,10 @@ long long msSinceLastData();
 // each connecting plug-in selects its own track.
 long long msSinceLastNewConn();
 
+// Cubase-Sixty (15.11.2026): the SSL plug-in on a track, by its announced HostTrackIndex (the MixConsole's number in
+// Cubase): its sslmeter::PluginType, a channel strip before a bus compressor, -1 = none (Meters are not counted).
+int stripPluginTypeOnTrack(int trackIndex);
+
 // Cubase-Sixty: one line per live instance (type, announced track, model, CompGain / GateGain), for a log.
 std::string debugSummary();
 // Cubase-Sixty: the gain reduction (dB, 0 .. negative) of the `ordinal`-th bus compressor on the track.

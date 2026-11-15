@@ -33,6 +33,7 @@
 #include "Sleep.h"
 
 #include "Mapping.h"
+#include "SslCoreImpersonator.h"
 #include "Protocol.h"
 #include "UF8Device.h"
 #include "Uf8Fader.h"
@@ -824,6 +825,23 @@ std::atomic<bool> g_uf8Frozen{false};
 std::mutex g_numMx;
 std::vector<int> g_chanNumber;   // by position in the bank list: its number (0 = not known)
 std::string g_numShown[8];       // what each strip shows ("" = not drawn since the UF8 connected)
+// The text cell in each strip's colour bar (15.11.2026), as Rea-Sixty and the UF1: the SSL plug-in on the strip's
+// track ("CS 2", "4K E", "Link", "BC 2"), from what the plug-ins announce (their track = the number above). Written
+// at all, the cell also switches the bar to the UF1's look (the part above the meters dimmed, the number in it):
+// twelve spaces for a track without one, as the UF1; nothing for an empty strip (a plain bar, as Rea-Sixty).
+std::string g_csShown[8] = {"\x01", "\x01", "\x01", "\x01", "\x01", "\x01", "\x01", "\x01"};
+const char* stripPluginLabel(int type)
+{
+    switch (type) {
+        case 1: return "CS 2";   // sslmeter::PluginType: NativeChannelStrip
+        case 2: case 7: return "BC 2";   // NativeBusComp, GenericBusComp (the 360 Link bus compressor)
+        case 3: return "4K B";
+        case 5: return "4K E";
+        case 6: return "Link";   // GenericChannelStrip (SSL 360 Link)
+        case 9: return "4K G";
+        default: return nullptr;
+    }
+}
 void paintStripNumbers(bool force = false)
 {
     if (!g_uf8Running || g_uf8Frozen) return;
@@ -831,14 +849,25 @@ void paintStripNumbers(bool force = false)
     std::lock_guard<std::mutex> lk(g_numMx);
     for (int s = 0; s < kStrips; ++s) {
         std::string t = "  ";
+        int number = 0;
         const size_t i = size_t(offset + s);
         if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
-            t = std::to_string(g_chanNumber[i]);
+            t = std::to_string(number = g_chanNumber[i]);
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
-        if (!force && g_numShown[s] == t) continue;
-        g_numShown[s] = t;
-        g_dev.send(uf8::buildChannelNumber(uint8_t(s), t));
+        if (force || g_numShown[s] != t) {
+            g_numShown[s] = t;
+            g_dev.send(uf8::buildChannelNumber(uint8_t(s), t));
+        }
+        std::string cs;
+        if (g_projectOpen && !g_stripEmpty[s]) {
+            const char* label = number > 0 ? stripPluginLabel(sslcore::stripPluginTypeOnTrack(number)) : nullptr;
+            cs = label ? label : std::string(12, ' ');
+        }
+        if (force || g_csShown[s] != cs) {
+            g_csShown[s] = cs;
+            g_dev.send(uf8::buildChannelStripType(uint8_t(s), cs));
+        }
     }
 }
 std::atomic<int> g_freezeGen{0};
@@ -1402,7 +1431,7 @@ bool uf8Connect(bool quiet)
     g_dev.setRawInputHandler(onUsbInput);
     { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
     g_meterShown = {};
-    { std::lock_guard<std::mutex> lk(g_numMx); for (auto& n : g_numShown) n.clear(); }
+    { std::lock_guard<std::mutex> lk(g_numMx); for (auto& n : g_numShown) n.clear(); for (auto& c : g_csShown) c = "\x01"; }
     g_uf8Running = true;
     uf8ApplyBrightness();
     replayUf8Cache();
@@ -1574,6 +1603,10 @@ int main(int argc, char** argv)
         cs::uf1Poll();
         cs::uc1Poll();
         { static int n = 0; if (++n % 5 == 0) selSendLogFlush(); }   // once a second
+        {   // Every second: the UF8 strips' plug-in labels (a plug-in added or removed in Cubase).
+            static int tick = 0;
+            if (++tick % 5 == 0) paintStripNumbers();
+        }
         {   // Every 2 s: what the surfaces say while no project is open. Cubase gone without closing its project
             // (a crash, ended in Task Manager): blanked as if it had.
             static int n = 0, shown = -1;
