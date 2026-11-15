@@ -56,8 +56,9 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
 - **Faders write at most every 60 ms too** (15.11.2026). The hand's position went to the script with every report
   (50+ a second) and Cubase fell seconds behind: when the hand stopped, the text that came back was a level passed
   long before, "jumping 4 dB and more" (bridge.log: drawn -4.74, Cubase -18.2). Now throttled as the V-pot's 2A, the
-  last one always sent. And a Cubase text more than 1.5 dB from what was drawn for the hand's position, within 3 s
-  of the hand, is taken as late and not shown; such pairs are not learnt either. The motor the same way: within 3 s of the hand,
+  last one always sent. And a Cubase text more than 0.06 dB from what was drawn for the hand's position, within 3 s
+  of the hand, is taken as late and not shown (1.5 dB still let a few late ones through, a few tenths each); pairs
+  more than 1.5 dB off are not learnt either. The motor the same way: within 3 s of the hand,
   a position from Cubase more than 64 (of 16383) from where the hand let go is late, and the fader stays (it jumped
   back now and then).
 - **Where it is used.** UF1 V-pots in DAW / SENDS (turns on CC 21–24 to custom values); UF8 fader send view and

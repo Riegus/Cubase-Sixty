@@ -289,8 +289,10 @@ void sendHandToScript(uint8_t s, uint16_t v)
         }).detach();
     }
 }
-// Cubase's text far (> 1.5 dB) from what the bridge drew for where the hand stopped: a late one, from a level the hand
-// has passed. Not shown (the drawn one stays); one that agrees, or anything once 3 s have passed, is.
+// Cubase's text not what the bridge drew for where the hand stopped (more than 0.06 dB off): a late one, from a level
+// the hand has passed. Not shown (the drawn one stays); one that agrees, or anything once 3 s have passed, is. (1.5 dB
+// let the last few late ones through, a few tenths each, 15.11.2026; the drawn value is within the curve's error, a
+// few hundredths where it has points, and the settled pair makes that spot exact for next time.)
 bool lateDbText(uint8_t s, const std::string& cubase)
 {
     std::string drawn;
@@ -299,7 +301,7 @@ bool lateDbText(uint8_t s, const std::string& cubase)
     char* e1 = nullptr; char* e2 = nullptr;
     const double a = std::strtod(drawn.c_str(), &e1), b = std::strtod(cubase.c_str(), &e2);
     if (e1 == drawn.c_str() || e2 == cubase.c_str()) return false;
-    return std::fabs(a - b) > 1.5;
+    return std::fabs(a - b) > 0.06;
 }
 std::string dbFieldText(std::string t)
 {
