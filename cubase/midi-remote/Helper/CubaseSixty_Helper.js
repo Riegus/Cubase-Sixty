@@ -341,7 +341,8 @@ function sendViewNumbers(activeDevice, v) {
 }
 
 var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: recordable')
-var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels']
+// (TEST 15.11.2026, the UF8's ARMED view: the same filters as its strip zones, includes, so the positions match.)
+var recFilters = ['includeAudioChannels', 'includeInstrumentChannels', 'includeSamplerChannels', 'includeMIDIChannels']
 for (var f = 0; f < recFilters.length; ++f) {
 	try { recZone[recFilters[f]]() } catch (e) { out('[CubaseSixty Helper] recordable list: ' + recFilters[f] + ' not available: ' + e) }
 }

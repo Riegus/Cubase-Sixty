@@ -1751,16 +1751,17 @@ var VIEWS = [
 // 15.11.2026), so the page's own zone (the bank keys are bound to it) is VCA only, and the strips' differ by excludes
 // of types they do not include anyway.
 var REC_INCLUDES = ['includeAudioChannels', 'includeInstrumentChannels', 'includeSamplerChannels', 'includeMIDIChannels']
-var ARMED_ZONE_FILTERS = [
-	['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels'],
-	REC_INCLUDES,
-	REC_INCLUDES.concat(['excludeGroupChannels']),
-	REC_INCLUDES.concat(['excludeFXChannels']),
-	REC_INCLUDES.concat(['excludeVCAChannels']),
-	REC_INCLUDES.concat(['excludeInputChannels']),
-	REC_INCLUDES.concat(['excludeOutputChannels']),
-	REC_INCLUDES.concat(['excludeGroupChannels', 'excludeFXChannels'])
-]
+// (TEST 15.11.2026: excludes of inputs / outputs on top of includes seemed to count for nothing, those zones moved with
+// the plain includes one; group / FX / VCA ones did separate. And the helper's recordable list is the includes too now:
+// the exclude-style list held one channel more, so the positions were off by one.)
+var ARMED_ZONE_FILTERS = []
+for (var azf = 0; azf < 8; ++azf) {
+	var fl = REC_INCLUDES.slice()
+	if (azf & 1) fl.push('excludeGroupChannels')
+	if (azf & 2) fl.push('excludeFXChannels')
+	if (azf & 4) fl.push('excludeVCAChannels')
+	ARMED_ZONE_FILTERS.push(fl)
+}
 // The ARMED view: which recordable channels are armed (helper SysEx 2F, by its recordable slot), which of them the strips
 // start at, where each strip's one-channel zone is (pos, its slot), and which strips have no armed track (unused: name
 // blank; the zone stays where it was).
