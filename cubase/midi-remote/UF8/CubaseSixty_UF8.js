@@ -1557,20 +1557,28 @@ function spikeActivated(activeDevice, name) {
 	spikeShow(activeDevice, name)
 }
 var spikePressAt = 0
-var spikeQ3 = cmdButton()
-spikeQ3.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 96)
-spikeQ3.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-	if (value > 0.5) { spikePressAt = Date.now(); out('[spike] Q3 pressed on page ' + spikeCur) }
-}
+var spikeQ3 = null
+try {
+	spikeQ3 = cmdButton()
+	spikeQ3.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 96)
+	spikeQ3.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		if (value > 0.5) { spikePressAt = Date.now(); out('[spike] Q3 pressed on page ' + spikeCur) }
+	}
+} catch (e) { out('[spike] FAILED making the Q3 key: ' + e) }
 function makeSpikePage(name, filters) {
 	var p = deviceDriver.mMapping.makePage(name)
 	var z = p.mHostAccess.mMixConsole.makeMixerBankZone()
-	for (var f = 0; f < filters.length; ++f) z = z[filters[f]]()
+	for (var f = 0; f < filters.length; ++f) {
+		try { z[filters[f]]() } catch (e) { out('[spike] ' + name + ': ' + filters[f] + ' failed: ' + e) }
+	}
 	spikeCache[name] = { titles: [], colors: [] }
 	for (var i = 0; i < STRIPS; ++i) {
+		spikeStep = name + ' strip ' + (i + 1) + ' channel'
 		var ch = z.makeMixerBankChannel()
+		spikeStep = name + ' strip ' + (i + 1) + ' fader / SEL'
 		p.makeValueBinding(strips[i].fader.mSurfaceValue, ch.mValue.mVolume).setValueTakeOverModeJump()
 		p.makeValueBinding(strips[i].select.mSurfaceValue, ch.mValue.mSelected)
+		spikeStep = name + ' strip ' + (i + 1) + ' callbacks / meter / Direct Access'
 		;(function (index, ch) {
 			ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
 				spikeCount(name + ' title')
@@ -1600,17 +1608,25 @@ function makeSpikePage(name, filters) {
 			} catch (e) { if (index === 0) out('[spike] ' + name + ': no Direct Access: ' + e) }
 		})(i, ch)
 	}
+	spikeStep = name + ' bank keys'
 	p.makeActionBinding(bankLeft.mSurfaceValue, z.mAction.mPrevBank)
 	p.makeActionBinding(bankRight.mSurfaceValue, z.mAction.mNextBank)
 	p.mOnActivate = function (activeDevice) { spikeActivated(activeDevice, name) }
 	p.mOnIdle = function () { spikeCount(name + ' page idle') }
 	return p
 }
-var spikeAudio = makeSpikePage('AUDIO', ['includeAudioChannels'])
-var spikeAudioInstr = makeSpikePage('AUDIO + INSTR', ['includeAudioChannels', 'includeInstrumentChannels'])
-page.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudio.mAction.mActivate)
-spikeAudio.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudioInstr.mAction.mActivate)
-spikeAudioInstr.makeActionBinding(spikeQ3.mSurfaceValue, page.mAction.mActivate)
+var spikeStep = 'start'
+try {
+	spikeStep = 'AUDIO page'
+	var spikeAudio = makeSpikePage('AUDIO', ['includeAudioChannels'])
+	spikeStep = 'AUDIO + INSTR page'
+	var spikeAudioInstr = makeSpikePage('AUDIO + INSTR', ['includeAudioChannels', 'includeInstrumentChannels'])
+	spikeStep = 'Q3 bindings'
+	page.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudio.mAction.mActivate)
+	spikeAudio.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudioInstr.mAction.mActivate)
+	spikeAudioInstr.makeActionBinding(spikeQ3.mSurfaceValue, page.mAction.mActivate)
+	spikeStep = 'done'
+} catch (e) { out('[spike] FAILED at ' + spikeStep + ': ' + e + (e && e.stack ? ' | ' + e.stack : '')) }
 ;(function () {
 	var mixerActivate = page.mOnActivate
 	page.mOnActivate = function (activeDevice, activeMapping) {
