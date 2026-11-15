@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.4.0-dev'
+var SCRIPT_VERSION = '0.5.0-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -181,6 +181,7 @@ for (var c = 0; c < CHANNELS; ++c) {
 			allTitles[index] = title
 			sendAll(activeDevice, index)
 			numbersDirty = true
+			scanSoon(1000)   // the view lists again, once the full list is still
 		}
 	})(c, ch)
 }
@@ -230,42 +231,102 @@ function sendNumbers(activeDevice) {
 // <index hi> <index lo> <name> to the UF8 script (follow selection, the bank position in a view), and each one's
 // track number as 1F <view> <index hi> <index lo> <number hi> <number lo> to the bridge (the strips' numbers), matched
 // against the numbers zone as the full list is. The bridge also counts them (the view picker dims empty views).
+// Read through a window of 16 channels per view that the script banks through itself (its bank actions triggered,
+// which Cubase carries out at once), not a zone as long as the list: six zones of 128-256 channels made Cubase stall
+// about 0.9 s longer after every selection change (measured 15.11.2026: longest gap 2.0 s instead of 1.1 s). The lists
+// are read 1 s after the full list last changed (a track added, removed, renamed, hidden), all six one after another.
 // ---------------------------------------------------------------------------------------------------------------
 var VIEW_LISTS = [
 	null,   // 0 = ALL: the full list above
-	{ name: 'audio', size: 256, filters: ['includeAudioChannels'] },
-	{ name: 'instruments', size: 256, filters: ['includeInstrumentChannels', 'includeSamplerChannels'] },
-	{ name: 'MIDI', size: 256, filters: ['includeMIDIChannels'] },
-	{ name: 'groups', size: 128, filters: ['includeGroupChannels'] },
-	{ name: 'FX', size: 128, filters: ['includeFXChannels'] },
-	{ name: 'VCA', size: 128, filters: ['includeVCAChannels'] }
+	{ name: 'audio', filters: ['includeAudioChannels'] },
+	{ name: 'instruments', filters: ['includeInstrumentChannels', 'includeSamplerChannels'] },
+	{ name: 'MIDI', filters: ['includeMIDIChannels'] },
+	{ name: 'groups', filters: ['includeGroupChannels'] },
+	{ name: 'FX', filters: ['includeFXChannels'] },
+	{ name: 'VCA', filters: ['includeVCAChannels'] }
 ]
+var SCAN_WIDTH = 16, VIEW_MAX = 256
 var viewTitles = [], sentViewNumbers = []
+var viewZones = [], scanSlots = [], scanSlotAt = []
 function sendViewTitle(activeDevice, v, index) {
 	sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, v, (index >> 7) & 0x7F, index & 0x7F], encodeName(viewTitles[v][index]), [0xF7]))
 }
 for (var vl = 1; vl < VIEW_LISTS.length; ++vl) {
 	viewTitles[vl] = []
 	sentViewNumbers[vl] = []
+	scanSlots[vl] = []
+	scanSlotAt[vl] = 0
 	var vz = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: ' + VIEW_LISTS[vl].name)
 	for (var vf = 0; vf < VIEW_LISTS[vl].filters.length; ++vf) {
 		try { vz[VIEW_LISTS[vl].filters[vf]]() } catch (e) { out('[CubaseSixty Helper] ' + VIEW_LISTS[vl].name + ': ' + VIEW_LISTS[vl].filters[vf] + ' not available: ' + e) }
 	}
-	for (var vc = 0; vc < VIEW_LISTS[vl].size; ++vc) {
-		;(function (v, index, ch) {
+	viewZones[vl] = vz
+	for (var vc = 0; vc < SCAN_WIDTH; ++vc) {
+		;(function (v, slot, ch) {
 			ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
-				if (viewTitles[v][index] === title) return
-				viewTitles[v][index] = title
-				sendViewTitle(activeDevice, v, index)
-				numbersDirty = true
+				hostMapping = activeMapping
+				scanSlots[v][slot] = title || ''
+				scanSlotAt[v] = Date.now()
 			}
 		})(vl, vc, vz.makeMixerBankChannel())
 	}
 }
+// The reading: reset the window, take its 16 names, next bank, ... until a bank is not full. A step is read once the
+// window has settled: 150 ms without a new name after one came, or 400 ms after the move if none came (the same names).
+var scan = { v: 0, bank: 0, found: [], movedAt: 0, queue: [], dueAt: 0, started: 0 }
+function scanSoon(delayMs) { scan.dueAt = Date.now() + delayMs }
+function scanMove(kind) {
+	if (!hostMapping) return false
+	var a = viewZones[scan.v].mAction
+	try { (kind === 'reset' ? a.mResetBank : a.mNextBank).trigger(hostMapping) } catch (e) { out('[CubaseSixty Helper] view lists: ' + e); return false }
+	scan.movedAt = Date.now()
+	return true
+}
+function scanNextView(activeDevice) {
+	scan.v = scan.queue.length ? scan.queue.shift() : 0
+	if (!scan.v) { out('[CubaseSixty Helper] view lists read in ' + (Date.now() - scan.started) + ' ms'); return }
+	scan.bank = 0
+	scan.found = []
+	if (!scanMove('reset')) { scan.v = 0; scan.queue = []; scanSoon(1000) }
+}
+function scanStep(activeDevice) {
+	var v = scan.v, now = Date.now()
+	var settled = scanSlotAt[v] > scan.movedAt ? now - scanSlotAt[v] >= 150 : now - scan.movedAt >= 400
+	if (!settled) return
+	var base = scan.bank * SCAN_WIDTH, full = true
+	for (var k = 0; k < SCAN_WIDTH; ++k) {
+		var t = scanSlots[v][k] || ''
+		scan.found[base + k] = t
+		if (!t) full = false
+	}
+	if (full && base + SCAN_WIDTH < VIEW_MAX) {
+		++scan.bank
+		if (scanMove('next')) return
+	}
+	// The view read: what changed goes out (removed ones as empty names), and its numbers.
+	var list = viewTitles[v], found = scan.found
+	var n = Math.max(list.length, found.length)
+	for (var i = 0; i < n && i < VIEW_MAX; ++i) {
+		var f = found[i] || ''
+		if ((list[i] || '') === f && list[i] !== undefined) continue
+		list[i] = f
+		sendViewTitle(activeDevice, v, i)
+	}
+	numbersDirty = true
+	scanNextView(activeDevice)
+}
+function scanIdle(activeDevice) {
+	if (scan.v) { scanStep(activeDevice); return }
+	if (!scan.dueAt || Date.now() < scan.dueAt) return
+	scan.dueAt = 0
+	scan.queue = [1, 2, 3, 4, 5, 6]
+	scan.started = Date.now()
+	scanNextView(activeDevice)
+}
 // A list's numbers: matched name by name, in order, against the numbers zone (as sendNumbers does the full list).
 function sendViewNumbers(activeDevice, v) {
 	var list = viewTitles[v], sent = sentViewNumbers[v], j = 0
-	for (var i = 0; i < VIEW_LISTS[v].size; ++i) {
+	for (var i = 0; i < VIEW_MAX; ++i) {
 		var n = 0
 		if (list[i]) {
 			var k = j
@@ -310,8 +371,8 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	// The views' lists up to their last name, and one empty entry after it (a list that shrank).
 	for (var v = 1; v < VIEW_LISTS.length; ++v) {
 		var last = -1
-		for (var vi = 0; vi < VIEW_LISTS[v].size; ++vi) if (viewTitles[v][vi]) last = vi
-		for (var vj = 0; vj <= last + 1 && vj < VIEW_LISTS[v].size; ++vj) sendViewTitle(activeDevice, v, vj)
+		for (var vi = 0; vi < VIEW_MAX; ++vi) if (viewTitles[v][vi]) last = vi
+		for (var vj = 0; vj <= last + 1 && vj < VIEW_MAX; ++vj) sendViewTitle(activeDevice, v, vj)
 	}
 	soloSent = -1
 	sendSolo(activeDevice)
@@ -324,9 +385,11 @@ deviceDriver.mOnDeactivate = function (activeDevice) {
 	resendLast = {}
 	sentNumbers = []
 	for (var v = 1; v < VIEW_LISTS.length; ++v) sentViewNumbers[v] = []
+	scan.v = 0; scan.queue = []; scan.dueAt = 0
 	flushLog(activeDevice)
 }
 deviceDriver.mOnIdle = function (activeDevice) {
+	try { scanIdle(activeDevice) } catch (e) { out('[CubaseSixty Helper] view lists: ' + e); scan.v = 0 }
 	if (numbersDirty) {   // once the names have come in (they arrive in a burst)
 		sendNumbers(activeDevice)
 		for (var v = 1; v < VIEW_LISTS.length; ++v) sendViewNumbers(activeDevice, v)

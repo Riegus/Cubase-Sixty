@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.19.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.20.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -784,6 +784,24 @@ function meterToMidi(value) {
 // full one: a track not of the view's type is not on it, and the bank stays. The same-name rank for the UF1 keeps
 // going by the full list.
 var followRestart = function () {}, followStop = function () {}, driverActivations = 0
+// The bank moved by the script itself (15.11.2026): the active view's bank zone actions triggered directly, as many as
+// needed at once, instead of bank notes from the bridge 100 ms apart (Cubase drops notes closer together, and more of
+// them right after a page switch). Measured: a reset + 5 next banks landed in 40-120 ms, the first time, every time.
+// kind: 0 shift right, 1 shift left, 2 next bank, 3 previous bank, 4 reset. Where the bank lands is logged. The bridge's
+// notes (SysEx 10 / 0B / 0F) stay as the fallback: at start-up (Cubase ignores bank moves at first) and from the third
+// try of a follow on.
+var bankTrig = { at: 0, what: '', logged: -2 }
+function bankTrigger(activeDevice, kind, count) {
+	if (!skAm || !curView || kind > 4) return false
+	var a = curView.bankZone.mAction
+	var act = [a.mShiftRight, a.mShiftLeft, a.mNextBank, a.mPrevBank, a.mResetBank][kind]
+	try { for (var i = 0; i < count; ++i) act.trigger(skAm) } catch (e) { out('[CubaseSixty] bank trigger: ' + e); return false }
+	bankTrig.at = Date.now()
+	bankTrig.what = ['shift right', 'shift left', 'next bank', 'previous bank', 'reset'][kind] + ' x' + count
+	bankTrig.logged = -2
+	out('[CubaseSixty] bank trigger: ' + bankTrig.what)
+	return true
+}
 // The UF1's BANK without a UF8 moves these strips and selects on them (SysEx 5D from the bridge): follow stays out
 // of it meanwhile, as the selection Cubase reports then is late and on the old bank (it banked back).
 var followQuietUntil = 0
@@ -946,6 +964,13 @@ var followQuietUntil = 0
 		if (jump) {
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
+			// By the script, all at once; the UF8 held until it is there (see bankTrigger).
+			if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
+				out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps (triggered)')
+				if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
+				dueMs = now + 600
+				return
+			}
 			out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps')
 			sendMidi(activeDevice, SYSEX_HEADER.concat([0x10, banks, 0xF7]))
 			dueMs = now + banks * 100 + 1000   // the bridge spaces the presses 100 ms apart and shows the end 400 ms later
@@ -955,6 +980,12 @@ var followQuietUntil = 0
 		// a jump right after loading lost most of its presses.
 		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
 		steps = Math.max(1, Math.min(steps, 64))
+		if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, delta < 0 ? 3 : 2, steps)) {
+			out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right') + ' (triggered)')
+			if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
+			dueMs = now + 600
+			return
+		}
 		out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right'))
 		sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
 		dueMs = now + steps * 100 + 800
@@ -998,6 +1029,10 @@ var followQuietUntil = 0
 		var list = curList(), total = 0
 		while (total < CHANNELS && list[total]) ++total
 		var offset = currentOffset()
+		if (bankTrig.at && offset >= 0 && offset !== bankTrig.logged && Date.now() - bankTrig.at < 2000) {
+			bankTrig.logged = offset
+			out('[CubaseSixty] bank trigger (' + bankTrig.what + '): bank at #' + (offset + 1) + ' after ' + (Date.now() - bankTrig.at) + ' ms')
+		}
 		if (total === sentTotal && offset === sentOffset) return
 		sentTotal = total
 		sentOffset = offset
@@ -1042,7 +1077,7 @@ var followQuietUntil = 0
 		pickCurrent(activeDevice)
 		if (dueMs > 0 && startupUntil <= 0) {
 			var now = nowMs()
-			dueMs = now + 800
+			dueMs = now + 300   // (the jump lands at once now; it needs the new page's names in)
 			viewFrozenUntil = now + 8000
 			startupFreeze(activeDevice, true)
 		}
@@ -1092,6 +1127,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (m[4] === 0x7F && m[5] === 0x01) { out('[CubaseSixty] a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if (m[4] >= 0x21 && m[4] <= 0x2D) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
+		return
+	}
+	if (m[4] === 0x30 && m.length >= 8) {   // the bridge asks the script to move the bank: 30 <kind> <count>
+		bankTrigger(activeDevice, m[5], m[6])
 		return
 	}
 	if (m[4] === 0x5D && m.length >= 7) {   // the UF1 banks these strips: no follow for <n> x 100 ms

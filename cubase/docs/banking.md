@@ -49,14 +49,26 @@ measured, what failed and why. Newest findings go in their section with the date
   its bank moves; with the all-channel / recordable lists moved to the Helper script a bank press takes ~0.07 s.
 - **Per-channel value bindings in hidden banks** (256 + 256 + 128) made Cubase pause up to 0.7 s while a value kept
   changing: hidden banks collect names only.
+- **Names-only zones cost on every selection change too** (15.11.2026). Six of them (the UF8 track views' lists, 1,280
+  channels in the Helper) made the scripts' longest stall after a selection change 2.0 s instead of 1.1 s (the UF8
+  script's idle calls, A/B with and without them). The lists are read through 16-channel windows the script banks
+  through itself instead.
+- **A script can move a bank itself, at once** (15.11.2026): `bankZone.mAction.mResetBank / mNextBank / mPrevBank /
+  mShiftLeft / mShiftRight .trigger(activeMapping)`, several in a row in one callback. Cubase carried out a reset + 5
+  next banks in 40-120 ms, every time, also right after a page switch (where bank notes from the bridge lost 2-3 of
+  5). No spacing needed. Not tried at start-up, where Cubase ignores bank notes for its first seconds.
 
 ## What works (keep)
 
-- **UF8 banking**: the bank keys go straight to the UF8 script's bank zone. Near the end the bridge sends single-track
-  shifts so the last track lands on strip 8 (`userBankRight`, from the script's SysEx 12 total / offset).
-- **UF8 follow selection**: on the idle timer; if the selected track is not on a strip, a jump (reset + n bank-rights,
-  100 ms apart), then one burst of the remaining steps. The bridge freezes the UF8 during multi-step bursts and shows
-  only the end state (SysEx 13 holds the freeze at start-up; released after 30 s by itself).
+- **UF8 banking**: the bank keys go straight to the UF8 script's bank zone. Near the end the bridge asks the script for
+  single-track shifts (SysEx 30, triggered all at once) so the last track lands on strip 8 (`userBankRight`, from the
+  script's SysEx 12 total / offset), the UF8 frozen until the script reports the bank there; bank notes 100 ms apart
+  only if that fails.
+- **UF8 follow selection**: on the idle timer; if the selected track is not on a strip, a jump (reset + n next banks)
+  triggered by the script, the UF8 frozen until it is there. At start-up, and from a follow's third try, the bridge's
+  bank notes instead (SysEx 10: reset + n bank-rights 100 ms apart, then one burst of the remaining steps). The
+  bridge freezes the UF8 during multi-step bursts and shows only the end state (SysEx 13 holds the freeze; released
+  after 30 s by itself).
 - **UF1 BANK with a UF8**: presses the UF8's bank key (same path as above).
 - **Single track steps past hidden tracks** (`track-stepping = mixconsole`, UF1 script, SysEx 5C): count from the
   channel list to the next visible track and trigger next / previous that many times at once. A press within 1.5 s
@@ -134,5 +146,5 @@ follow pulls the strips back to where the late selection report says.**
 - Prefer Cubase's own bank zones over counting tracks: they know about folders and visibility.
 - Never act on a new bank before the script has reported it (SysEx 12 / new strip names).
 - Never chain decisions on selection reports during a burst; they are late and include the tracks passed.
-- Space notes (40 ms; bank steps 60–100 ms).
+- Space notes (40 ms; bank steps 60–100 ms). Better: let the script trigger the bank actions (no spacing, no losses).
 - Add a trace (`dev-restart.ps1 -Trace`, `cubase\logs\bridge.log`) before guessing: every finding above came from one.
