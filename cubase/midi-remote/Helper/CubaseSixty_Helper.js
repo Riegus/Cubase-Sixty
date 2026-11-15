@@ -297,7 +297,7 @@ function scanNextView(activeDevice) {
 	scan.v = scan.queue.length ? scan.queue.shift() : 0
 	if (!scan.v) {
 		out('[CubaseSixty Helper] view lists read in ' + (Date.now() - scan.started) + ' ms')
-		if (startSel.active) startSel.until = Math.min(startSel.until, Date.now() + 2000)
+		if (startSel.active) startSel.until = Math.max(startSel.until, Date.now() + 2000)
 		return
 	}
 	scan.bank = 0
@@ -334,39 +334,43 @@ function scanStep(activeDevice) {
 	scanNextView(activeDevice)
 }
 // The selection at a project's start (15.11.2026): Cubase reports the project's selected track (the UF1 showed it) but
-// none of the mixer channels as selected (mSelected), and the reading's window moves then selected other tracks: the
-// first move the track before it, a later one the last audio track (traced; the UF8 did not move). Selecting the track's
-// channel before the reading did nothing (Cubase ignored it in that state). So while the first reading of a project runs
-// (and 2 s after it), a selection that moves away from the track selected at the start is put back, the way SEL selects;
-// only when Cubase reported no mixer channel selected when the reading began, and the track's name is on one channel.
+// none of the mixer channels as selected (mSelected), and bank zones moving then selected other tracks: the track before
+// it, then the last audio track; with the view lists being read (their window moves), and also on a reopen without a
+// reading (Cubase resets the zones; traced). Selecting the track's channel at once did nothing (Cubase ignored it in that
+// state). So for 12 s after a project opens (or 2 s after the first reading, if later; 30 s at most), a selection that
+// moves away from the track selected at the start is put back, the way SEL selects; only when Cubase reported no mixer
+// channel selected at the start, and the track's name is on one channel.
 var selTitle = ''
-var startSel = { title: '', active: false, until: 0, dueAt: 0, puts: 0, done: false }
+var startSel = { title: '', active: false, until: 0, cap: 0, dueAt: 0, puts: 0, done: true, openedAt: 0 }
 page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
 	hostMapping = activeMapping
 	selTitle = title || ''
+	startSelBegin()
 	if (startSel.active && selTitle !== startSel.title) startSel.dueAt = Date.now() + 100
 }
 function startSelBegin() {
-	if (startSel.done) return
+	if (startSel.done || !selTitle) return
 	startSel.done = true
-	if (selIndex >= 0 || !selTitle) return
+	if (selIndex >= 0) return
 	startSel.title = selTitle
 	startSel.active = true
-	startSel.until = Date.now() + 30000   // (at the latest; 2 s after the reading once it has ended)
+	startSel.until = startSel.openedAt + 12000
+	startSel.cap = startSel.openedAt + 30000
 	startSel.puts = 0
-	out('[CubaseSixty Helper] start: "' + selTitle + '" selected, no mixer channel selected; kept while the lists are read')
+	out('[CubaseSixty Helper] start: "' + selTitle + '" selected, no mixer channel selected; kept for a moment')
 }
 function startSelIdle(activeDevice) {
+	startSelBegin()   // (Cubase may report the track before the project's activation)
 	if (!startSel.active) return
 	var now = Date.now()
-	if (now > startSel.until) { startSel.active = false; startSel.dueAt = 0; return }
+	if (now > startSel.until || now > startSel.cap) { startSel.active = false; startSel.dueAt = 0; return }
 	if (!startSel.dueAt || now < startSel.dueAt) return
 	startSel.dueAt = 0
 	if (selTitle === startSel.title) return
 	var at = -1, count = 0
 	for (var i = 0; i < CHANNELS; ++i) if (allTitles[i] === startSel.title) { if (at < 0) at = i; ++count }
 	if (count !== 1 || ++startSel.puts > 5) { out('[CubaseSixty Helper] start: the selection moved to "' + selTitle + '"; not put back (' + (count !== 1 ? count + ' channels named "' + startSel.title + '"' : 'five times already') + ')'); startSel.active = false; return }
-	out('[CubaseSixty Helper] start: the selection moved to "' + selTitle + '" while the lists were read' + scanState() + '; back to "' + startSel.title + '" (#' + at + ')')
+	out('[CubaseSixty Helper] start: the selection moved to "' + selTitle + '" at the start' + scanState() + '; back to "' + startSel.title + '" (#' + at + ')')
 	selVars[at].setProcessValue(activeDevice, 0)
 	selVars[at].setProcessValue(activeDevice, 1)
 }
@@ -452,11 +456,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 }
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
-deviceDriver.mOnActivate = function (activeDevice) { helperStart = Date.now(); startSel.done = false; startSel.active = false; out('[CubaseSixty Helper] active (a project is open)') }
+deviceDriver.mOnActivate = function (activeDevice) { helperStart = Date.now(); startSel.done = false; startSel.active = false; startSel.openedAt = Date.now(); out('[CubaseSixty Helper] active (a project is open)') }
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	out('[CubaseSixty Helper] inactive (no project)')
 	startSel.active = false
-	startSel.done = false
+	startSel.done = true   // (until a project opens)
 	selTitle = ''
 	selIndex = -1
 	selSeen = []
