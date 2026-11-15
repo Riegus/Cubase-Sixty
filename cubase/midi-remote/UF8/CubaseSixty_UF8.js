@@ -1496,7 +1496,10 @@ function skMessage(activeDevice, m) {
 	t.da.setParameterProcessValue(skAm, t.obj, t.tag, v)
 	skReport(activeDevice, index)
 }
-page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping }
+page.mOnActivate = function (activeDevice, activeMapping) {
+	skAm = activeMapping
+	if (spikeSwitchAt || spikePressAt) spikeActivated(activeDevice, 'Mixer')   // SPIKE
+}
 // The send views' levels read about nine times a second (each idle tick) and sent when changed: Cubase reports a
 // Direct Access change only when an edit ends (a mouse drag showed only at the release), and right after a write the
 // text was not updated yet (10.11.2026).
@@ -1634,13 +1637,7 @@ try {
 	spikeAudioInstr.makeActionBinding(spikeQ3.mSurfaceValue, page.mAction.mActivate)
 	spikeStep = 'done'; out('[spike] step: ' + spikeStep)
 } catch (e) { out('[spike] FAILED at ' + spikeStep + ': ' + e + (e && e.stack ? ' | ' + e.stack : '')) }
-;(function () {
-	var mixerActivate = page.mOnActivate
-	page.mOnActivate = function (activeDevice, activeMapping) {
-		mixerActivate(activeDevice, activeMapping)
-		if (spikeSwitchAt || spikePressAt) spikeActivated(activeDevice, 'Mixer')
-	}
-})()
+// (Reading a callback back, page.mOnActivate, stops the script: "DukValue is uninitialized".)
 out('[spike] step: Mixer activate hook done')
 var spikeLogAt = 0
 function spikeIdle(activeDevice) {
