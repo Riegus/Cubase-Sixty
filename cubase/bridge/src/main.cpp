@@ -218,7 +218,7 @@ bool g_ownText = false;   // the bridge feeds its own text through onMidiIn ("Wa
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
 std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
 void note(uint8_t n, bool on);
-void pageRightBurst(int count);
+void pageRightBurst(int count, int target);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
 {
@@ -228,7 +228,7 @@ bool userBankRight(bool pressed)
     if (remaining >= 8) return false;             // a full bank follows: the normal step
     if (!pressed) return false;                   // releases pass (a stray release does no harm)
     if (remaining <= 0) return true;              // the last track is already on a strip: stay
-    pageRightBurst(remaining);
+    pageRightBurst(remaining, total - 8);
     return true;
 }   // set once Cubase has sent us a name or colour
 
@@ -1028,10 +1028,11 @@ std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ...
 void replayUf8Cache();
 // Bank-right near the end: page-rights until the last track is on strip 8. With more than one, the UF8 frozen like a
 // jump so only the end shows (15.11.2026: each step moved the motors, heard as banking two or three times), and
-// 100 ms apart (at 60 ms a press was now and then lost, and the bank stopped one short).
-void pageRightBurst(int count)
+// 100 ms apart (at 60 ms a press was now and then lost, and the bank stopped one short). The end is shown as soon as
+// the script reports the bank there (SysEx 12: it does once all eight names are in), else after 400 ms.
+void pageRightBurst(int count, int target)
 {
-    std::thread([count] {
+    std::thread([count, target] {
         const int gen = count > 1 ? ++g_freezeGen : 0;
         if (count > 1) g_uf8Frozen = true;
         for (int i = 0; i < count; ++i) {
@@ -1040,7 +1041,8 @@ void pageRightBurst(int count)
             note(kNotePageRight, false);
         }
         if (count > 1) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            for (int waited = 0; waited < 400 && g_bankOffset != target; waited += 20)
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
             if (g_freezeGen == gen && !g_freezeHeld) { g_uf8Frozen = false; replayUf8Cache(); }
         }
     }).detach();
