@@ -17,7 +17,8 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 - **The faders do not match the UF8's printed dB scale** (seen 15.11.2026, in every view; there from the start). The
   bridge drives the motors with Cubase's own fader position (pitch bend), which follows Cubase's fader curve: -14 dB
-  in Cubase sits near the UF8's "30" mark. Rea-Sixty places them by dB (REAPER's slider law plus a calibration table
+  in Cubase sits near the UF8's "30" mark (Geir: "it looks like the values should be doubled"; -3.85 dB sat near "5",
+  -27 dB near "45"). Rea-Sixty places them by dB (REAPER's slider law plus a calibration table
   measured against the UF8's scale, `pbToLinearVolume` / `linearVolumeToPb` in extension/src/main.cpp). To do: learn
   Cubase's curve (14-bit position and its dB text, as the send level curve), place the motor by dB with Rea-Sixty's
   mapping, and turn the hand's position back the same way.
