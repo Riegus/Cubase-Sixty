@@ -110,7 +110,7 @@ Starts with its own spike. Two candidate routes:
 
 ## After the views
 
-- **The UF8 faders follow Cubase's fader curve, not the UF8's printed dB scale** (all views, from the start; see known-issues.md). To place them by dB as Rea-Sixty does.
+- ~~The UF8 faders follow Cubase's fader curve, not the UF8's printed dB scale~~: done 15.11.2026, on `cubase` (placed by dB, the marks measured on the hardware).
 
 ## Decided (2026-11-15)
 

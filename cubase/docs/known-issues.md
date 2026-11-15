@@ -15,7 +15,8 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF8
 
-- **The faders do not match the UF8's printed dB scale** (seen 15.11.2026, in every view; there from the start). The
+- **Fixed (15.11.2026, on `cubase`): the faders are placed by dB on the printed scale (see control-feel.md, Faders).**
+  **The faders did not match the UF8's printed dB scale** (seen 15.11.2026, in every view; there from the start). The
   bridge drives the motors with Cubase's own fader position (pitch bend), which follows Cubase's fader curve: -14 dB
   in Cubase sits near the UF8's "30" mark (Geir: "it looks like the values should be doubled"; -3.85 dB sat near "5",
   -27 dB near "45"). Rea-Sixty places them by dB (REAPER's slider law plus a calibration table
