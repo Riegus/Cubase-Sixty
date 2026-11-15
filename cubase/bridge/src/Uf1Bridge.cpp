@@ -2274,6 +2274,64 @@ void uf1SendToScript(const std::vector<unsigned char>& msg) { sendMidi(msg); }
 // The send level curve (the dB text for a 14-bit position), shared with the UF8's V-pot send view: it draws its value
 // text from it while turning, and teaches it Cubase's settled values.
 std::string uf1LevelText(int pos14) { return levelTextFor(pos14); }
+// Cubase's level curve as numbers, for the UF8 faders placed by dB (15.11.2026): the send level curve above is also
+// Cubase's fader curve (0 dB at 12928 and +6.02 dB at the top in both; the faders' logged positions matched it to a
+// few hundredths of a dB). A few points of it are built in, so a fresh install has the curve at once; below the
+// lowest known point dB = a log10(pos) + b through the two lowest (it put 2755 at -27.39 against Cubase's -27.2).
+namespace {
+const std::pair<int, double> kLevelSeed[] = {
+    {4760, -17.7}, {4924, -17.1}, {5744, -14.5}, {6235, -13.0}, {7054, -10.9}, {7873, -9.0}, {8857, -6.95},
+    {9348, -6.01}, {10359, -3.85}, {11314, -2.22}, {12132, -1.02}, {12928, 0.0}, {14263, 2.84}, {16383, 6.02},
+};
+std::vector<std::pair<int, double>> levelPoints()   // (g_levelMx held) learnt and built-in, by position
+{
+    std::map<int, double> m;
+    for (auto& p : kLevelSeed) m[p.first] = p.second;
+    for (auto& [pos, text] : g_levelText) { double db = 0; if (parseDb(text, db)) m[pos] = db; }
+    return std::vector<std::pair<int, double>>(m.begin(), m.end());
+}
+}
+double levelDbOf(int pos14)
+{
+    if (pos14 <= 0) return -200.0;
+    std::lock_guard<std::mutex> lk(g_levelMx);
+    levelCurveLoad();
+    const auto pts = levelPoints();
+    if (pos14 <= pts[0].first) {
+        const auto [p1, d1] = pts[0];
+        const auto [p2, d2] = pts[1];
+        const double a = (d2 - d1) / std::log10(double(p2) / double(p1));
+        return std::max(-200.0, d1 + a * std::log10(double(pos14) / double(p1)));
+    }
+    for (size_t i = 1; i < pts.size(); ++i) {
+        if (pos14 > pts[i].first) continue;
+        const auto [p1, d1] = pts[i - 1];
+        const auto [p2, d2] = pts[i];
+        return d1 + (d2 - d1) * double(pos14 - p1) / double(p2 - p1);
+    }
+    return pts.back().second;
+}
+int levelPosOf(double db)
+{
+    if (db <= -199.0) return 0;
+    std::lock_guard<std::mutex> lk(g_levelMx);
+    levelCurveLoad();
+    const auto pts = levelPoints();
+    if (db <= pts[0].second) {
+        const auto [p1, d1] = pts[0];
+        const auto [p2, d2] = pts[1];
+        const double a = (d2 - d1) / std::log10(double(p2) / double(p1));
+        return std::clamp(int(std::lround(p1 * std::pow(10.0, (db - d1) / a))), 0, p1);
+    }
+    for (size_t i = 1; i < pts.size(); ++i) {
+        if (db > pts[i].second) continue;
+        const auto [p1, d1] = pts[i - 1];
+        const auto [p2, d2] = pts[i];
+        if (d2 <= d1) return p2;
+        return int(std::lround(p1 + (p2 - p1) * (db - d1) / (d2 - d1)));
+    }
+    return pts.back().first;
+}
 void uf1LearnLevel(int pos14, const std::string& text)
 {
     std::string t;
