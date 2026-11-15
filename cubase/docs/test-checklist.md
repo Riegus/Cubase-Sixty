@@ -62,6 +62,9 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
   drawn, its settings on the V-pots (over SSL's protocol), the plug-in's window and the UF1's screens follow; PLAY and
   PRESETS work; a change in the plug-in's window shows on the UF1. Loudness: the readouts as the plug-in's (True Peak
   Max holds, "---" after RESET), the time labels under the history as the plug-in's; PPM readouts not below 0.0.
+- UF8 colour bars name the SSL plug-in on each track (CS 2 / 4K E / Link / BC 2; a plug-in added or removed shows
+  within a second or two; empty strips plain); the selected track's strip has the number box dimmed, as the UF1, and
+  it moves with the selection.
 - UF8 track numbers (top left of each strip): the MixConsole's numbers, the same as the UF1 shows for the selected
   track, also with hidden tracks between; they follow banking and follow-selection; blank on empty strips and with no
   project; back after a bridge restart and a UF8 reconnect.
