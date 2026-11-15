@@ -342,7 +342,7 @@ function sendViewNumbers(activeDevice, v) {
 
 var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: recordable')
 // Includes, the same as the UF8's ARMED strip zones, so the positions match (15.11.2026: "exclude inputs, outputs,
-// groups, FX, VCA" held one channel more, probably a rack instrument's return, which cannot record).
+// groups, FX, VCA" held one channel more, not identified; every instrument track checked was in the includes list).
 var recFilters = ['includeAudioChannels', 'includeInstrumentChannels', 'includeSamplerChannels', 'includeMIDIChannels']
 for (var f = 0; f < recFilters.length; ++f) {
 	try { recZone[recFilters[f]]() } catch (e) { out('[CubaseSixty Helper] recordable list: ' + recFilters[f] + ' not available: ' + e) }
