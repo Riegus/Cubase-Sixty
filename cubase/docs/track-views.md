@@ -102,6 +102,16 @@ Starts with its own spike. Two candidate routes:
 - **Cubase puts a page's zones back to the start each time the page is activated.** ARMED lays its strips out afresh on every activation (~120 moves in ~50 ms, no stall).
 - **A strip without an armed track still has a channel behind it.** The bridge marks it dead (SysEx 32 with 7F 7F) and blanks it: name, colour, dB, meter, LEDs and fader down. It drops what Cubase sends for that strip, and ignores the hand on it. The script tells the bridge each strip's track in the full list (SysEx 32), for the numbers and SSL plug-in names.
 - REC mode's SEL colours had to become solid colours (as Rea-Sixty's) once the selected-strip mask was sent.
+- **Cubase scrolls every zone of a page to a newly selected track**, so all eight one-channel zones jumped to it. After a real selection change (Cubase re-reports the selected track after every layout, so compare the name), the UF8 is held, laid out afresh 0.3 s later, and shown again.
+- **The bank keys' own callback didn't reach the script in ARMED.** The bridge pages instead (SysEx 30, kinds 5–8).
+- **The bridge's handling of empty strips** now keeps SOLO / CUT / SEL sent for an empty strip and shows them when a track's name arrives.
+
+**Done (15.11.2026; UF8 0.22.0, Helper 0.6.0).** Tested on the UF8:
+- ARMED shows the armed tracks, eight at a time. Bank / page keys page through them, and it follows the selection to its page.
+- Arming and disarming rearranges it live. Blank strips are dark and ignore the hand.
+- The picker darkens ARMED with nothing armed.
+- VCAs can be armed (REC mode, top soft keys); their linked tracks then show in ARMED.
+- The Helper's arm states cost nothing measurable: the longest stall after a selection change stayed at ~1 s.
 
 ### 7. Settings and docs
 
