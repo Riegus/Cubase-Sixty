@@ -13,6 +13,15 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   direction, with and without SSL plug-ins in the project; then whether the bridge can make Cubase look again, or
   at least tell the user (the surfaces) what to do. See cubase-limitations.md (bridge outage).
 
+## UF8
+
+- **The faders do not match the UF8's printed dB scale** (seen 15.11.2026, in every view; there from the start). The
+  bridge drives the motors with Cubase's own fader position (pitch bend), which follows Cubase's fader curve: -14 dB
+  in Cubase sits near the UF8's "30" mark. Rea-Sixty places them by dB (REAPER's slider law plus a calibration table
+  measured against the UF8's scale, `pbToLinearVolume` / `linearVolumeToPb` in extension/src/main.cpp). To do: learn
+  Cubase's curve (14-bit position and its dB text, as the send level curve), place the motor by dB with Rea-Sixty's
+  mapping, and turn the hand's position back the same way.
+
 ## UF1
 
 - **V-pots not smooth: fixed on wip/uf1-vpot-test (10.11.2026), to be merged after the test checklist.** Cause: a
