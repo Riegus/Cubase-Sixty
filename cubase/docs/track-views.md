@@ -68,7 +68,7 @@ Both now find the strips by name in the Helper's list of all channels. In a filt
 - Follow selection: selecting a track of the view's type banks to it. Selecting a track of another type leaves the bank alone.
 - The bank report (SysEx 12) per view.
 
-Test: numbers and follow selection in each view, including two tracks with the same name.
+Test: numbers and follow selection in each view, including two tracks with the same name. Selecting a track of the view's type in the MixConsole or project window banks the UF8 to it (in the spike's AUDIO page it did not: the follow only ran on the Mixer page).
 
 ### 6. ARMED
 
