@@ -1319,15 +1319,18 @@ void onMidiIn(std::vector<unsigned char>& msg)
         else {
             g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1}));
             uf8ProjectOpen();
-            // The view at start (settings), 3 s after the project opened (the script's start-up first), if the UF8 is
-            // on ALL then (a view picked meanwhile, or kept across a project change, stays).
+            // The view at start (settings): at once to the script (SysEx 34 <view>), which activates that page itself
+            // before its start-up follow banks (15.11.2026: on ALL first, it banked there and again in the start view
+            // 3 s later). If the UF8 is still on ALL 3 s later, the bridge switches (a view picked meanwhile, or kept
+            // across a project change, stays).
+            if (const int v = startView(); v > 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x34, uint8_t(v), 0xF7});
             static std::atomic<int> gen{0};
             const int g = ++gen;
             std::thread([g] {
                 std::this_thread::sleep_for(std::chrono::seconds(3));
                 if (g != gen || !g_projectOpen || g_uf8View != 0) return;
                 const int v = startView();
-                if (v > 0) { std::printf("UF8 view at start: %s (settings)\n", kViewNames[v]); switchView(v); }
+                if (v > 0) { std::printf("UF8 view at start: %s (settings; the bridge switched)\n", kViewNames[v]); switchView(v); }
             }).detach();
         }
         // (Always logged: the tray app shows it.)
@@ -1470,7 +1473,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (g_viewPick) paintSoftKeys();
         } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
             const int v = m[5] < kViewCount ? m[5] : 0;
-            if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+            if (g_uf8View.exchange(v) != v) {
+                // The script switched itself (the start view): a new page starts on volume / pan, so the route again.
+                std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+                std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
+            } else if (g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
             if (v != 7) for (auto& d : g_dead) d = false;   // (ARMED's dead strips live again in another view)
             paintStripNumbers(true);
             paintSoftKeys();   // Q3's LED, the picker
