@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.16.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.17.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -182,15 +182,28 @@ recordButton.mSurfaceValue.mMidiBinding
 	.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 95)
 
 // ---------------------------------------------------------------------------
-// Mapping: mixer page
+// Mapping: the views (docs/track-views.md). Each view is a mapping page of its own, with a bank zone of its own
+// channel types, and every page gets the same bindings: the blocks below that bind to Cubase register with
+// eachPage(function (page, bankZone, view) { ... }), and the end of the file builds the pages (buildViews), each with
+// every block, in the order they were registered. Surface elements, the script's state and its functions are made
+// once. Only the active page's callbacks fire, and Cubase sends the new page's names, colours, values and meters by
+// itself when it is activated (measured 15.11.2026), so the state per strip is shared by all views. Cubase's objects
+// used from code (Direct Access, the insert viewer, the value under the mouse) are one per page: useView() points
+// the shared names at the active view's.
+// (A callback can't be read back: "var f = page.mOnActivate" stops the script, "DukValue is uninitialized".)
 // ---------------------------------------------------------------------------
-
-var page = deviceDriver.mMapping.makePage('Mixer')
-
-var bankZone = page.mHostAccess.mMixConsole
-	.makeMixerBankZone()
-	.excludeInputChannels()
-	.excludeOutputChannels()
+var pageBuilders = []
+function eachPage(build) { pageBuilders.push(build) }
+var curView = null
+// A surface variable bound on every page: made once, with its callback (setup), by the first page that asks.
+var sharedVars = {}
+function sharedVariable(name, setup) {
+	if (!sharedVars[name]) {
+		sharedVars[name] = surface.makeCustomValueVariable(name)
+		if (setup) setup(sharedVars[name])
+	}
+	return sharedVars[name]
+}
 
 // What the faders and the V-pots are on: two sub-page areas, switched by the bridge (MIDI channel 2):
 //   faders: note 80 = track volume, 81 = track pan (FLIP), 82-89 = send 1-8 of each track (SEND / PLUGIN 1-8,
@@ -198,22 +211,12 @@ var bankZone = page.mHostAccess.mMixConsole
 //   V-pots: note 90 = track pan, 91 = track volume (FLIP), 92 = sends 1-8 of the selected track (long FLIP,
 //           Rea-Sixty's "8 sends of focused track")
 // The strip's name shows the send's destination while a send view is on (the faders' one wins).
-var faderArea = page.makeSubPageArea('Faders')
-var vpotArea = page.makeSubPageArea('VPots')
-var faderVol = faderArea.makeSubPage('Volume')
-var faderPan = faderArea.makeSubPage('Pan')
-var faderSend = []
-for (var fs = 0; fs < 8; ++fs) faderSend.push(faderArea.makeSubPage('Send' + (fs + 1)))
-var vpotPan = vpotArea.makeSubPage('Pan')
-var vpotVol = vpotArea.makeSubPage('Volume')
-var vpotSends = vpotArea.makeSubPage('SelectedSends')
 var route = { fader: 'vol', send: -1, vpot: 'pan' }   // fader: vol / pan / send (send = 0..7); vpot: pan / vol / sends
 var uf8FlipActive = false   // (the fader on pan)
 var flipResets = []
 var sendTitles = []       // [strip][send]: each banked track's send destinations
 var selSendTitles = []    // [send]: the selected track's
 for (var st = 0; st < 8; ++st) sendTitles.push(['', '', '', '', '', '', '', ''])
-var routeSelected = page.mHostAccess.mTrackSelection.mMixerChannel
 function routeChanged(activeDevice) {
 	uf8FlipActive = route.fader === 'pan'
 	for (var r = 0; r < flipResets.length; ++r) flipResets[r](activeDevice)
@@ -231,25 +234,43 @@ function paintStripName(activeDevice, index) {
 	sendStripName(activeDevice, index, text)
 }
 ;(function () {
+	// The keys are made once; each page binds them to its own sub-pages (sub(view) picks the sub-page).
+	var keys = []
 	function key(note, sub, apply) {
 		var k = cmdButton()
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, note)
-		page.makeActionBinding(k.mSurfaceValue, sub.mAction.mActivate)
-		sub.mOnActivate = function (activeDevice) { apply(); routeChanged(activeDevice) }
+		keys.push({ button: k, sub: sub, apply: apply })
 	}
-	key(80, faderVol, function () { route.fader = 'vol' })
-	key(81, faderPan, function () { route.fader = 'pan' })
-	for (var n = 0; n < 8; ++n) (function (n) { key(82 + n, faderSend[n], function () { route.fader = 'send'; route.send = n }) })(n)
-	key(90, vpotPan, function () { route.vpot = 'pan' })
-	key(91, vpotVol, function () { route.vpot = 'vol' })
-	key(92, vpotSends, function () { route.vpot = 'sends' })
-	for (var s = 0; s < 8; ++s) (function (s) {
-		var slot = routeSelected.mSends.getByIndex(s)
-		slot.mOnTitleChange = function (activeDevice, activeMapping, title) {
-			selSendTitles[s] = title || ''
-			if (route.vpot === 'sends' && route.fader !== 'send') { paintStripName(activeDevice, s); skRescanAt = Date.now() + 150 }   // (another track: its levels)
-		}
-	})(s)
+	key(80, function (v) { return v.faderVol }, function () { route.fader = 'vol' })
+	key(81, function (v) { return v.faderPan }, function () { route.fader = 'pan' })
+	for (var n = 0; n < 8; ++n) (function (n) { key(82 + n, function (v) { return v.faderSend[n] }, function () { route.fader = 'send'; route.send = n }) })(n)
+	key(90, function (v) { return v.vpotPan }, function () { route.vpot = 'pan' })
+	key(91, function (v) { return v.vpotVol }, function () { route.vpot = 'vol' })
+	key(92, function (v) { return v.vpotSends }, function () { route.vpot = 'sends' })
+	eachPage(function (page, bankZone, view) {
+		var faderArea = page.makeSubPageArea('Faders')
+		var vpotArea = page.makeSubPageArea('VPots')
+		view.faderVol = faderArea.makeSubPage('Volume')
+		view.faderPan = faderArea.makeSubPage('Pan')
+		view.faderSend = []
+		for (var fs = 0; fs < 8; ++fs) view.faderSend.push(faderArea.makeSubPage('Send' + (fs + 1)))
+		view.vpotPan = vpotArea.makeSubPage('Pan')
+		view.vpotVol = vpotArea.makeSubPage('Volume')
+		view.vpotSends = vpotArea.makeSubPage('SelectedSends')
+		view.routeSelected = page.mHostAccess.mTrackSelection.mMixerChannel
+		for (var k = 0; k < keys.length; ++k) (function (key) {
+			var sub = key.sub(view)
+			page.makeActionBinding(key.button.mSurfaceValue, sub.mAction.mActivate)
+			sub.mOnActivate = function (activeDevice) { key.apply(); routeChanged(activeDevice) }
+		})(keys[k])
+		for (var s = 0; s < 8; ++s) (function (s) {
+			var slot = view.routeSelected.mSends.getByIndex(s)
+			slot.mOnTitleChange = function (activeDevice, activeMapping, title) {
+				selSendTitles[s] = title || ''
+				if (route.vpot === 'sends' && route.fader !== 'send') { paintStripName(activeDevice, s); skRescanAt = Date.now() + 150 }   // (another track: its levels)
+			}
+		})(s)
+	})
 })()
 
 // SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
@@ -257,120 +278,128 @@ var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
 var trackDb = [], dbResend = []
 var trackPan = [], panResend = [], stripPanShow = []
 var panCentre = []
-for (var i = 0; i < STRIPS; ++i) {
-	var channel = bankZone.makeMixerBankChannel()
-	var strip = strips[i]
+eachPage(function (page, bankZone, view) {
+	view.da = []
+	for (var i = 0; i < STRIPS; ++i) {
+		var channel = bankZone.makeMixerBankChannel()
+		var strip = strips[i]
 
-	page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mVolume)
-		.setValueTakeOverModeJump().setSubPage(faderVol)
-	page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mPan)
-		.setValueTakeOverModeJump().setSubPage(faderPan)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(vpotPan)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(vpotVol)
-	// The V-pot push can centre the pan (SysEx 2B from the bridge; the setting "V-pot push"): through Direct Access where
-	// the channel shows a pan parameter, else through this variable, which is only written.
-	panCentre[i] = surface.makeCustomValueVariable('panCentre' + i)
-	page.makeValueBinding(panCentre[i], channel.mValue.mPan)
-	// (Send levels go through Direct Access, see "Send views" below: the send's on switch is only a placeholder, a
-	// control needs a binding in every sub page.)
-	page.makeValueBinding(strip.vpot.mSurfaceValue, routeSelected.mSends.getByIndex(i).mOn).setSubPage(vpotSends)
-	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderVol)
-	page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(faderPan)
-	for (var sn = 0; sn < 8; ++sn) {
-		var sendSlot = channel.mSends.getByIndex(sn)
-		page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mOn).setSubPage(faderSend[sn])   // (placeholder: see "Send views")
-		page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(faderSend[sn])
-		;(function (index, n) {
-			sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
-				sendTitles[index][n] = title || ''
-				if (route.fader === 'send' && route.send === n) skRescanAt = Date.now() + 150   // a send added / removed: the fader's target
+		page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mVolume)
+			.setValueTakeOverModeJump().setSubPage(view.faderVol)
+		page.makeValueBinding(strip.fader.mSurfaceValue, channel.mValue.mPan)
+			.setValueTakeOverModeJump().setSubPage(view.faderPan)
+		page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mPan).setSubPage(view.vpotPan)
+		page.makeValueBinding(strip.vpot.mSurfaceValue, channel.mValue.mVolume).setSubPage(view.vpotVol)
+		// The V-pot push can centre the pan (SysEx 2B from the bridge; the setting "V-pot push"): through Direct Access where
+		// the channel shows a pan parameter, else through this variable, which is only written.
+		panCentre[i] = sharedVariable('panCentre' + i)
+		page.makeValueBinding(panCentre[i], channel.mValue.mPan)
+		// (Send levels go through Direct Access, see "Send views" below: the send's on switch is only a placeholder, a
+		// control needs a binding in every sub page.)
+		page.makeValueBinding(strip.vpot.mSurfaceValue, view.routeSelected.mSends.getByIndex(i).mOn).setSubPage(view.vpotSends)
+		page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(view.faderVol)
+		page.makeValueBinding(strip.cut.mSurfaceValue, channel.mValue.mMute).setTypeToggle().setSubPage(view.faderPan)
+		for (var sn = 0; sn < 8; ++sn) {
+			var sendSlot = channel.mSends.getByIndex(sn)
+			page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mOn).setSubPage(view.faderSend[sn])   // (placeholder: see "Send views")
+			page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(view.faderSend[sn])
+			;(function (index, n) {
+				sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
+					sendTitles[index][n] = title || ''
+					if (route.fader === 'send' && route.send === n) skRescanAt = Date.now() + 150   // a send added / removed: the fader's target
+				}
+			})(i, sn)
+		}
+		page.makeValueBinding(strip.select.mSurfaceValue, channel.mValue.mSelected)
+		;(function (index) {
+			// Which strips are selected: tells two tracks with the same name apart (follow selection, below).
+			strip.select.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+				stripSelected[index] = value > 0.5
+				followStripSelect(activeDevice)   // another track of the same name has no new name to report
 			}
-		})(i, sn)
+		})(i)
+		page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
+			.setTypeToggle()
+		// Top soft key = record-enable for the track (its LED shows the state).
+		page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
+			.setTypeToggle()
+		// SEL in AUTO (note 112 + strip from the bridge): the track's automation Write; its LED feedback goes back
+		// on the same note, and the bridge shows it on SEL (red).
+		page.makeValueBinding(strip.autoWrite.mSurfaceValue, channel.mValue.mAutomationWrite)
+			.setTypeToggle()
+		;(function (index, ch) {
+			if (!skStrip[index]) skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null, tag: -1, sent: null, faderOn: false, panOn: false, fTag: -1, vTag: -1, fObj: -1, vObj: -1, fKind: null, vKind: null, vDa: null, vOn: -1 }
+			try { view.da[index] = page.mHostAccess.makeDirectAccess(ch) } catch (e) { if (index === 0) out('[CubaseSixty] no Direct Access, the SSL soft keys do nothing: ' + e) }
+			if (!view.da[index]) return
+			view.da[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+				skAm = activeMapping
+				var st = skStrip[index]
+				if (st.faderOn && objectID === st.fObj && tag === st.fTag) stripFaderSend(activeDevice, index)
+				if (st.panOn && st.vKind === 'plugin' && objectID === st.vObj && tag === st.vTag) stripPanSend(activeDevice, index)
+				// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
+				if (skFocus && objectID === skStrip[index].tagObj && tag === skStrip[index].tag) skReport(activeDevice, index)
+			}
+			view.da[index].mOnObjectChange = function (activeDevice, activeMapping, objectID) {
+				skAm = activeMapping
+				skStrip[index].scanned = false
+				skRescanAt = Date.now() + 300
+			}
+		})(i, channel)
+		// Meters: left and right VU level to the bridge as CC 80 + strip (left) and CC 88 + strip (right),
+		// 0..127. A mono channel only reports the left side; the bridge then shows it on both.
+		;(function (index, ch) {
+			function meterSide(name, hostValue, cc) {
+				var meter = sharedVariable(name + index, function (meter) {
+					var last = -1
+					meter.mOnProcessValueChange = function (activeDevice, value) {
+						var v = meterToMidi(value)
+						if (v === last) return
+						last = v
+						sendMidi(activeDevice, [0xB0, cc, v])
+					}
+				})
+				page.makeValueBinding(meter, hostValue)
+			}
+			try {
+				meterSide('meterL', ch.mValue.getVUChannelMeterByChannelIndex(0), 80 + index)
+				meterSide('meterR', ch.mValue.getVUChannelMeterByChannelIndex(1), 88 + index)
+			} catch (e) {
+				if (index === 0) out('[CubaseSixty] stereo meters not available (' + e + '), using one meter per strip')
+				try { meterSide('meter', ch.mValue.mVUMeter, 80 + index) } catch (e2) { if (index === 0) out('[CubaseSixty] meters not available: ' + e2) }
+			}
+		})(i, channel)
+		// V-pot push = open the channel editor for the track.
+		page.makeValueBinding(strip.vpush.mSurfaceValue, channel.mValue.mEditorOpen)
+			.setTypeToggle()
+
+		// Scribble strip: send the track's name and colour to the bridge as SysEx
+		// (see "Scribble strips and track colours" in the protocol doc).
+		// These callbacks belong to the mixer bank channel itself (host side), not to
+		// the fader's surface value: the surface-value versions only fired when a
+		// track was renamed and never for colours.
+		;(function (index) {
+			channel.mOnTitleChange = function (activeDevice, activeMapping, title) {
+				dbg('title strip ' + (index + 1) + ': [' + title + ']')
+				stripTitles[index] = title
+				paintStripName(activeDevice, index)
+				if (skStrip[index]) { skStrip[index].scanned = false; skStrip[index].wanted = null; skAm = activeMapping; skRescanAt = Date.now() + 150 }
+				updateArmable(activeDevice, index)
+				seekOnTitle(activeDevice)
+				followOnStripTitle(activeDevice)
+			}
+			// Known Cubase limit: this only fires when a track is selected or banked in, not the
+			// moment its colour is changed (tested on Cubase 15 with several other colour hooks).
+			channel.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
+				dbg('color strip ' + (index + 1) + ': r=' + r + ' g=' + g + ' b=' + b + ' a=' + a + ' active=' + isActive)
+				sendStripColor(activeDevice, index, r, g, b)
+			}
+		})(i)
 	}
-	page.makeValueBinding(strip.select.mSurfaceValue, channel.mValue.mSelected)
-	;(function (index) {
-		// Which strips are selected: tells two tracks with the same name apart (follow selection, below).
-		strip.select.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-			stripSelected[index] = value > 0.5
-			followStripSelect(activeDevice)   // another track of the same name has no new name to report
-		}
-	})(i)
-	page.makeValueBinding(strip.solo.mSurfaceValue, channel.mValue.mSolo)
-		.setTypeToggle()
-	// Top soft key = record-enable for the track (its LED shows the state).
-	page.makeValueBinding(strip.softKey.mSurfaceValue, channel.mValue.mRecordEnable)
-		.setTypeToggle()
-	// SEL in AUTO (note 112 + strip from the bridge): the track's automation Write; its LED feedback goes back
-	// on the same note, and the bridge shows it on SEL (red).
-	page.makeValueBinding(strip.autoWrite.mSurfaceValue, channel.mValue.mAutomationWrite)
-		.setTypeToggle()
-	;(function (index, ch) {
-		skStrip[index] = { obj: -1, model: null, scanned: false, wanted: null, tag: -1, sent: null, faderOn: false, panOn: false, fTag: -1, vTag: -1, fObj: -1, vObj: -1, fKind: null, vKind: null, vDa: null, vOn: -1 }
-		try { skDa[index] = page.mHostAccess.makeDirectAccess(ch) } catch (e) { if (index === 0) out('[CubaseSixty] no Direct Access, the SSL soft keys do nothing: ' + e) }
-		if (!skDa[index]) return
-		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
-			skAm = activeMapping
-			var st = skStrip[index]
-			if (st.faderOn && objectID === st.fObj && tag === st.fTag) stripFaderSend(activeDevice, index)
-			if (st.panOn && st.vKind === 'plugin' && objectID === st.vObj && tag === st.vTag) stripPanSend(activeDevice, index)
-			// Only the focused parameter (a plug-in reports every parameter's change, e.g. under automation).
-			if (skFocus && objectID === skStrip[index].tagObj && tag === skStrip[index].tag) skReport(activeDevice, index)
-		}
-		skDa[index].mOnObjectChange = function (activeDevice, activeMapping, objectID) {
-			skAm = activeMapping
-			skStrip[index].scanned = false
-			skRescanAt = Date.now() + 300
-		}
-	})(i, channel)
-	// Meters: left and right VU level to the bridge as CC 80 + strip (left) and CC 88 + strip (right),
-	// 0..127. A mono channel only reports the left side; the bridge then shows it on both.
-	;(function (index, ch) {
-		function meterSide(name, hostValue, cc) {
-			var meter = surface.makeCustomValueVariable(name + index)
-			page.makeValueBinding(meter, hostValue)
-			var last = -1
-			meter.mOnProcessValueChange = function (activeDevice, value) {
-				var v = meterToMidi(value)
-				if (v === last) return
-				last = v
-				sendMidi(activeDevice, [0xB0, cc, v])
-			}
-		}
-		try {
-			meterSide('meterL', ch.mValue.getVUChannelMeterByChannelIndex(0), 80 + index)
-			meterSide('meterR', ch.mValue.getVUChannelMeterByChannelIndex(1), 88 + index)
-		} catch (e) {
-			if (index === 0) out('[CubaseSixty] stereo meters not available (' + e + '), using one meter per strip')
-			try { meterSide('meter', ch.mValue.mVUMeter, 80 + index) } catch (e2) { if (index === 0) out('[CubaseSixty] meters not available: ' + e2) }
-		}
-	})(i, channel)
-	// V-pot push = open the channel editor for the track.
-	page.makeValueBinding(strip.vpush.mSurfaceValue, channel.mValue.mEditorOpen)
-		.setTypeToggle()
+})
 
-	// Scribble strip: send the track's name and colour to the bridge as SysEx
-	// (see "Scribble strips and track colours" in the protocol doc).
-	// These callbacks belong to the mixer bank channel itself (host side), not to
-	// the fader's surface value: the surface-value versions only fired when a
-	// track was renamed and never for colours.
-	;(function (index) {
-		channel.mOnTitleChange = function (activeDevice, activeMapping, title) {
-			dbg('title strip ' + (index + 1) + ': [' + title + ']')
-			stripTitles[index] = title
-			paintStripName(activeDevice, index)
-			if (skStrip[index]) { skStrip[index].scanned = false; skStrip[index].wanted = null; skAm = activeMapping; skRescanAt = Date.now() + 150 }
-			updateArmable(activeDevice, index)
-			seekOnTitle(activeDevice)
-			followOnStripTitle(activeDevice)
-		}
-		// Known Cubase limit: this only fires when a track is selected or banked in, not the
-		// moment its colour is changed (tested on Cubase 15 with several other colour hooks).
-		channel.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isActive) {
-			dbg('color strip ' + (index + 1) + ': r=' + r + ' g=' + g + ' b=' + b + ' a=' + a + ' active=' + isActive)
-			sendStripColor(activeDevice, index, r, g, b)
-		}
-	})(i)
-
+// The strips' own state and display, made once (the surface's callbacks are shared by all pages).
+for (var i = 0; i < STRIPS; ++i) {
+	var strip = strips[i]
 	// Pan on the strip's display (value line "Pan" + Cubase's text, readout bar) and the level in the dB
 	// readout. Normally pan comes from the V-pot and the level from the fader; under FLIP the other way round.
 	;(function (index, vpot, fader) {
@@ -474,25 +503,27 @@ var autoRead = surface.makeButton(px(48), px(372), px(33), px(22))
 var autoWrite = surface.makeButton(px(83), px(372), px(33), px(22))
 autoRead.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 56)
 autoWrite.mSurfaceValue.mMidiBinding.setInputPort(midiInput).setOutputPort(midiOutput).bindToNote(0, 57)
-var selectedTrack = page.mHostAccess.mTrackSelection.mMixerChannel
-page.makeValueBinding(autoRead.mSurfaceValue, selectedTrack.mValue.mAutomationRead).setTypeToggle()
-page.makeValueBinding(autoWrite.mSurfaceValue, selectedTrack.mValue.mAutomationWrite).setTypeToggle()
-
-page.makeActionBinding(bankLeft.mSurfaceValue, bankZone.mAction.mPrevBank)
-page.makeActionBinding(bankRight.mSurfaceValue, bankZone.mAction.mNextBank)
-
-var transport = page.mHostAccess.mTransport.mValue
-page.makeValueBinding(stopButton.mSurfaceValue, transport.mStop).setTypeToggle()
-page.makeValueBinding(playButton.mSurfaceValue, transport.mStart).setTypeToggle()
-page.makeValueBinding(recordButton.mSurfaceValue, transport.mRecord).setTypeToggle()
-
 // Foot switches 1 and 2: play and record.
 var foot1 = surface.makeButton(px(13), px(442), px(50), px(22))
 var foot2 = surface.makeButton(px(67), px(442), px(50), px(22))
 foot1.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 62)
 foot2.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 63)
-page.makeValueBinding(foot1.mSurfaceValue, transport.mStart).setTypeToggle()
-page.makeValueBinding(foot2.mSurfaceValue, transport.mRecord).setTypeToggle()
+
+eachPage(function (page, bankZone, view) {
+	var selectedTrack = page.mHostAccess.mTrackSelection.mMixerChannel
+	page.makeValueBinding(autoRead.mSurfaceValue, selectedTrack.mValue.mAutomationRead).setTypeToggle()
+	page.makeValueBinding(autoWrite.mSurfaceValue, selectedTrack.mValue.mAutomationWrite).setTypeToggle()
+
+	page.makeActionBinding(bankLeft.mSurfaceValue, bankZone.mAction.mPrevBank)
+	page.makeActionBinding(bankRight.mSurfaceValue, bankZone.mAction.mNextBank)
+
+	var transport = page.mHostAccess.mTransport.mValue
+	page.makeValueBinding(stopButton.mSurfaceValue, transport.mStop).setTypeToggle()
+	page.makeValueBinding(playButton.mSurfaceValue, transport.mStart).setTypeToggle()
+	page.makeValueBinding(recordButton.mSurfaceValue, transport.mRecord).setTypeToggle()
+	page.makeValueBinding(foot1.mSurfaceValue, transport.mStart).setTypeToggle()
+	page.makeValueBinding(foot2.mSurfaceValue, transport.mRecord).setTypeToggle()
+})
 
 // ---------------------------------------------------------------------------
 // SysEx helpers: scribble-strip name and colour
@@ -617,11 +648,13 @@ function seekOnTitle(activeDevice) {
 	seekCheck(activeDevice)
 }
 
-page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
-	seek.selectedTitle = title
-	seekCheck(activeDevice)
-	followCurrentTitle(activeDevice, title)
-}
+eachPage(function (page, bankZone, view) {
+	page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
+		seek.selectedTitle = title
+		seekCheck(activeDevice)
+		followCurrentTitle(activeDevice, title)
+	}
+})
 
 // Any bank key pressed by hand ends the search for good.
 function stopSeekOnPress(button) {
@@ -658,10 +691,15 @@ for (var nm = 1; nm <= 8; ++nm) {
 }
 // After a cycle marker is recalled (which only sets the locators), the cursor goes to its start.
 encoderCommands.push({ note: 26, category: 'Transport', command: 'To Left Locator' })
+// Command keys: the button is made once, the command bound on every page.
+var commandKeys = []
+eachPage(function (page, bankZone, view) {
+	for (var c = 0; c < commandKeys.length; ++c) page.makeCommandBinding(commandKeys[c].button.mSurfaceValue, commandKeys[c].category, commandKeys[c].command)
+})
 for (var ec = 0; ec < encoderCommands.length; ++ec) {
 	var encButton = cmdButton()
 	encButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, encoderCommands[ec].note)
-	page.makeCommandBinding(encButton.mSurfaceValue, encoderCommands[ec].category, encoderCommands[ec].command)
+	commandKeys.push({ button: encButton, category: encoderCommands[ec].category, command: encoderCommands[ec].command })
 }
 
 // ---------------------------------------------------------------------------
@@ -678,7 +716,7 @@ for (var z = 0; z < zoomKeys.length; ++z) {
 	var zoomAt = [[901, 374], [864, 406], [901, 406], [938, 406], [901, 438]][z]
 	var zoomButton = surface.makeButton(px(zoomAt[0]), px(zoomAt[1]), px(34), px(26))
 	zoomButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, zoomKeys[z].note)
-	page.makeCommandBinding(zoomButton.mSurfaceValue, zoomKeys[z].category, zoomKeys[z].command)
+	commandKeys.push({ button: zoomButton, category: zoomKeys[z].category, command: zoomKeys[z].command })
 }
 
 // ---------------------------------------------------------------------------
@@ -689,8 +727,10 @@ var pageLeft = surface.makeButton(px(13), px(300), px(50), px(22))
 var pageRight = surface.makeButton(px(67), px(300), px(50), px(22))
 pageLeft.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 44)
 pageRight.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 45)
-page.makeActionBinding(pageLeft.mSurfaceValue, bankZone.mAction.mShiftLeft)
-page.makeActionBinding(pageRight.mSurfaceValue, bankZone.mAction.mShiftRight)
+eachPage(function (page, bankZone, view) {
+	page.makeActionBinding(pageLeft.mSurfaceValue, bankZone.mAction.mShiftLeft)
+	page.makeActionBinding(pageRight.mSurfaceValue, bankZone.mAction.mShiftRight)
+})
 stopSeekOnPress(pageLeft)
 stopSeekOnPress(pageRight)
 
@@ -710,7 +750,7 @@ for (var a = 0; a < autoModes.length; ++a) {
 	var modeAt = [[13, 372], [13, 396], [48, 396], [83, 396]][a]
 	var modeButton = surface.makeButton(px(modeAt[0]), px(modeAt[1]), px(33), px(22))
 	modeButton.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, autoModes[a].note)
-	page.makeCommandBinding(modeButton.mSurfaceValue, 'Automation', autoModes[a].command)
+	commandKeys.push({ button: modeButton, category: 'Automation', command: autoModes[a].command })
 }
 
 // Meter scale: Cubase reports the meter as linear amplitude (0..1), which read far too low when sent
@@ -918,7 +958,7 @@ var followQuietUntil = 0
 	followOnStripTitle = function (activeDevice) { reportBank(activeDevice) }
 	var resetKey = cmdButton()
 	resetKey.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, 79)
-	page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank)
+	eachPage(function (page, bankZone, view) { page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank) })
 	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script
 	// they made every bank move about 0.25 s slower.
 	onAllTitle = function (activeDevice, index, title) {
@@ -1157,8 +1197,7 @@ function stripTags(index) {
 // An empty send slot: Cubase keeps eight per track, an empty one has no destination (its title is "" or only its
 // number) but still a level (0 dB).
 function emptySend(title) { return !title || /^\s*\d*\s*-?\s*$/.test(String(title)) }
-var selDa = null
-try { selDa = page.mHostAccess.makeDirectAccess(routeSelected) } catch (e) { out('[CubaseSixty] no Direct Access on the selected track: the V-pot send view does nothing: ' + e) }
+var selDa = null   // the active view's (useView)
 // The level parameter of send slot n (0-7) on the channel da is on: { obj, tag, on } or null.
 function sendSlotLevel(da, n) {
 	if (!da || !skAm) return null
@@ -1222,7 +1261,7 @@ function stripModeUpdate(activeDevice, index) {
 	st.vKind = vKind
 	st.vDa = vDa
 	st.vOn = vOn
-	if (changed) { st.fPolled = st.vPolled = st.vOnPolled = null }
+	if (changed) { st.fPolled = st.vPolled = st.vOnPolled = st.fTextPolled = st.vTextPolled = null }
 	if (changed) {
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
 		flipResets[index](activeDevice)   // the track's own values where the script no longer has them
@@ -1293,8 +1332,10 @@ function stripFaderSend(activeDevice, index) {
 	stripFaderShow(activeDevice, index)
 }
 // The selected track's sends changed elsewhere (the mouse, automation, our own writes): the V-pots show them.
-if (selDa) {
-	selDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+eachPage(function (page, bankZone, view) {
+	view.selDa = null
+	try { view.selDa = page.mHostAccess.makeDirectAccess(view.routeSelected) } catch (e) { out('[CubaseSixty] no Direct Access on the selected track: the V-pot send view does nothing: ' + e); return }
+	view.selDa.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 		skAm = activeMapping
 		if (route.vpot !== 'sends') return
 		for (var i = 0; i < STRIPS; ++i) {
@@ -1302,20 +1343,25 @@ if (selDa) {
 			if (st && st.panOn && st.vKind === 'send' && st.vObj === objectID && (st.vTag === tag || st.vOn === tag)) stripPanSend(activeDevice, i)
 		}
 	}
-	selDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) { skAm = activeMapping; skRescanAt = Date.now() + 300 }
-}
+	view.selDa.mOnObjectChange = function (activeDevice, activeMapping, objectID) { skAm = activeMapping; skRescanAt = Date.now() + 300 }
+})
 
 // SEL on the selected track (SysEx 2C <strip> from the bridge, the setting "UF8 SEL on the selected track" = ssl): the
 // window of the track's first SSL channel strip, through an insert viewer moved to its slot and checked by name (as the
 // UF1's encoder push). Without an SSL channel strip the bridge is asked to open the channel editor (2C <strip> back).
-var selWin = { viewer: null, state: null, open: 0, name: '', job: null }
-try {
-	selWin.viewer = routeSelected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtySelWindow')
-	selWin.state = surface.makeCustomValueVariable('selPluginWindow')
-	page.makeValueBinding(selWin.state, selWin.viewer.mEdit)
-	selWin.state.mOnProcessValueChange = function (activeDevice, value) { selWin.open = value }
-	selWin.viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { selWin.name = name || '' }
-} catch (e) { out('[CubaseSixty] SSL strip window switch could not be set up: ' + e) }
+var selWin = { viewer: null, state: null, open: 0, name: '', job: null }   // viewer: the active view's (useView)
+eachPage(function (page, bankZone, view) {
+	view.selWinViewer = null
+	try {
+		var viewer = view.routeSelected.mInsertAndStripEffects.makeInsertEffectViewer('CubaseSixtySelWindow' + (view.index ? view.index : ''))
+		selWin.state = sharedVariable('selPluginWindow', function (state) {
+			state.mOnProcessValueChange = function (activeDevice, value) { selWin.open = value }
+		})
+		page.makeValueBinding(selWin.state, viewer.mEdit)
+		viewer.mOnChangePluginIdentity = function (activeDevice, activeMapping, name) { selWin.name = name || '' }
+		view.selWinViewer = viewer
+	} catch (e) { out('[CubaseSixty] SSL strip window switch could not be set up: ' + e) }
+})
 function selWindowOpen(activeDevice, index) {
 	var st = skStrip[index], title = ''
 	if (st) { try { skScan(index) } catch (e) {} }
@@ -1349,15 +1395,20 @@ function selWinIdle(activeDevice) {
 // FOCUS: the CHANNEL encoder on the value under Cubase's mouse pointer (SysEx 2D <1 up / 0 down> <steps> from the
 // bridge). increment / decrement on the host value, in Cubase's own steps; if they do nothing, through a value
 // variable bound to it (1 % a step).
-var mouse = { value: null, variable: null, process: -1, title: '', display: '', used: 0 }
-try {
-	mouse.value = page.mHostAccess.mMouseCursor.mValueUnderMouse
-	mouse.variable = surface.makeCustomValueVariable('valueUnderMouse')
-	page.makeValueBinding(mouse.variable, mouse.value)
-	mouse.variable.mOnProcessValueChange = function (activeDevice, value) { mouse.process = value }
-	mouse.value.mOnTitleChange = function (activeDevice, activeMapping, title, title2) { mouse.title = String(title) + (title2 ? ' / ' + title2 : '') }
-	mouse.value.mOnDisplayValueChange = function (activeDevice, activeMapping, value, units) { mouse.display = String(value) + (units ? ' ' + units : '') }
-} catch (e) { out('[CubaseSixty] value under the mouse not available: ' + e) }
+var mouse = { value: null, variable: null, process: -1, title: '', display: '', used: 0 }   // value: the active view's (useView)
+eachPage(function (page, bankZone, view) {
+	view.mouseValue = null
+	try {
+		var value = page.mHostAccess.mMouseCursor.mValueUnderMouse
+		mouse.variable = sharedVariable('valueUnderMouse', function (variable) {
+			variable.mOnProcessValueChange = function (activeDevice, v) { mouse.process = v }
+		})
+		page.makeValueBinding(mouse.variable, value)
+		value.mOnTitleChange = function (activeDevice, activeMapping, title, title2) { mouse.title = String(title) + (title2 ? ' / ' + title2 : '') }
+		value.mOnDisplayValueChange = function (activeDevice, activeMapping, v, units) { mouse.display = String(v) + (units ? ' ' + units : '') }
+		view.mouseValue = value
+	} catch (e) { out('[CubaseSixty] value under the mouse not available: ' + e) }
+})
 function mouseStep(activeDevice, up, steps) {
 	if (!mouse.value || !skAm) return
 	var before = mouse.process
@@ -1481,17 +1532,28 @@ function skMessage(activeDevice, m) {
 	t.da.setParameterProcessValue(skAm, t.obj, t.tag, v)
 	skReport(activeDevice, index)
 }
-page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping }
+eachPage(function (page, bankZone, view) {
+	page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping; useView(view) }
+	page.mOnIdle = function (activeDevice, activeMapping) { pageIdle(activeDevice, activeMapping) }
+})
 // The send views' levels read about nine times a second (each idle tick) and sent when changed: Cubase reports a
 // Direct Access change only when an edit ends (a mouse drag showed only at the release), and right after a write the
 // text was not updated yet (10.11.2026).
+// SSL Strip Mode the same way (15.11.2026: a plug-in fader or pan moved with the mouse showed on the UF8 only now and
+// then, and the dB field did not follow the fader). Text too: right after a write it is not updated yet.
 function sendViewPoll(activeDevice) {
 	for (var i = 0; i < STRIPS; ++i) {
 		var st = skStrip[i]
 		if (!st) continue
-		if (st.faderOn && st.fKind === 'send' && st.fObj >= 0) {
+		if (st.faderOn && (st.fKind === 'send' || st.fKind === 'plugin') && st.fObj >= 0) {
 			var v = skDa[i].getParameterProcessValue(skAm, st.fObj, st.fTag)
-			if (v !== st.fPolled) { st.fPolled = v; stripFaderSend(activeDevice, i) }
+			var ft = st.fKind === 'plugin' ? daText(skDa[i], st.fObj, st.fTag) : null   // (the send views as before: value only)
+			if (v !== st.fPolled || ft !== st.fTextPolled) { st.fPolled = v; st.fTextPolled = ft; stripFaderSend(activeDevice, i) }
+		}
+		if (st.panOn && st.vKind === 'plugin' && st.vObj >= 0) {
+			var pv = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
+			var pt = daText(st.vDa, st.vObj, st.vTag)
+			if (pv !== st.vPolled || pt !== st.vTextPolled) { st.vPolled = pv; st.vTextPolled = pt; stripPanSend(activeDevice, i) }
 		}
 		if (st.panOn && st.vKind === 'send' && st.vObj >= 0) {
 			var w = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
@@ -1503,13 +1565,41 @@ function sendViewPoll(activeDevice) {
 		}
 	}
 }
-page.mOnIdle = function (activeDevice, activeMapping) {
+function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
-	if (route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
+	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
 		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
 		if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The views (docs/track-views.md): one mapping page each, with the bank zone's filters (called one by one: their
+// return value is not used). Inputs and outputs are never on the UF8.
+// ---------------------------------------------------------------------------
+var VIEWS = [
+	{ name: 'Mixer', filters: ['excludeInputChannels', 'excludeOutputChannels'] }
+]
+var views = []
+// The active view's Cubase objects under the names the code uses.
+function useView(view) {
+	curView = view
+	skDa = view.da
+	selDa = view.selDa
+	selWin.viewer = view.selWinViewer
+	mouse.value = view.mouseValue
+}
+;(function buildViews() {
+	for (var v = 0; v < VIEWS.length; ++v) {
+		var page = deviceDriver.mMapping.makePage(VIEWS[v].name)
+		var bankZone = page.mHostAccess.mMixConsole.makeMixerBankZone()
+		for (var f = 0; f < VIEWS[v].filters.length; ++f) bankZone[VIEWS[v].filters[f]]()
+		var view = { index: v, name: VIEWS[v].name, page: page, bankZone: bankZone }
+		for (var b = 0; b < pageBuilders.length; ++b) pageBuilders[b](page, bankZone, view)
+		views.push(view)
+	}
+	useView(views[0])
+})()
