@@ -580,15 +580,20 @@ var followCurrentTitle = function () {}   // set by the follow-selection block
 var followStripSelect = function () {}    // set by the follow-selection block
 var onAllTitle = function () {}           // set by the follow-selection block
 var allTitlesForArmed = function () { return [] }   // set by the follow-selection block
+var vcaTitles = function () { return [] }           // set by the follow-selection block
 var onViewTitle = function () {}          // set by the follow-selection block
 var followViewChanged = function () {}    // set by the follow-selection block
 var recTitles = []
 var armableSent = []
 
 
+// VCAs too (15.11.2026): Cubase lets a VCA be record-enabled, which arms the tracks linked to it (those then show in
+// ARMED; the VCA itself does not, it records nothing). The VCAs' names from the helper's VCA list (track views).
 function isRecordable(title) {
 	if (!title) return false
 	for (var k = 0; k < REC_CHANNELS; ++k) if (recTitles[k] === title) return true
+	var vca = vcaTitles()
+	for (var v = 0; v < vca.length; ++v) if (vca[v] === title) return true
 	return false
 }
 
@@ -1058,6 +1063,7 @@ var followQuietUntil = 0
 	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script
 	// they made every bank move about 0.25 s slower.
 	allTitlesForArmed = function () { return allTitles }
+	vcaTitles = function () { return viewLists[6] || [] }
 	onAllTitle = function (activeDevice, index, title) {
 		if (allTitles[index] === title) return
 		allTitles[index] = title
@@ -1070,6 +1076,7 @@ var followQuietUntil = 0
 		var list = viewLists[v] || (viewLists[v] = [])
 		if (list[index] === title) return
 		list[index] = title
+		if (v === 6) for (var a = 0; a < STRIPS; ++a) updateArmable(activeDevice, a)   // (VCAs can be armed)
 		if (!curView || curView.index !== v) return
 		reportBank(activeDevice)
 		if (title && title === currentTitle) pickCurrent(activeDevice)
