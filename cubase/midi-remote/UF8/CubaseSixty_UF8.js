@@ -1557,14 +1557,14 @@ function sendViewPoll(activeDevice) {
 		// every strip each tick made the send views feel slow (15.11.2026).
 		if (st.faderOn && (st.fKind === 'send' || st.fKind === 'plugin') && st.fObj >= 0) {
 			var v = skDa[i].getParameterProcessValue(skAm, st.fObj, st.fTag)
-			if (v !== st.fPolled) { st.fPolled = v; st.fSettle = 5; st.fTextPolled = daText(skDa[i], st.fObj, st.fTag); stripFaderSend(activeDevice, i) }
+			if (v !== st.fPolled) { st.fPolled = v; st.fSettle = 5; st.fTextPolled = daText(skDa[i], st.fObj, st.fTag); st.fTextSame = 0; stripFaderSend(activeDevice, i) }
 			else if (st.fSettle > 0) {
 				--st.fSettle
 				var ft = daText(skDa[i], st.fObj, st.fTag)
-				if (ft !== st.fTextPolled) { st.fTextPolled = ft; stripFaderShow(activeDevice, i) }
+				if (ft !== st.fTextPolled) { st.fTextPolled = ft; st.fTextSame = 0; stripFaderShow(activeDevice, i) } else ++st.fTextSame
 				// Settled (~0.5 s still): the exact level with its text, for the bridge's send level curve (SysEx 16),
 				// so its own drawing while the hand moves gets closer and the correction at the end smaller.
-				if (st.fSettle === 0 && st.fKind === 'send' && ft) {
+				if (st.fSettle === 0 && st.fKind === 'send' && ft && st.fTextSame >= 3) {   // (the text unchanged for 3 reads)
 					var p14 = Math.round(Math.max(0, Math.min(1, v)) * 16383)
 					sendMidi(activeDevice, SYSEX_HEADER.concat([0x16, i, (p14 >> 7) & 0x7F, p14 & 0x7F], toAscii7(ft), [0xF7]))
 				}
