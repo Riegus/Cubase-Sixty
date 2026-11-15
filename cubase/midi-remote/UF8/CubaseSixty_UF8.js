@@ -1716,6 +1716,7 @@ function sendViewPoll(activeDevice) {
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	if (armed.dirty && curView && curView.armed) { armed.dirty = false; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
+	if (curView && curView.armed) armedCheck()
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
 	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
@@ -1768,11 +1769,24 @@ function armedLayout(activeDevice) {
 		if (view.pos[k] !== target) {
 			var a = view.zones[k].mAction
 			if (!(view.pos[k] >= 0) || target < view.pos[k]) { a.mResetBank.trigger(skAm); view.pos[k] = 0; ++moves }
-			while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
+			// (mShiftRight did nothing on a one-channel zone, 15.11.2026: every strip stayed on the first track.)
+			while (view.pos[k] < target) { a.mNextBank.trigger(skAm); ++view.pos[k]; ++moves }
 		}
 		if (armed.unused[k] !== unused) { armed.unused[k] = unused; paintStripName(activeDevice, k) }
 	}
 	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
+	if (moves) armed.checkAt = Date.now() + 1500
+}
+// (TEST) Where the strips landed: the names they show against the armed list, 1.5 s after a layout.
+function armedCheck() {
+	if (!armed.checkAt || Date.now() < armed.checkAt) return
+	armed.checkAt = 0
+	var list = armedList(), parts = []
+	for (var k = 0; k < STRIPS; ++k) {
+		var slot = list[armed.offset + k]
+		parts.push((k + 1) + ': ' + (slot === undefined ? '(none)' : '"' + recTitles[slot] + '"') + ' -> "' + (stripTitles[k] || '') + '"')
+	}
+	out('[CubaseSixty] ARMED check (wanted -> shown): ' + parts.join(', '))
 }
 function armedPage(activeDevice, step) {
 	var n = armedList().length
