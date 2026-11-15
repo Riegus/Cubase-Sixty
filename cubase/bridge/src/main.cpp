@@ -1035,16 +1035,25 @@ void pageRightBurst(int count, int target)
     std::thread([count, target] {
         const int gen = count > 1 ? ++g_freezeGen : 0;
         if (count > 1) g_uf8Frozen = true;
-        for (int i = 0; i < count; ++i) {
-            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            note(kNotePageRight, true);
-            note(kNotePageRight, false);
+        // (TEST, 15.11.2026) The script moves the bank itself, all steps at once (SysEx 30 00 <count>: its shift-right
+        // action triggered); the notes only if the bank has not got there within 400 ms.
+        const int before = g_bankOffset;
+        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x30, 0x00, uint8_t(count), 0xF7});
+        int waited = 0;
+        for (; waited < 400 && g_bankOffset != target; waited += 10) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        if (g_bankOffset == target) std::printf("UF8 bank-right near the end: %d step(s) by the script, there after %d ms\n", count, waited);
+        else {
+            const int now = g_bankOffset;
+            const int left = now >= before && now < target ? target - now : count;
+            std::printf("UF8 bank-right near the end: the script's %d step(s) got the bank from %d to %d in 400 ms; %d note(s)\n", count, before, now, left);
+            for (int i = 0; i < left; ++i) {
+                if (i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                note(kNotePageRight, true);
+                note(kNotePageRight, false);
+            }
+            for (int w = 0; w < 400 && g_bankOffset != target; w += 20) std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
-        if (count > 1) {
-            for (int waited = 0; waited < 400 && g_bankOffset != target; waited += 20)
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            if (g_freezeGen == gen && !g_freezeHeld) { g_uf8Frozen = false; replayUf8Cache(); }
-        }
+        if (count > 1 && g_freezeGen == gen && !g_freezeHeld) { g_uf8Frozen = false; replayUf8Cache(); }
     }).detach();
 }
 void replayUf8Cache();
