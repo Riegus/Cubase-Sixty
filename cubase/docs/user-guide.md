@@ -16,7 +16,7 @@ Tested with Cubase 15 Pro on Windows 11.
 
 **Using the surfaces**
 
-- [UF8](#uf8): [the strips](#the-strips), [moving around](#moving-around), [what SEL does](#what-sel-does-norm-rec-auto),
+- [UF8](#uf8): [the strips](#the-strips), [moving around](#moving-around), [track views](#track-views-which-tracks-the-strips-show), [what SEL does](#what-sel-does-norm-rec-auto),
   [the top soft keys](#the-top-soft-keys-your-ssl-channel-strips), [sends](#sends-on-the-uf8), [FLIP and SSL Strip Mode](#flip-and-ssl-strip-mode),
   [the CHANNEL encoder](#the-channel-encoder), [markers](#markers-and-nav-mode), [automation](#automation), [zoom](#zoom-and-the-editor)
 - [UF1](#uf1): [the strip](#the-strip), [getting around](#getting-around), [the four views](#the-four-views),
@@ -181,6 +181,38 @@ Touching a fader can also select its track (Settings > Behaviour).
   unlatches.
 - **360°** opens the Settings page in your browser.
 
+### Track views: which tracks the strips show
+
+The strips can bank over all tracks or over one kind of track. **Q3** opens the view picker on the top soft keys:
+
+| Key | View |
+|-----|------|
+| 1 | **ALL**: every track and channel (not inputs and outputs) |
+| 2 | **AUDIO**: audio tracks |
+| 3 | **INSTR**: instrument and sampler tracks |
+| 4 | **MIDI**: MIDI tracks |
+| 5 | **GROUPS**: group channels |
+| 6 | **FX**: FX channels |
+| 7 | **VCA**: VCA faders |
+| 8 | **ARMED**: the tracks armed for recording |
+
+The current view's key is lit; a view with no tracks is dark. Press a key to switch (it stays lit a moment, then the
+soft keys go back to the SSL soft keys); press **Q3** again to close the picker without switching. **Q3 is lit while a
+view other than ALL is on.**
+
+Everything works the same in every view: banking, following the selection (a track of another kind leaves the strips
+where they are), the track numbers (the project's numbers, so AUDIO might show 1, 4, 7), sends, FLIP, SSL Strip
+Mode. Switching views keeps the fader and V-pot mode, and the strips land on the selected track if it is in the new
+view.
+
+**ARMED** shows the armed tracks in project order, eight at a time; BANK and PAGE go through them, and selecting an
+armed track that is not on the strips brings its eight. Arming or disarming a track (with the mouse, a top soft key,
+SEL in REC) adds or removes it at once. Strips without an armed track are dark and do nothing. Arming a VCA arms
+the tracks linked to it; those show in ARMED, the VCA does not.
+
+The view the UF8 starts on (ALL, any view, or the last one used) and which views the picker offers are in
+[Settings](#settings) > UF8 track views.
+
 ### What SEL does: NORM, REC, AUTO
 
 The NORM, REC and AUTO keys choose what the SEL keys do. The mode's key is lit.
@@ -188,7 +220,7 @@ The NORM, REC and AUTO keys choose what the SEL keys do. The mode's key is lit.
 | Mode | SEL does | SEL lights |
 |------|----------|-----------|
 | **NORM** | Selects the track; on the selected track, opens / closes its SSL channel strip or channel editor. | The selected track. |
-| **REC** | Arms / disarms the track for recording. | Dim red: can be armed. Red: armed. Dark: this strip cannot record (group, FX, VCA, output). |
+| **REC** | Arms / disarms the track for recording (on a VCA: the tracks linked to it). | Dim red: can be armed. Red: armed. Dark: this strip cannot record (group, FX, output). |
 | **AUTO** | Switches the track's automation **Write** on / off. | Red while the track is writing. |
 
 ### The top soft keys: your SSL channel strips
@@ -535,6 +567,7 @@ UF8 / UF1 / UC1 buttons pick which surfaces' settings show (one or more; remembe
 |---------|---------------|
 | Devices | Which surfaces are connected and whether Cubase is; key / LED and display brightness; sleep when idle. |
 | Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; what a UF8 V-pot push and SEL on the selected track do; what the UF1's BYPASS key does with inserts that were bypassed already; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
+| UF8 track views | The view the UF8 starts on (ALL by default, any view, or the last one used) and which views the Q3 picker offers. |
 | UC1 keys | What the magnifier, 360° and secondary encoder push do. |
 | UC1 on Cubase's strip | Whether the knobs / keys load a missing gate or compressor; which compressor DYN IN loads; which bus comp the Bus Comp section starts on. |
 | Display | How long track names are shortened; the UC1's 7-segment leading zeros. |
@@ -589,7 +622,7 @@ Cubase gives controllers less than REAPER does, so some things are missing or di
 - On fast turns of a **send**, the MixConsole trails the controller for a moment and then lands on the same value.
 - A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
 - The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there. On the UF8,
-  **Q3** and **LAYER 1–3** do nothing.
+  **LAYER 1–3** do nothing.
 
 The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),
 [what Cubase does not allow](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md),

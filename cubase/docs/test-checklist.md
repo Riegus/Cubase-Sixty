@@ -40,6 +40,17 @@ Quick: banking, SEL, a fader, a V-pot.
   latched: pan, a focused parameter, a send level move a quarter as far); 360 opens the Settings page.
 - CHANNEL encoder: each mode (hold its push and turn); zoom pad. FOCUS: the encoder on the value under the
   mouse pointer (a plug-in knob, a MixConsole fader); FOCUS lit; about as fast as a V-pot on pan; FINE a quarter.
+- Faders on the printed scale: a track at 0 dB on "0", at -10 dB on "10"; a fader set on a mark gives that level in
+  Cubase; the same in a fader send view (the dB value following the hand all the way down).
+- Track views: Q3 opens the picker (current lit, empty views dark, Q3 lit off ALL); each view shows only its kind,
+  with banking, follow selection (another kind leaves the bank), project track numbers and SSL plug-in names; the
+  route (FLIP, a send view, Strip Mode) kept across a switch; switching lands on the selected track in one move.
+- ARMED: only the armed tracks, eight at a time (BANK / PAGE through them, follows the selection to its eight);
+  arming / disarming rearranges it; blank strips dark and dead to the hand; leaving and coming back right; arming a
+  VCA brings its linked tracks; nothing armed: ARMED dark in the picker.
+- REC: armable dim red, armed bright red, groups / FX / outputs dark, on every bank; VCAs armable.
+- Settings > UF8 track views: the view at start (a view; "the last view used" across a Cubase restart); a view
+  switched off is dark in the picker and does nothing.
 
 ## UF1
 
