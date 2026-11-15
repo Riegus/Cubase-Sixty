@@ -267,8 +267,12 @@ int g_dbDrawnPos[8] = {};
 // Access): at most one every 60 ms, the last one always, as the V-pot send view's 2A (control-feel.md rule 8). Sent
 // with every position report (50+ a second), Cubase fell behind by seconds: the text that came back when the hand
 // stopped was a level from far back, and corrected itself again later (15.11.2026, "jumps 4 dB and more").
+std::array<std::atomic<int>, 8> g_handPos{};          // the hand's last position on a fader that is the script's
+std::array<std::atomic<long long>, 8> g_handAt{};
 void sendHandToScript(uint8_t s, uint16_t v)
 {
+    g_handPos[s] = v;
+    g_handAt[s] = nowMs8();
     static std::array<std::atomic<long long>, 8> lastTx{};
     static std::array<std::atomic<int>, 8> pending{};   // position + 1 waiting to go, 0 = none
     const auto tx = [](uint8_t strip, int pos) {
@@ -1286,8 +1290,14 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 std::printf("UF8 send level %s at %d not learnt: the curve says %s\n", t.c_str(), pos, known.c_str());
             else cs::uf1LearnLevel(pos, t);
         } else if (m.size() >= 9 && m[4] == 0x27 && m[5] < kStrips) {
-            const int s = m[5];
-            if (g_stripFader[s] && !g_touched[s]) driveFader(s, uint16_t((m[6] << 7) | m[7]));
+            const int s = m[5], pos = (m[6] << 7) | m[7];
+            // Within 3 s of the hand, a position away from where it let go is a late one (Cubase still catching up with
+            // the writes): the motor stays (15.11.2026: the fader jumped back now and then after the hand let go).
+            if (g_stripFader[s] && !g_touched[s]) {
+                if (nowMs8() - g_handAt[s] < 3000 && std::abs(pos - g_handPos[s]) > 64)
+                    std::printf("UF8 fader %d: late position %d from Cubase ignored (hand at %d)\n", s + 1, pos, g_handPos[s].load());
+                else driveFader(s, uint16_t(pos));
+            }
         } else if (m.size() >= 7 && m[4] == 0x0D && m[5] < kStrips) {
             // A send level on the V-pot (the selected track's sends): "Send" left, the level right.
             std::string v(m.begin() + 6, m.end() - 1);
