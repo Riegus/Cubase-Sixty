@@ -1732,7 +1732,7 @@ int main(int argc, char** argv)
             paintStripNumbers();
             return;
         }
-        if (msg.size() >= 12 && msg[0] == 0xF0 && msg[4] == 0x1F && msg[5] > 0 && msg[5] < 7) {   // a view's track number
+        if (msg.size() >= 11 && msg[0] == 0xF0 && msg[4] == 0x1F && msg[5] > 0 && msg[5] < 7) {   // a view's track number
             const size_t i = (size_t(msg[6]) << 7) | msg[7];
             const int n = (int(msg[8]) << 7) | msg[9];
             if (i < 256) {

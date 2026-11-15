@@ -946,10 +946,23 @@ var followQuietUntil = 0
 		sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
 		dueMs = now + steps * 100 + 800
 	}
+	// Is Cubase pausing? (control-feel.md, "How to measure": ~92 idle calls per 10 s, never more than ~0.12 s apart;
+	// fewer with long gaps = Cubase busy.) Logged only when it is.
+	var idleCount = 0, idleSince = 0, idleLast = 0, idleGap = 0
+	function idleMeasure(now) {
+		if (idleLast) idleGap = Math.max(idleGap, now - idleLast)
+		idleLast = now
+		++idleCount
+		if (!idleSince) idleSince = now
+		if (now - idleSince < 10000) return
+		if (idleCount < 75 || idleGap > 400) out('[CubaseSixty] Cubase busy: ' + idleCount + ' idle calls in ' + ((now - idleSince) / 1000).toFixed(1) + ' s, longest gap ' + idleGap + ' ms (view ' + (curView ? curView.label : '?') + ')')
+		idleCount = 0; idleSince = now; idleGap = 0
+	}
 	deviceDriver.mOnIdle = function (activeDevice) {
 		flushLog(activeDevice)
 		var now = nowMs()
 		if (now <= 0) return
+		idleMeasure(now)
 		requestListsIfNeeded(activeDevice, now)
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
@@ -1001,6 +1014,8 @@ var followQuietUntil = 0
 	}
 	// Another view: the selected track looked up in its list, and banked to if it is there (after 300 ms, as a new
 	// selection); the bank's size and position for the bridge.
+	// Not at once: right after a page switch Cubase is busy re-sending the new page's values and dropped bank presses
+	// (a jump of 5 landed 3, then corrected: "it banks two times", 15.11.2026). 1.2 s, when the names are in.
 	followViewChanged = function (activeDevice) {
 		selectedIndex = -1
 		followTries = 0
@@ -1008,6 +1023,7 @@ var followQuietUntil = 0
 		dueMs = 0
 		reportBank(activeDevice)
 		pickCurrent(activeDevice)
+		if (dueMs > 0) dueMs = nowMs() + 1200
 	}
 })()
 
