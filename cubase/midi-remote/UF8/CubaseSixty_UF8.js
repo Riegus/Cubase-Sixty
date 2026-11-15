@@ -62,7 +62,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
+var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x32: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -571,6 +571,7 @@ var followOnStripTitle = function () {}   // set by the follow-selection block
 var followCurrentTitle = function () {}   // set by the follow-selection block
 var followStripSelect = function () {}    // set by the follow-selection block
 var onAllTitle = function () {}           // set by the follow-selection block
+var allTitlesForArmed = function () { return [] }   // set by the follow-selection block
 var onViewTitle = function () {}          // set by the follow-selection block
 var followViewChanged = function () {}    // set by the follow-selection block
 var recTitles = []
@@ -1047,6 +1048,7 @@ var followQuietUntil = 0
 	eachPage(function (page, bankZone, view) { page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank) })
 	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script
 	// they made every bank move about 0.25 s slower.
+	allTitlesForArmed = function () { return allTitles }
 	onAllTitle = function (activeDevice, index, title) {
 		if (allTitles[index] === title) return
 		allTitles[index] = title
@@ -1766,7 +1768,18 @@ for (var azf = 0; azf < 8; ++azf) {
 // start at, where each strip's one-channel zone is (pos, its slot), and which strips have no armed track (unused: name
 // blank; the zone stays where it was).
 var recArmed = []
-var armed = { offset: 0, unused: [], dirty: false }
+var armed = { offset: 0, unused: [], dirty: false, sentAll: [] }
+// A recordable slot's place in the full list: both lists are in the MixConsole's order, so the slot's name is matched
+// slot by slot from the top (as the helper matches its numbers).
+function recToAll(slot) {
+	var all = allTitlesForArmed(), j = 0
+	for (var i = 0; i <= slot; ++i) {
+		while (j < all.length && all[j] !== recTitles[i]) ++j
+		if (j >= all.length) return -1
+		if (i < slot) ++j
+	}
+	return j
+}
 function armedList() {
 	var list = []
 	for (var s = 0; s < REC_CHANNELS; ++s) if (recArmed[s] && recTitles[s]) list.push(s)
@@ -1788,6 +1801,14 @@ function armedLayout(activeDevice) {
 			while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
 		}
 		if (armed.unused[k] !== unused) { armed.unused[k] = unused; paintStripName(activeDevice, k) }
+	}
+	// Each strip's track in the full list (SysEx 32 <strip> <index hi> <index lo>, 7F 7F = none): the bridge's numbers and
+	// SSL plug-in names go by it in ARMED.
+	for (var n = 0; n < STRIPS; ++n) {
+		var at = armed.unused[n] ? -1 : recToAll(list[armed.offset + n])
+		if (armed.sentAll[n] === at) continue
+		armed.sentAll[n] = at
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x32, n], at < 0 ? [0x7F, 0x7F] : [(at >> 7) & 0x7F, at & 0x7F], [0xF7]))
 	}
 	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
 	if (moves) armed.checkAt = Date.now() + 1500

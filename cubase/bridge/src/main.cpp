@@ -134,6 +134,7 @@ std::mutex g_numMx;
 // The filtered views' (1-6) numbers by position in the view's list (helper SysEx 1F), and which positions hold a
 // channel (helper 1E, passed on to the UF8 script): the picker dims a view with none. Both under g_numMx.
 std::vector<int> g_viewNumber[kViewCount];
+std::array<int, 8> g_armedAll{-1, -1, -1, -1, -1, -1, -1, -1};   // ARMED: each strip's track in the full list (SysEx 32)
 std::vector<bool> g_viewHas[kViewCount];   // (ARMED, 7: none, the script lays its strips out itself)
 int viewChannels(int v)   // (g_numMx held)
 {
@@ -1017,7 +1018,11 @@ void paintStripNumbers(bool force = false)
         const size_t i = size_t(offset + s);
         const int view = g_uf8View;
         const std::vector<int>& numbers = view > 0 && view < 7 ? g_viewNumber[view] : g_chanNumber;   // the view's list
-        if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < numbers.size() && numbers[i] > 0)
+        if (view == 7) {   // ARMED: by each strip's place in the full list, from the script
+            const int a = g_armedAll[s];
+            if (g_projectOpen && a >= 0 && !g_stripEmpty[s] && size_t(a) < g_chanNumber.size() && g_chanNumber[a] > 0)
+                t = std::to_string(number = g_chanNumber[a]);
+        } else if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < numbers.size() && numbers[i] > 0)
             t = std::to_string(number = numbers[i]);
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
@@ -1288,6 +1293,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
             auto v = [&](int i) { return (m[i] == 0x7F && m[i + 1] == 0x7F) ? -1 : (m[i] << 7) | m[i + 1]; };
             g_bankTotal = v(5);
             g_bankOffset = v(7);
+            paintStripNumbers();
+        } else if (m.size() >= 9 && m[4] == 0x32 && m[5] < kStrips) {   // ARMED: a strip's track in the full list
+            g_armedAll[m[5]] = (m[6] == 0x7F && m[7] == 0x7F) ? -1 : (m[6] << 7) | m[7];
             paintStripNumbers();
         } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
             const int v = m[5] < kViewCount ? m[5] : 0;
