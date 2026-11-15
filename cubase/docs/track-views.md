@@ -60,7 +60,8 @@ Test: each view shows only its track type. Banking, fader modes, sends, SOLO / C
 - Q3 opens the picker. The top soft keys show the view names, and the current view is lit. Pressing one switches view and closes the picker; Q3 again closes it unchanged. It works the same way as Nav Mode on Q1 / Q2.
 - Q3's LED is lit while a view other than ALL is on.
 - The view's name shows briefly on the displays.
-- Views with no tracks of that type are offered but dimmed.
+- Views with no tracks of that type are offered but dimmed. (Not done in step 4: the UF8 script hears only the active page, so it can't count the other views' tracks. Possible with the Helper's lists in step 5.)
+- After a pick the chosen key stays lit for 0.6 s, then the keys go back. That is the feedback, instead of the view's name on the displays: the new view's names arrive in the same moment and would overwrite it.
 
 Test: picking views from the surface, and that Q1 / Q2 / Nav Mode / soft keys are unchanged.
 

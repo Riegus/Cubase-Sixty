@@ -121,11 +121,15 @@ std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's ow
 std::atomic<std::chrono::steady_clock::time_point> g_uf8ConnectedAt{};   // the foot switches are ignored just after it
 std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle markers (Q1)
 // Track views (docs/track-views.md): which channel types the UF8 banks over. The script has one mapping page per
-// view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 steps through them (step 3;
-// the picker on the soft keys is step 4).
+// view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 opens the picker: the top
+// soft keys are the views (the current one lit), a press switches and closes it, Q3 again closes it unchanged.
+// Q3 is lit while a view other than ALL is on.
 constexpr int kViewCount = 7;
 constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA" };
 std::atomic<int> g_uf8View{0};
+std::atomic<bool> g_viewPick{false};
+std::atomic<int> g_viewPickGen{0};
+void switchView(int v);
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
 const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
@@ -330,6 +334,17 @@ void unfocus()
     paintVpots();
     paintPanFine();
 }
+void applyRoute();
+// Another track view: the script's page for it, then the route again 60 ms later (a new page starts on volume / pan).
+void switchView(int v)
+{
+    if (v < 0 || v >= kViewCount) return;
+    const bool same = g_uf8View.exchange(v) == v;
+    std::printf("UF8 view: %s%s\n", kViewNames[v], same ? " (already on)" : "");
+    if (same) return;
+    note2(uint8_t(100 + v));
+    std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
+}
 void applyRoute()
 {
     const int send = g_routeSend;
@@ -499,6 +514,7 @@ void handleFrame(const uf8frames::Frame& fr)
                     if (g != gen) return;
                     held = true;
                     g_nav = !g_nav;
+                    if (g_nav) g_viewPick = false;
                     if (g_nav && g_focus >= 0) unfocus();
                     std::printf("UF8 Nav Mode %s\n", g_nav ? "on" : "off");
                     paintSoftKeys();
@@ -530,24 +546,39 @@ void handleFrame(const uf8frames::Frame& fr)
         }
         if (d[3] == 0x43 || d[3] == 0x44) {   // Q1 / Q2: the soft keys on the channel strip / the bus comp (Nav Mode: cycle / markers)
             if (pressed) {
+                g_viewPick = false;
                 if (g_nav) g_navView = d[3] == 0x43 ? 1 : 0;
                 else g_skDomain = d[3] == 0x44 ? 1 : 0;
                 paintSoftKeys();
             }
             break;
         }
-        if (d[3] == 0x45) {   // Q3: the next track view; then the route again (a new page starts on volume / pan)
+        if (d[3] == 0x45) {   // Q3: the track view picker on the top soft keys, open / closed
             if (pressed) {
-                const int v = (g_uf8View + 1) % kViewCount;
-                g_uf8View = v;
-                std::printf("UF8 Q3: view %s\n", kViewNames[v]);
-                note2(uint8_t(100 + v));
-                std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
+                ++g_viewPickGen;
+                g_viewPick = !g_viewPick;
+                if (g_viewPick) g_nav = false;   // (Nav Mode has the same keys)
+                paintSoftKeys();
             }
             break;
         }
+        if (d[3] >= 0x18 && d[3] <= 0x1F && g_viewPick) {   // the picker: a view; shown lit for a moment, then closed
+            if (!pressed) break;
+            const int v = d[3] - 0x18;
+            if (v >= kViewCount) break;
+            switchView(v);
+            const int gen = ++g_viewPickGen;
+            paintSoftKeys();
+            std::thread([gen] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(600));
+                if (gen != g_viewPickGen) return;
+                g_viewPick = false;
+                paintSoftKeys();
+            }).detach();
+            break;
+        }
         if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
-            if (pressed) { g_skBank = d[3] - 0x68; paintSoftKeys(); }
+            if (pressed) { g_viewPick = false; g_skBank = d[3] - 0x68; paintSoftKeys(); }
             break;
         }
         if (d[3] >= 0x18 && d[3] <= 0x1F && g_nav) {   // Nav Mode: jump to marker / recall cycle marker 1-8
@@ -836,6 +867,19 @@ void paintSel(int strip)
 void paintSoftKeys()
 {
     if (g_noProject) return;
+    if (g_viewPick) {   // the track view picker: the views, the current one lit
+        const int cur = g_uf8View;
+        for (int s = 0; s < kStrips; ++s) {
+            sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s >= kViewCount ? uf8::TopSoftKeyState::Off
+                : s == cur ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
+            g_dev.send(uf8::buildPluginSlotName(uint8_t(s), s < kViewCount ? kViewNames[s] : ""));
+        }
+        sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick1, false));
+        sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick2, false));
+        sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick3, true));
+        return;
+    }
+    sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick3, g_uf8View != 0));
     if (g_nav) {   // Nav Mode: the eight keys are markers / cycle markers 1-8, the last one pressed lit
         const int view = g_navView;
         for (int s = 0; s < kStrips; ++s) {
@@ -1190,6 +1234,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const int v = m[5] < kViewCount ? m[5] : 0;
             if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
             paintStripNumbers(true);
+            paintSoftKeys();   // Q3's LED, the picker
         } else if (m.size() >= 6 && m[4] == 0x11) {
             // The script asks for a "tick" in 300 ms (note 80): it has no timer of its own, and wants to look
             // at the bank only after Cubase has finished reacting to a new selection.
