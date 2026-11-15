@@ -607,6 +607,7 @@ compete for the SSL plug-ins' meters.
 | The UC1's knobs do nothing on a track | The track has neither an SSL strip nor Cubase's strip reachable (an instrument return, for example), or loading modules is set to "never". |
 | A top soft key on the UF8 shows "-" | That track has no SSL channel strip. |
 | A surface is odd after *Reload Scripts* | Restart Cubase; a reload does not always set the scripts up fully. |
+| The selected track jumps to another a few seconds after a project opens | Another controller's MIDI Remote script does it (seen with a keyboard's scripts). Switch that controller's scripts off in *Studio > MIDI Remote Manager* to check. |
 | Stepping to a track lands somewhere else | "Project window" stepping needs the Project window focused; the default (MixConsole) does not. |
 
 For a report: switch on the script log (Settings > Logging), reproduce the problem, and send the files from the logs

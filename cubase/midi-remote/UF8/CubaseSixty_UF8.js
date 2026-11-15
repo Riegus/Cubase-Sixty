@@ -315,7 +315,6 @@ eachPage(function (page, bankZone, view) {
 		;(function (index) {
 			// Which strips are selected: tells two tracks with the same name apart (follow selection, below).
 			strip.select.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
-				if (!!stripSelected[index] !== (value > 0.5)) out('[CubaseSixty] SEL value: strip ' + (index + 1) + ' "' + (stripTitles[index] || '') + '" ' + (value > 0.5 ? 'on' : 'off') + ' (view ' + (curView ? curView.label : '?') + ', ' + (Date.now() - startedAt) + ' ms)')   // (test, 15.11.2026)
 				stripSelected[index] = value > 0.5
 				followStripSelect(activeDevice)   // another track of the same name has no new name to report
 			}

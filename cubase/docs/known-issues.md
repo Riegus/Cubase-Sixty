@@ -15,6 +15,15 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF8
 
+- **Not ours (15.11.2026): another controller's MIDI Remote scripts moved the selection when a project opened.** The
+  selected track jumped twice a few seconds after the project opened (Vocals Main → the track before it → Audio FX, the
+  last audio track), with every surface following. Traced to the zone moves at a project's start, before Cubase has a
+  selected mixer channel; with the four CubaseSixty scripts off it still happened, with Geir's Arturia keyboard scripts
+  off it did not. Left to the user (the guide's "When something is wrong" says so); a put-back in the Helper worked but
+  was dropped as undoing someone else's change.
+- **Fixed (15.11.2026): the view at start ALL was not applied.** Cubase opens the UF8 on the page it was last on (INSTR),
+  and the bridge sent the start view only when it was not ALL. It is now always sent.
+
 - **Fixed (15.11.2026, on `cubase`): the faders are placed by dB on the printed scale (see control-feel.md, Faders).**
   **The faders did not match the UF8's printed dB scale** (seen 15.11.2026, in every view; there from the start). The
   bridge drives the motors with Cubase's own fader position (pitch bend), which follows Cubase's fader curve: -14 dB
