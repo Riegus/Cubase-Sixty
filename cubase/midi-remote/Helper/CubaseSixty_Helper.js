@@ -329,9 +329,31 @@ function scanStep(activeDevice) {
 	numbersDirty = true
 	scanNextView(activeDevice)
 }
+// The selection at a project's start (15.11.2026): Cubase reports the project's selected track (the UF1 showed it) but
+// none of the mixer channels as selected (mSelected), and the reading's first window moves then selected another track
+// (a reset of the instruments window selected the track before it, of the groups window the last audio track; traced).
+// So before the first reading, that track's channel is selected the way SEL selects it, once Cubase reports no channel
+// selected; not with two channels of its name (which one?), nor on a track without a channel (a folder).
+var selTitle = ''
+var selSynced = false
+page.mHostAccess.mTrackSelection.mMixerChannel.mOnTitleChange = function (activeDevice, activeMapping, title) {
+	hostMapping = activeMapping
+	selTitle = title || ''
+}
+function selSync(activeDevice) {
+	selSynced = true
+	if (selIndex >= 0 || !selTitle) return false
+	var at = -1, count = 0
+	for (var i = 0; i < CHANNELS; ++i) if (allTitles[i] === selTitle) { if (at < 0) at = i; ++count }
+	if (count !== 1) { out('[CubaseSixty Helper] start: "' + selTitle + '" selected, no mixer channel selected; ' + (count ? count + ' channels of that name, left as it is' : 'not a channel of the list')); return false }
+	out('[CubaseSixty Helper] start: "' + selTitle + '" selected, no mixer channel selected: #' + at + ' selected')
+	selVars[at].setProcessValue(activeDevice, 1)
+	return true
+}
 function scanIdle(activeDevice) {
 	if (scan.v) { scanStep(activeDevice); return }
 	if (!scan.dueAt || Date.now() < scan.dueAt) return
+	if (!selSynced && selSync(activeDevice)) { scanSoon(300); return }
 	scan.dueAt = 0
 	scan.queue = [1, 2, 3, 4, 5, 6]
 	scan.started = Date.now()
@@ -410,9 +432,13 @@ midiInput.mOnSysex = function (activeDevice, message) {
 }
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
-deviceDriver.mOnActivate = function (activeDevice) { helperStart = Date.now(); out('[CubaseSixty Helper] active (a project is open)') }
+deviceDriver.mOnActivate = function (activeDevice) { helperStart = Date.now(); selSynced = false; out('[CubaseSixty Helper] active (a project is open)') }
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	out('[CubaseSixty Helper] inactive (no project)')
+	selSynced = false
+	selTitle = ''
+	selIndex = -1
+	selSeen = []
 	resendLast = {}
 	sentNumbers = []
 	for (var v = 1; v < VIEW_LISTS.length; ++v) sentViewNumbers[v] = []
