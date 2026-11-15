@@ -192,8 +192,12 @@ if (-not $CubaseExe) {
 if (-not $CubaseExe -or -not (Test-Path $CubaseExe)) { throw 'Cubase executable not found. Pass -CubaseExe "<path>\Cubase15.exe".' }
 
 Write-Host "Starting Cubase: $CubaseExe"
+if ($Project -and -not (Test-Path $Project)) {
+    # Moved or renamed: start Cubase anyway (the Hub) instead of stopping with everything else done.
+    Write-Warning "Project not found: $Project (cubase\tools\project.txt or CUBASE_SIXTY_PROJECT): starting Cubase without it."
+    $Project = $null
+}
 if ($Project) {
-    if (-not (Test-Path $Project)) { throw "Project not found: $Project" }
     # Open the file like a double-click does; that loads the project directly. (Passing the path to Cubase's exe showed the Hub.)
     Write-Host "Opening project: $Project"
     Start-Process -FilePath $Project
