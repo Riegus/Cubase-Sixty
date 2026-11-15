@@ -85,5 +85,8 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - 13.11.2026: Geir tests the installed build for a few days before the first release. Left before releasing: the
   guide read against the hardware, the uninstaller tried, the FOCUS test log line made debug-only, a GitHub
   release with CubaseSixty-Setup-0.1.0.exe.
+- 15.11.2026: the UF8 track views are done (track-views.md) and held the release back until then. Also left: Geir
+  retests the UF1's EQ graph (PLUGIN view: an SSL channel strip's curve, flat with its EQ out; Cubase's own channel EQ
+  on a track without one).
 - A user guide: what each key does on each surface, the setup steps that stay manual (the Mackie Control device for
   scrubbing, SSL 360 not running), with links to the known issues and the Cubase limitations.
