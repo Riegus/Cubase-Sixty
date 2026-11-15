@@ -276,7 +276,7 @@ function paintStripName(activeDevice, index) {
 
 // SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
 var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
-var trackDb = [], dbResend = []
+var trackDb = [], dbResend = [], faderPosResend = []
 var trackPan = [], panResend = [], stripPanShow = []
 var panCentre = []
 eachPage(function (page, bankZone, view) {
@@ -438,6 +438,14 @@ for (var i = 0; i < STRIPS; ++i) {
 			if (text === lastDb) return
 			lastDb = text
 			sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
+		}
+		// ARMED: the fader's position sent again from the value Cubase last gave this strip (after the script moved its
+		// zone, the dB text followed but the motor did not, 15.11.2026). As pitch bend, as Cubase sends it.
+		faderPosResend[index] = function (activeDevice) {
+			if (faderShown.pos === null || route.fader !== 'vol') return -1
+			var v = Math.max(0, Math.min(16383, Math.round(faderShown.pos * 16383)))
+			sendMidi(activeDevice, [0xE0 | index, v & 0x7F, (v >> 7) & 0x7F])
+			return v
 		}
 		dbResend[index] = function (activeDevice) { lastDb = null; if (trackDb[index] !== undefined) dbText(activeDevice, trackDb[index]) }
 		// Strip mode: the V-pot on the SSL strip's pan; Cubase's track pan is kept for the way back.
@@ -1718,7 +1726,7 @@ function sendViewPoll(activeDevice) {
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	if (armed.dirty && curView && curView.armed) { armed.dirty = false; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
-	if (curView && curView.armed) armedCheck()
+	if (curView && curView.armed) armedCheck(activeDevice)
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
 	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
@@ -1811,12 +1819,15 @@ function armedLayout(activeDevice) {
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x32, n], at < 0 ? [0x7F, 0x7F] : [(at >> 7) & 0x7F, at & 0x7F], [0xF7]))
 	}
 	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
-	if (moves) armed.checkAt = Date.now() + 1500
+	if (moves) armed.checkAt = Date.now() + 600
 }
 // (TEST) Where the strips landed: the names they show against the armed list, 1.5 s after a layout.
-function armedCheck() {
+function armedCheck(activeDevice) {
 	if (!armed.checkAt || Date.now() < armed.checkAt) return
 	armed.checkAt = 0
+	var pos = []
+	for (var f = 0; f < STRIPS; ++f) pos.push(armed.unused[f] || !faderPosResend[f] ? '-' : faderPosResend[f](activeDevice))
+	out('[CubaseSixty] ARMED faders sent again: ' + pos.join(' '))
 	var list = armedList(), parts = []
 	for (var k = 0; k < STRIPS; ++k) {
 		var slot = list[armed.offset + k]
