@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.20.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.22.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -62,7 +62,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
+var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x32: 1, 0x33: 0, 0x26: 1, 0x27: 1, 0x7C: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -225,6 +225,7 @@ function routeChanged(activeDevice) {
 }
 // The name a strip shows: the send's destination in a send view, else the track's.
 function paintStripName(activeDevice, index) {
+	if (curView && curView.armed && armed && armed.unused[index]) { sendStripName(activeDevice, index, ''); return }   // ARMED: no track
 	var text = stripTitles[index] || ''
 	// (A track without that send shows a blank name, not an empty one: the bridge takes an empty name as no track
 	// on the strip and switches its LEDs off.)
@@ -275,7 +276,7 @@ function paintStripName(activeDevice, index) {
 
 // SSL soft keys (see the end of the file): one Direct Access per strip, onto its channel.
 var skDa = [], skStrip = [], skAm = null, skFocus = null, skRescanAt = 0
-var trackDb = [], dbResend = []
+var trackDb = [], dbResend = [], faderPosResend = []
 var trackPan = [], panResend = [], stripPanShow = []
 var panCentre = []
 eachPage(function (page, bankZone, view) {
@@ -438,6 +439,14 @@ for (var i = 0; i < STRIPS; ++i) {
 			lastDb = text
 			sendMidi(activeDevice, SYSEX_HEADER.concat([0x0C, index], toAscii7(text), [0xF7]))
 		}
+		// ARMED: the fader's position sent again from the value Cubase last gave this strip (after the script moved its
+		// zone, the dB text followed but the motor did not, 15.11.2026). As pitch bend, as Cubase sends it.
+		faderPosResend[index] = function (activeDevice) {
+			if (faderShown.pos === null || route.fader !== 'vol') return -1
+			var v = Math.max(0, Math.min(16383, Math.round(faderShown.pos * 16383)))
+			sendMidi(activeDevice, [0xE0 | index, v & 0x7F, (v >> 7) & 0x7F])
+			return v
+		}
 		dbResend[index] = function (activeDevice) { lastDb = null; if (trackDb[index] !== undefined) dbText(activeDevice, trackDb[index]) }
 		// Strip mode: the V-pot on the SSL strip's pan; Cubase's track pan is kept for the way back.
 		panResend[index] = function (activeDevice) {
@@ -570,15 +579,21 @@ var followOnStripTitle = function () {}   // set by the follow-selection block
 var followCurrentTitle = function () {}   // set by the follow-selection block
 var followStripSelect = function () {}    // set by the follow-selection block
 var onAllTitle = function () {}           // set by the follow-selection block
+var allTitlesForArmed = function () { return [] }   // set by the follow-selection block
+var vcaTitles = function () { return [] }           // set by the follow-selection block
 var onViewTitle = function () {}          // set by the follow-selection block
 var followViewChanged = function () {}    // set by the follow-selection block
 var recTitles = []
 var armableSent = []
 
 
+// VCAs too (15.11.2026): Cubase lets a VCA be record-enabled, which arms the tracks linked to it (those then show in
+// ARMED; the VCA itself does not, it records nothing). The VCAs' names from the helper's VCA list (track views).
 function isRecordable(title) {
 	if (!title) return false
 	for (var k = 0; k < REC_CHANNELS; ++k) if (recTitles[k] === title) return true
+	var vca = vcaTitles()
+	for (var v = 0; v < vca.length; ++v) if (vca[v] === title) return true
 	return false
 }
 
@@ -655,18 +670,20 @@ eachPage(function (page, bankZone, view) {
 		seek.selectedTitle = title
 		seekCheck(activeDevice)
 		followCurrentTitle(activeDevice, title)
+		if (view.armed) armedSelectionMoved(activeDevice, title)
 	}
 })
 
 // Any bank key pressed by hand ends the search for good.
-function stopSeekOnPress(button) {
+function stopSeekOnPress(button, armedStep) {
 	button.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+		if (value > 0 && curView && curView.armed) { armedPage(activeDevice, armedStep); return }   // ARMED: through the armed tracks
 		if (value > 0 && seek.ownPresses > 0) { seek.ownPresses--; return }   // our own step, sent by the bridge
 		if (seek.active && value > 0) { seek.active = false; out('[CubaseSixty] bank key pressed: start-up search stopped') }
 	}
 }
-stopSeekOnPress(bankLeft)
-stopSeekOnPress(bankRight)
+stopSeekOnPress(bankLeft, -STRIPS)
+stopSeekOnPress(bankRight, STRIPS)
 
 // ---------------------------------------------------------------------------
 // Zoom pad (notes 72-76: up, left, centre, right, down), same as the UF1's NAV cross: left / right = zoom
@@ -733,8 +750,8 @@ eachPage(function (page, bankZone, view) {
 	page.makeActionBinding(pageLeft.mSurfaceValue, bankZone.mAction.mShiftLeft)
 	page.makeActionBinding(pageRight.mSurfaceValue, bankZone.mAction.mShiftRight)
 })
-stopSeekOnPress(pageLeft)
-stopSeekOnPress(pageRight)
+stopSeekOnPress(pageLeft, -1)
+stopSeekOnPress(pageRight, 1)
 
 // ---------------------------------------------------------------------------
 // Automation mode keys (notes 58 / 59 / 60 / 61 = Off / Trim / Latch / Touch): Cubase's global automation
@@ -1045,6 +1062,8 @@ var followQuietUntil = 0
 	eachPage(function (page, bankZone, view) { page.makeActionBinding(resetKey.mSurfaceValue, bankZone.mAction.mResetBank) })
 	// All channels' names come from the helper script (SysEx 18 via the bridge): as a list in this script
 	// they made every bank move about 0.25 s slower.
+	allTitlesForArmed = function () { return allTitles }
+	vcaTitles = function () { return viewLists[6] || [] }
 	onAllTitle = function (activeDevice, index, title) {
 		if (allTitles[index] === title) return
 		allTitles[index] = title
@@ -1057,6 +1076,7 @@ var followQuietUntil = 0
 		var list = viewLists[v] || (viewLists[v] = [])
 		if (list[index] === title) return
 		list[index] = title
+		if (v === 6) for (var a = 0; a < STRIPS; ++a) updateArmable(activeDevice, a)   // (VCAs can be armed)
 		if (!curView || curView.index !== v) return
 		reportBank(activeDevice)
 		if (title && title === currentTitle) pickCurrent(activeDevice)
@@ -1130,6 +1150,9 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x30 && m.length >= 8) {   // the bridge asks the script to move the bank: 30 <kind> <count>
+		// ARMED: kinds 5-8 page through the armed tracks (bank right / left, page right / left). The bank keys' own
+		// callback did not reach the script there (15.11.2026).
+		if (m[5] >= 5 && m[5] <= 8) { if (curView && curView.armed) armedPage(activeDevice, [STRIPS, -STRIPS, 1, -1][m[5] - 5]); return }
 		bankTrigger(activeDevice, m[5], m[6])
 		return
 	}
@@ -1148,6 +1171,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	} else if (m[4] === 0x19 && m.length >= 7) {
 		++listNamesSeen
 		onRecTitle(activeDevice, m[5], decodeName(m, 6))
+		armed.dirty = true
+		armedCountSend(activeDevice)
+	} else if (m[4] === 0x2F && m.length >= 8) {   // a recordable channel's record-enable (helper): the ARMED view
+		if (recArmed[m[5]] !== (m[6] === 1)) { recArmed[m[5]] = m[6] === 1; armed.dirty = true }
+		armedCountSend(activeDevice)
 	}
 }
 
@@ -1662,6 +1690,9 @@ eachPage(function (page, bankZone, view) {
 		var changed = curView !== view
 		useView(view)
 		if (changed) { out('[CubaseSixty] view: ' + view.label); followViewChanged(activeDevice) }
+		// ARMED again: the bridge forgot the dead strips when another view came, and Cubase put the page's zones back to
+		// the start (as it does every page's bank on activation): every strip laid out afresh.
+		if (view.armed) { armed.sentAll = []; armed.unused = []; view.pos = []; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x14, view.index, 0xF7]))   // the bridge: which view (its numbers, Q3)
 	}
 	page.mOnIdle = function (activeDevice, activeMapping) { pageIdle(activeDevice, activeMapping) }
@@ -1709,6 +1740,8 @@ function sendViewPoll(activeDevice) {
 }
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
+	if (armed.dirty && curView && curView.armed) { armed.dirty = false; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
+	if (curView && curView.armed) { armedIdle(activeDevice); armedCheck(activeDevice) }
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
 	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
@@ -1733,8 +1766,142 @@ var VIEWS = [
 	{ name: 'MIDI', label: 'MIDI', filters: ['includeMIDIChannels'] },
 	{ name: 'Groups', label: 'GROUPS', filters: ['includeGroupChannels'] },
 	{ name: 'FX', label: 'FX', filters: ['includeFXChannels'] },
-	{ name: 'VCA', label: 'VCA', filters: ['includeVCAChannels'] }
+	{ name: 'VCA', label: 'VCA', filters: ['includeVCAChannels'] },
+	// ARMED (step 6): each strip a bank zone of one channel of its own (the recordable types, the order of the helper's
+	// recordable list), moved by the script to the armed tracks; bank / page keys page through them (armedPage).
+	{ name: 'Armed', label: 'ARMED', armed: true, filters: ['includeVCAChannels'] }
 ]
+// ARMED's eight strip zones: the recordable types (as the helper's recordable list), each with a filter set of its own
+// that holds the same channels. Zones with the same filters move together (one bank, whatever their names: tried
+// 15.11.2026), so the page's own zone (the bank keys are bound to it) is VCA only, and the strips' differ by excludes
+// of types they do not include anyway.
+var REC_INCLUDES = ['includeAudioChannels', 'includeInstrumentChannels', 'includeSamplerChannels', 'includeMIDIChannels']
+// (15.11.2026: excludes of inputs / outputs on top of includes count for nothing, those zones moved with the plain
+// includes one; group / FX / VCA ones separate. The helper's recordable list uses the same includes: an exclude-style
+// list held one channel more, so the positions were off by one.)
+var ARMED_ZONE_FILTERS = []
+for (var azf = 0; azf < 8; ++azf) {
+	var fl = REC_INCLUDES.slice()
+	if (azf & 1) fl.push('excludeGroupChannels')
+	if (azf & 2) fl.push('excludeFXChannels')
+	if (azf & 4) fl.push('excludeVCAChannels')
+	ARMED_ZONE_FILTERS.push(fl)
+}
+// The ARMED view: which recordable channels are armed (helper SysEx 2F, by its recordable slot), which of them the strips
+// start at, where each strip's one-channel zone is (pos, its slot), and which strips have no armed track (unused: name
+// blank; the zone stays where it was).
+var recArmed = []
+var armed = { offset: 0, unused: [], dirty: false, sentAll: [] }
+// A recordable slot's place in the full list: both lists are in the MixConsole's order, so the slot's name is matched
+// slot by slot from the top (as the helper matches its numbers).
+function recToAll(slot) {
+	var all = allTitlesForArmed(), j = 0
+	for (var i = 0; i <= slot; ++i) {
+		while (j < all.length && all[j] !== recTitles[i]) ++j
+		if (j >= all.length) return -1
+		if (i < slot) ++j
+	}
+	return j
+}
+function armedList() {
+	var list = []
+	for (var s = 0; s < REC_CHANNELS; ++s) if (recArmed[s] && recTitles[s]) list.push(s)
+	return list
+}
+function armedLayout(activeDevice) {
+	var view = curView
+	if (!view || !view.armed || !skAm) return
+	var list = armedList()
+	if (armed.offset >= list.length) armed.offset = Math.max(0, Math.floor((list.length - 1) / STRIPS) * STRIPS)
+	var t0 = Date.now(), moves = 0
+	// First each strip's track in the full list (SysEx 32 <strip> <index hi> <index lo>, 7F 7F = none): the bridge's
+	// numbers and SSL plug-in names go by it, and it drops what Cubase sends for a strip without one (dead). Before the
+	// moves, so what Cubase sends for a strip that has a track again is not dropped.
+	for (var n = 0; n < STRIPS; ++n) {
+		var at = list[armed.offset + n] === undefined ? -1 : recToAll(list[armed.offset + n])
+		if (armed.sentAll[n] === at) continue
+		armed.sentAll[n] = at
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x32, n], at < 0 ? [0x7F, 0x7F] : [(at >> 7) & 0x7F, at & 0x7F], [0xF7]))
+	}
+	for (var k = 0; k < STRIPS; ++k) {
+		var slot = list[armed.offset + k]
+		var unused = slot === undefined
+		var target = unused ? (view.pos[k] >= 0 ? view.pos[k] : 0) : slot
+		// A strip with a track again, its zone already there: moved away and back, so Cubase sends its values again (the
+		// bridge dropped them while the strip was dead).
+		var revive = armed.unused[k] === true && !unused && view.pos[k] === target
+		if (view.pos[k] !== target || revive) {
+			var a = view.zones[k].mAction
+			if (revive && target === 0) { a.mShiftRight.trigger(skAm); a.mResetBank.trigger(skAm); moves += 2 }
+			else {
+				if (!(view.pos[k] >= 0) || target <= view.pos[k]) { a.mResetBank.trigger(skAm); view.pos[k] = 0; ++moves }
+				while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
+			}
+		}
+		if (armed.unused[k] !== unused) {
+			armed.unused[k] = unused
+			// The bridge blanks a strip without a track and drops what comes for it: what this script last sent there
+			// (dB, pan) is not on it any more, so it is sent again, not skipped as unchanged (vox2 came back without
+			// its dB value, 15.11.2026).
+			if (flipResets[k]) flipResets[k](unused ? null : activeDevice)
+			paintStripName(activeDevice, k)
+		}
+	}
+	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
+	if (moves) armed.checkAt = Date.now() + 600
+}
+// 0.6 s after the strips moved: their fader positions sent again from what Cubase gave them (the motors did not always
+// follow the move, 15.11.2026).
+function armedCheck(activeDevice) {
+	if (!armed.checkAt || Date.now() < armed.checkAt) return
+	armed.checkAt = 0
+	for (var f = 0; f < STRIPS; ++f) if (!armed.unused[f] && faderPosResend[f]) faderPosResend[f](activeDevice)
+}
+// A track selected: Cubase scrolls every zone of the page to show it, so all eight one-channel zones jumped to the
+// selected track (15.11.2026). The UF8 held (SysEx 13 01), then 0.3 s later every strip laid out afresh, and shown
+// 0.4 s after that (13 00).
+// Only a real change: Cubase reports the selected track again after every layout (the zones moved), which made this a
+// loop, the UF8 held all the time (15.11.2026).
+function armedSelectionMoved(activeDevice, title) {
+	if (title === armed.selTitle) return
+	var first = armed.selTitle === undefined
+	armed.selTitle = title
+	if (first) return   // (the page's first report: nothing has moved)
+	// Follow the selection: an armed track off the strips, its page of eight (by name).
+	var list = armedList()
+	for (var i = 0; i < list.length; ++i) {
+		if (recTitles[list[i]] !== title) continue
+		if (i < armed.offset || i >= armed.offset + STRIPS) armed.offset = Math.min(i - (i % STRIPS), Math.max(0, list.length - STRIPS))
+		break
+	}
+	if (!armed.relayoutAt) sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 1, 0xF7]))
+	armed.relayoutAt = Date.now() + 300
+	armed.showAt = 0
+}
+function armedIdle(activeDevice) {
+	var now = Date.now()
+	if (armed.relayoutAt && now >= armed.relayoutAt) {
+		armed.relayoutAt = 0
+		curView.pos = []
+		try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) }
+		armed.showAt = now + 400
+	}
+	if (armed.showAt && now >= armed.showAt) { armed.showAt = 0; sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 0, 0xF7])) }
+}
+// How many are armed, for the picker (it darkens ARMED with none): SysEx 33 <count hi> <count lo>, on change.
+function armedCountSend(activeDevice) {
+	var count = armedList().length
+	if (count === armed.countSent) return
+	armed.countSent = count
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x33, (count >> 7) & 0x7F, count & 0x7F, 0xF7]))
+}
+function armedPage(activeDevice, step) {
+	var n = armedList().length
+	var to = Math.max(0, Math.min(armed.offset + step, Math.max(0, n - STRIPS)))   // (at the end: the last one on strip 8)
+	if (to === armed.offset) return
+	armed.offset = to
+	armedLayout(activeDevice)
+}
 var viewKeys = []
 for (var vk = 0; vk < VIEWS.length; ++vk) {
 	viewKeys.push(cmdButton())
@@ -1755,6 +1922,22 @@ function useView(view) {
 		var bankZone = page.mHostAccess.mMixConsole.makeMixerBankZone()
 		for (var f = 0; f < VIEWS[v].filters.length; ++f) bankZone[VIEWS[v].filters[f]]()
 		var view = { index: v, name: VIEWS[v].name, label: VIEWS[v].label, page: page, bankZone: bankZone }
+		if (VIEWS[v].armed) {
+			// One zone per strip; the page's own bank zone (above) gets no channels: the bank and page keys are bound to
+			// it there and move nothing shown (armedPage does the paging).
+			view.armed = true
+			view.zones = []
+			view.pos = []
+			for (var zk = 0; zk < STRIPS; ++zk) {
+				var z = page.mHostAccess.mMixConsole.makeMixerBankZone('ARMED strip ' + (zk + 1))
+				for (var zf = 0; zf < ARMED_ZONE_FILTERS[zk].length; ++zf) z[ARMED_ZONE_FILTERS[zk][zf]]()
+				view.zones.push(z)
+			}
+			bankZone = (function (zones, actions) {
+				var n = 0
+				return { makeMixerBankChannel: function () { return zones[n++].makeMixerBankChannel() }, mAction: actions }
+			})(view.zones, bankZone.mAction)
+		}
 		for (var b = 0; b < pageBuilders.length; ++b) pageBuilders[b](page, bankZone, view)
 		views.push(view)
 	}

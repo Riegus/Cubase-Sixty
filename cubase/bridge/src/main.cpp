@@ -124,17 +124,23 @@ std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle m
 // view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 opens the picker: the top
 // soft keys are the views (the current one lit), a press switches and closes it, Q3 again closes it unchanged.
 // Q3 is lit while a view other than ALL is on.
-constexpr int kViewCount = 7;
-constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA" };
+constexpr int kViewCount = 8;
+constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA", "ARMED" };
 std::atomic<int> g_uf8View{0};
+std::array<std::atomic<bool>, 8> g_dead{};   // ARMED: strips without an armed track (see armedBlank)
+// The SOLO / CUT / SEL state Cubase last sent per strip, also while the strip was empty (not shown then): shown when a
+// track's name arrives there (15.11.2026: back from ARMED, strip 8's SEL came before its name and was lost).
+std::array<std::array<std::atomic<bool>, 3>, 8> g_ledWant{};
 std::atomic<bool> g_viewPick{false};
 std::atomic<int> g_viewPickGen{0};
 void switchView(int v);
 std::mutex g_numMx;
 // The filtered views' (1-6) numbers by position in the view's list (helper SysEx 1F), and which positions hold a
 // channel (helper 1E, passed on to the UF8 script): the picker dims a view with none. Both under g_numMx.
-std::vector<int> g_viewNumber[7];
-std::vector<bool> g_viewHas[7];
+std::vector<int> g_viewNumber[kViewCount];
+std::array<int, 8> g_armedAll{-1, -1, -1, -1, -1, -1, -1, -1};   // ARMED: each strip's track in the full list (SysEx 32)
+int g_armedCount = -1;   // how many tracks are armed (SysEx 33; -1 not known): the picker darkens ARMED with none
+std::vector<bool> g_viewHas[kViewCount];   // (ARMED, 7: none, the script lays its strips out itself)
 int viewChannels(int v)   // (g_numMx held)
 {
     int n = 0;
@@ -397,6 +403,9 @@ void switchView(int v)
     const bool same = g_uf8View.exchange(v) == v;
     std::printf("UF8 view: %s%s\n", kViewNames[v], same ? " (already on)" : "");
     if (same) return;
+    // Leaving ARMED: its dead strips live again at once (Cubase sends the new page's LEDs before the script reports
+    // the view: Audio FX's SEL was dropped, 15.11.2026).
+    if (v != 7) for (auto& d : g_dead) d = false;
     note2(uint8_t(100 + v));
     std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
 }
@@ -427,6 +436,17 @@ void handleFrame(const uf8frames::Frame& fr)
     else if (d[1] == 0x20) { if (d[4] != 0 && cs::sleep::activity(true, "UF8 fader touch")) return; }
     else if (d[1] == 0x24) { if (cs::sleep::activity(true, "UF8 V-pot / encoder")) return; }
     else if (d[1] == 0x22) { if (cs::sleep::key(0, d[3], d[5] == 0x01, "UF8 key")) return; }
+    // The ARMED view: a strip without an armed track still has a channel behind it (its one-channel zone stays where it
+    // was, blanked): nothing from the hand reaches it.
+    if (g_uf8View == 7) {
+        int st = -1;
+        if (d[1] == 0x21 || d[1] == 0x20 || d[1] == 0x24) st = d[3] < kStrips ? d[3] : -1;
+        else if (d[1] == 0x22) {
+            if (d[3] >= 0x08 && d[3] <= 0x0F) st = d[3] - 0x08;   // V-pot pushes
+            else if (auto n = buttonToNote(d[3])) { if ((*n >= 8 && *n < 40) || (*n >= 48 && *n < 56)) st = *n % 8; }
+        }
+        if (st >= 0 && g_stripEmpty[st]) return;
+    }
     switch (d[1]) {
     case 0x21: {   // fader position: FF 21 03 strip lsb msb ck
         const uint8_t s = d[3];
@@ -731,6 +751,14 @@ void handleFrame(const uf8frames::Frame& fr)
             // connect (at start, and when the UF8 is plugged in again).
             const bool foot = (*n == 62 || *n == 63);
             if (foot && std::chrono::steady_clock::now() - g_uf8ConnectedAt.load() < std::chrono::seconds(4)) break;
+            // ARMED: the bank / page keys page through the armed tracks, by the script (SysEx 30, kinds 5-8).
+            if (g_uf8View == 7 && (*n == kNoteBankRight || *n == kNoteBankLeft || *n == 44 || *n == 45)) {
+                if (pressed) {
+                    const uint8_t kind = *n == kNoteBankRight ? 5 : *n == kNoteBankLeft ? 6 : *n == 45 ? 7 : 8;
+                    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x30, kind, 1, 0xF7});
+                }
+                break;
+            }
             if (*n == kNoteBankRight && userBankRight(pressed)) break;
             note(*n, pressed);
             if (pressed && *n >= kNoteAutoOff && *n <= kNoteAutoTouch) cs::autoModePressed(*n);
@@ -877,9 +905,8 @@ void setLed(int strip, int cls, bool on)
         if (strip >= 0 && strip < 8) {
             g_selOn[strip] = on;
             paintSel(strip);
-            // Which strips are selected, as SSL 360 and Rea-Sixty send it on every selection change (cap33). Not sent
-            // before 15.11.2026; tried for the UF1's look of the colour bar (its number box dimmed), which the UF1 may
-            // draw because its track is the selected one.
+            // Which strips are selected, as SSL 360 and Rea-Sixty send it on every selection change (cap33). Sent since
+            // 15.11.2026, for the UF1's look of the colour bar (the selected strip's number box dimmed).
             uint16_t mask = 0;
             for (int i = 0; i < 8; ++i) if (g_selOn[i]) mask |= uint16_t(1u << i);
             g_dev.send(uf8::buildSelectedStripBitmask(mask));
@@ -911,6 +938,10 @@ void setLed(int strip, int cls, bool on)
     }
 }
 
+// REC / AUTO: solid colours (bright and dim bytes the same), as Rea-Sixty's ledColourFor: the firmware's selected-strip
+// mask (FF 66, sent on every selection change since 15.11.2026) and the on flag then cannot change how they look. With
+// a dim track colour and the on flag, REC's "can arm" showed as bright as armed outside the selected strip.
+const uf8::LedColour kSelDark{0x00, 0xF0, 0x00, 0xF0};   // no colour (cap41 00 F0)
 void paintSel(int strip)
 {
     if (strip < 0 || strip >= kStrips) return;
@@ -920,13 +951,13 @@ void paintSel(int strip)
         // As the top soft keys: dark where the track cannot be armed, dim red where it can, red when armed.
         const bool can = !g_noRec[strip] && !g_stripEmpty[strip];
         const bool armed = can && g_recOn[strip];
-        sendLedFrames(can ? uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true,
-                                                    armed ? uf8::ledColourRed() : uf8::ledColourForTrackRgb(0x5A0000))
-                          : uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, false, uf8::ledColourRed()));
+        sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true,
+            !can ? kSelDark : armed ? uf8::ledColourRedBrightSolid() : uf8::ledColourRedDimSolid()));
         return;
     }
-    const bool on = g_autoW[strip].load();
-    sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, on && !g_stripEmpty[strip], uf8::ledColourRed()));
+    // AUTO: red with Write on, dim red without (as before: red's dim bytes), dark without a track.
+    sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true, g_stripEmpty[strip] ? kSelDark
+        : g_autoW[strip] ? uf8::ledColourRedBrightSolid() : uf8::ledColourRedDimSolid()));
 }
 void paintSoftKeys()
 {
@@ -937,7 +968,8 @@ void paintSoftKeys()
         {
             // A view without channels (the helper's lists): its key dark (still a key: the list may not be in yet).
             std::lock_guard<std::mutex> lk(g_numMx);
-            for (int v = 1; v < kViewCount; ++v) empty[v] = !g_viewHas[v].empty() && viewChannels(v) == 0;   // (nothing heard: not known)
+            for (int v = 1; v < 7; ++v) empty[v] = !g_viewHas[v].empty() && viewChannels(v) == 0;   // (nothing heard: not known)
+            empty[7] = g_armedCount == 0;
         }
         for (int s = 0; s < kStrips; ++s) {
             sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s >= kViewCount ? uf8::TopSoftKeyState::Off
@@ -1061,7 +1093,11 @@ void paintStripNumbers(bool force = false)
         const size_t i = size_t(offset + s);
         const int view = g_uf8View;
         const std::vector<int>& numbers = view > 0 && view < 7 ? g_viewNumber[view] : g_chanNumber;   // the view's list
-        if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < numbers.size() && numbers[i] > 0)
+        if (view == 7) {   // ARMED: by each strip's place in the full list, from the script
+            const int a = g_armedAll[s];
+            if (g_projectOpen && a >= 0 && !g_stripEmpty[s] && size_t(a) < g_chanNumber.size() && g_chanNumber[a] > 0)
+                t = std::to_string(number = g_chanNumber[a]);
+        } else if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < numbers.size() && numbers[i] > 0)
             t = std::to_string(number = numbers[i]);
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
@@ -1192,11 +1228,47 @@ void uf8ProjectOpen()
 
 void uf8NoProject();
 void uf8IdleText(int kind);
+// ARMED: a strip without an armed track is dead. Its one-channel zone still has a channel behind it (where it was),
+// so what Cubase sends for that strip is dropped, and the strip is blanked once: name, colour, dB, meter, value line,
+// LEDs off, fader down (15.11.2026: with only the name blank, the first armed track's meter, CUT and fader showed).
+int stripOfMsg(const std::vector<unsigned char>& m)
+{
+    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D) {
+        switch (m[4]) {
+            case 0x01: case 0x02: case 0x06: case 0x07: case 0x0C: case 0x0D: case 0x0E: case 0x20: case 0x26: case 0x27:
+                return m[5] < kStrips ? m[5] : -1;
+            default: return -1;
+        }
+    }
+    if (m.size() < 3) return -1;
+    const uint8_t st = m[0] & 0xF0;
+    if (st == 0xE0) return (m[0] & 0x0F) < kStrips ? (m[0] & 0x0F) : -1;
+    if (st == 0xB0 && m[1] >= kCcMeter && m[1] < kCcMeter + 2 * kStrips) return (m[1] - kCcMeter) % kStrips;
+    if ((st == 0x90 || st == 0x80 || st == 0xA0) && m[0] == st) {   // (MIDI channel 1: the strips' keys)
+        const int n = m[1];
+        if ((n >= 8 && n < 32) || (n >= 48 && n < 56) || (n >= 64 && n < 72) || (n >= 112 && n < 120)) return n % 8;
+    }
+    return -1;
+}
+void armedBlank(int s)
+{
+    std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
+    std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
+    std::vector<unsigned char> db{0xF0, 0x7D, 0x52, 0x36, 0x0C, uint8_t(s), 0xF7};
+    std::vector<unsigned char> ml{0xB0, uint8_t(kCcMeter + s), 0}, mr{0xB0, uint8_t(kCcMeter + kStrips + s), 0};
+    for (auto* v : {&name, &colour, &db, &ml, &mr}) onMidiIn(*v);
+    g_panLine[s].clear();
+    g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
+    for (int cls = 0; cls < 4; ++cls) setLed(s, cls, false);
+    for (auto& w : g_ledWant[s]) w = false;
+    if (!g_touched[s]) driveFader(s, 0);
+}
 void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
     if (cs::scriptLogSysex(m.data(), m.size())) return;
+    if (const int ds = stripOfMsg(m); ds >= 0 && g_dead[ds]) return;   // ARMED: a strip without a track
     // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
         g_projectOpen = m[5] != 0;
@@ -1248,6 +1320,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 g_stripEmpty[n->strip] = false;
                 const std::string& v = g_dbText[n->strip];
                 g_dev.send(uf8::buildFaderDbReadout(uint8_t(n->strip), v, v.empty() ? "" : "dB"));
+                for (int cls = 0; cls < 3; ++cls) if (g_ledWant[n->strip][cls]) setLed(n->strip, cls, true);
             }
             if (t.empty()) {
                 // An empty strip (past the last track): Cubase stops sending its meter and level, so clear
@@ -1333,9 +1406,20 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_bankTotal = v(5);
             g_bankOffset = v(7);
             paintStripNumbers();
+        } else if (m.size() >= 9 && m[4] == 0x32 && m[5] < kStrips) {   // ARMED: a strip's track in the full list
+            const int s = m[5], a = (m[6] == 0x7F && m[7] == 0x7F) ? -1 : (m[6] << 7) | m[7];
+            g_armedAll[s] = a;
+            const bool dead = g_uf8View == 7 && a < 0;
+            if (dead && !g_dead[s]) { armedBlank(s); g_dead[s] = true; }
+            else if (!dead) g_dead[s] = false;
+            paintStripNumbers();
+        } else if (m.size() >= 8 && m[4] == 0x33) {   // how many tracks are armed (the picker)
+            { std::lock_guard<std::mutex> lk(g_numMx); g_armedCount = (m[5] << 7) | m[6]; }
+            if (g_viewPick) paintSoftKeys();
         } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
             const int v = m[5] < kViewCount ? m[5] : 0;
             if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+            if (v != 7) for (auto& d : g_dead) d = false;   // (ARMED's dead strips live again in another view)
             paintStripNumbers(true);
             paintSoftKeys();   // Q3's LED, the picker
         } else if (m.size() >= 6 && m[4] == 0x11) {
@@ -1551,6 +1635,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         }
         if (auto t = noteToLed(m[1])) {
             const bool on = status != 0x80 && m[2] > 0;
+            if (t->cls <= 2 && t->strip >= 0 && t->strip < kStrips) g_ledWant[t->strip][t->cls] = on;
             if (on && t->cls <= 2 && t->strip >= 0 && t->strip < kStrips && g_stripEmpty[t->strip]) return;   // empty strip stays dark
             setLed(t->strip, t->cls, on);
         }
@@ -1842,7 +1927,7 @@ int main(int argc, char** argv)
             }
             if (countChanged && g_viewPick) paintSoftKeys();
         }
-        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19 && msg[4] != 0x1E)) return;
+        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19 && msg[4] != 0x1E && msg[4] != 0x2F)) return;
         std::lock_guard<std::mutex> lk(g_outMx);
         try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
     });
