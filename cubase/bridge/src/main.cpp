@@ -258,10 +258,48 @@ std::array<std::atomic<bool>, 8> g_stripFader{};
 std::array<std::atomic<bool>, 8> g_stripPan{};   // the V-pot on the strip's pan (turns as 28, push as 29)
 std::array<std::atomic<int>, 8> g_volPb{-1, -1, -1, -1, -1, -1, -1, -1};
 std::array<std::atomic<int>, 8> g_handHw{};   // the hand's last fader position, in the motor's units
-void driveFader(int s, uint16_t v14)
+// The faders on the UF8's printed dB scale (15.11.2026; before, Cubase's position went straight onto the motor and
+// -14 dB sat near the "30" mark). A level (track volume, a send) goes Cubase position -> dB (Cubase's curve,
+// cs::levelDbOf) -> motor position (the marks below, measured on the hardware: each mark's position when a fader was
+// set on it), and the hand back the same way. Pan (FLIP) and an SSL strip's fader (Strip Mode) stay linear. Rea-Sixty
+// does the same with REAPER's slider law and a calibration table (pbToLinearVolume).
+struct Uf8Mark { double db; int pb; };
+constexpr Uf8Mark kUf8Marks[] = {
+    {12, 15583}, {6, 14108}, {0, 12593}, {-5, 10961}, {-10, 9380}, {-20, 7168}, {-30, 5487}, {-40, 3585}, {-60, 1922},
+};
+constexpr double kUf8BottomDb = -100.0;   // below -60 straight on to the bottom (the scale's "infinity")
+int dbToMotor(double db)
 {
+    if (db >= kUf8Marks[0].db) return kUf8Marks[0].pb;
+    for (size_t i = 1; i < std::size(kUf8Marks); ++i) {
+        if (db < kUf8Marks[i].db) continue;
+        const auto& a = kUf8Marks[i - 1];
+        const auto& b = kUf8Marks[i];
+        return int(std::lround(b.pb + (a.pb - b.pb) * (db - b.db) / (a.db - b.db)));
+    }
+    const auto& last = kUf8Marks[std::size(kUf8Marks) - 1];
+    if (db <= kUf8BottomDb) return 0;
+    return int(std::lround(last.pb * (db - kUf8BottomDb) / (last.db - kUf8BottomDb)));
+}
+double motorToDb(int pb)
+{
+    if (pb <= 0) return -200.0;
+    if (pb >= kUf8Marks[0].pb) return kUf8Marks[0].db;
+    for (size_t i = 1; i < std::size(kUf8Marks); ++i) {
+        if (pb < kUf8Marks[i].pb) continue;
+        const auto& a = kUf8Marks[i - 1];
+        const auto& b = kUf8Marks[i];
+        return b.db + (a.db - b.db) * double(pb - b.pb) / double(a.pb - b.pb);
+    }
+    const auto& last = kUf8Marks[std::size(kUf8Marks) - 1];
+    return kUf8BottomDb + (last.db - kUf8BottomDb) * double(pb) / double(last.pb);
+}
+// db: v14 is a level (Cubase's curve), placed by dB; else linear.
+void driveFader(int s, uint16_t v14, bool db = false)
+{
+    const uint16_t pb = db ? uint16_t(dbToMotor(cs::levelDbOf(v14))) : midi14ToPb(v14);
     std::vector<std::vector<uint8_t>> frames;
-    { std::lock_guard<std::mutex> lk(g_faderMx); frames = uf8fader::drive(uint8_t(s), midi14ToPb(v14), g_engaged[s]); }
+    { std::lock_guard<std::mutex> lk(g_faderMx); frames = uf8fader::drive(uint8_t(s), pb, g_engaged[s]); }
     for (auto& f : frames) g_dev.send(std::move(f));
 }
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
@@ -386,7 +424,9 @@ void handleFrame(const uf8frames::Frame& fr)
         const uint16_t pb14 = uint16_t((d[4] & 0x7F) | ((d[5] & 0x7F) << 7));
         const auto r = uf8fader::read(pb14, (d[4] & 0x80) != 0, /*grabValid=*/false);
         if (!r.usable) return;
-        const uint16_t v = pbToMidi14(r.pbOut);
+        // A level (volume, or a send in a fader send view) by dB; pan (FLIP) and an SSL strip's fader linear.
+        const bool dbScale = g_routeSend >= 0 || (!g_stripFader[s] && !g_routeFlip);
+        const uint16_t v = dbScale ? uint16_t(std::clamp(cs::levelPosOf(motorToDb(r.pbOut)), 0, 16383)) : pbToMidi14(r.pbOut);
         g_handHw[s] = r.pbOut;   // (the motor's own units: the fader-scale calibration logs it on release)
         // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
         if (g_stripFader[s] || g_routeSend >= 0) sendHandToScript(s, v);
@@ -413,8 +453,10 @@ void handleFrame(const uf8frames::Frame& fr)
         const uint8_t s = d[3];
         if (s >= kStrips) return;
         const bool down = d[4] != 0;
-        // (Fader scale calibration, 15.11.2026: where a fader was let go, in the motor's units, 0-15583.)
-        if (!down && g_touched[s]) std::printf("UF8 fader %d let go at %d (motor units, top 15583)\n", s + 1, g_handHw[s].load());
+        // (Trace: where a fader was let go, in the motor's units 0-15583, and as dB on the printed scale. The marks in
+        // kUf8Marks were measured with this.)
+        if (!down && g_touched[s] && g_trace8)
+            std::printf("UF8 fader %d let go at %d (motor units, top 15583) = %.1f dB on the scale\n", s + 1, g_handHw[s].load(), motorToDb(g_handHw[s]));
         g_touched[s] = down;
         if (down) {
             { std::lock_guard<std::mutex> lk(g_faderMx); g_engaged[s] = false; }
@@ -1083,7 +1125,7 @@ void uf8NoProject()
         // The faders go to 0 dB (13.11.2026; to the bottom all eight at once was loud, 10.11.2026, and then they stayed
         // where they were). Driven, not passed through onMidiIn: the cache keeps Cubase's values, which go back when
         // the project opens.
-        if (const int z = cs::fader0dbPos(); z >= 0 && !g_touched[s]) driveFader(s, uint16_t(z));
+        if (const int z = cs::fader0dbPos(); z >= 0 && !g_touched[s]) driveFader(s, uint16_t(z), true);
         onMidiIn(name);
         onMidiIn(colour);
         g_panLine[s].clear();
@@ -1373,7 +1415,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             const int s = m[5];
             g_stripFader[s] = m[6] != 0;
             g_stripPan[s] = m.size() >= 9 && m[7] == 1;
-            if (!g_stripFader[s] && g_volPb[s] >= 0 && !g_touched[s]) driveFader(s, uint16_t(g_volPb[s].load()));
+            if (!g_stripFader[s] && g_volPb[s] >= 0 && !g_touched[s]) driveFader(s, uint16_t(g_volPb[s].load()), !g_routeFlip);
         } else if (m.size() >= 10 && m[4] == 0x16 && m[5] < kStrips) {
             // A settled send level from the fader send view: its exact position and Cubase's text, for the level curve.
             std::string t(m.begin() + 8, m.end() - 1);
@@ -1392,7 +1434,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (g_stripFader[s] && !g_touched[s]) {
                 if (nowMs8() - g_handAt[s] < 3000 && std::abs(pos - g_handPos[s]) > 64)
                     std::printf("UF8 fader %d: late position %d from Cubase ignored (hand at %d)\n", s + 1, pos, g_handPos[s].load());
-                else driveFader(s, uint16_t(pos));
+                else driveFader(s, uint16_t(pos), g_routeSend >= 0);   // (a send level by dB; an SSL strip's fader linear)
             }
         } else if (m.size() >= 7 && m[4] == 0x0D && m[5] < kStrips) {
             // A send level on the V-pot (the selected track's sends): "Send" left, the level right.
@@ -1482,7 +1524,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         g_volPb[s] = v;
         if (!g_routeFlip && !g_stripFader[s] && !g_noProject) cs::fader0dbSeen(g_dbText[s], v);
         if (g_touched[s] || g_stripFader[s]) return;   // hand wins; strip mode: the strip's fader drives it
-        driveFader(s, v);
+        driveFader(s, v, !g_routeFlip);   // (volume by dB; pan under FLIP linear)
         return;
     }
     // LED feedback: note on / note off, plus polyphonic aftertouch (Cubase sends
