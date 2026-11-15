@@ -115,7 +115,7 @@ Starts with its own spike. Two candidate routes:
 
 ### 7. Settings and docs
 
-**Done (15.11.2026, branch wip-views-settings).** Settings > UF8 track views: the view at start (ALL by default, any view, or "the last view used", kept in uf8-1-last-view.txt) and the views the picker offers (one switch per view; one switched off is dark and does nothing). The keys have the unit's number (`uf8-1-...`), so a second UF8 gets its own. The start view is applied 3 s after a project opens, if the UF8 is on ALL then. The user guide has a section "Track views". The test checklist, the protocol and this plan are updated.
+**Done (15.11.2026, branch wip-views-settings).** Settings > UF8 track views: the view at start (ALL by default, any view, or "the last view used", kept in uf8-1-last-view.txt) and the views the picker offers (one switch per view; one switched off is dark and does nothing). The keys have the unit's number (`uf8-1-...`), so a second UF8 gets its own. The start view is applied when a project opens, by the script before its start-up follow (SysEx 34); also ALL, as Cubase opens the UF8 on the page it was last on (fixed 15.11.2026: with ALL set, it stayed on INSTR). The user guide has a section "Track views". The test checklist, the protocol and this plan are updated.
 
 
 - Settings: which views the picker offers, and the view at start-up (ALL, or the last one).

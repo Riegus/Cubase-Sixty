@@ -1321,17 +1321,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
             uf8ProjectOpen();
             // The view at start (settings): at once to the script (SysEx 34 <view>), which activates that page itself
             // before its start-up follow banks (15.11.2026: on ALL first, it banked there and again in the start view
-            // 3 s later). If the UF8 is still on ALL 3 s later, the bridge switches (a view picked meanwhile, or kept
-            // across a project change, stays).
-            if (const int v = startView(); v > 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x34, uint8_t(v), 0xF7});
-            static std::atomic<int> gen{0};
-            const int g = ++gen;
-            std::thread([g] {
-                std::this_thread::sleep_for(std::chrono::seconds(3));
-                if (g != gen || !g_projectOpen || g_uf8View != 0) return;
-                const int v = startView();
-                if (v > 0) { std::printf("UF8 view at start: %s (settings; the bridge switched)\n", kViewNames[v]); switchView(v); }
-            }).detach();
+            // 3 s later). Sent for ALL too: Cubase opens the UF8 on the page it was last on (INSTR, with ALL set; seen
+            // 15.11.2026), so the script switches whenever that is not the start view. The script takes it only in its
+            // first 10 s after a project opened, so a bridge restart (its scripts announce themselves again) leaves the
+            // view as it is.
+            sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x34, uint8_t(startView()), 0xF7});
         }
         // (Always logged: the tray app shows it.)
         std::printf("Cubase: %s\n", m[5] ? "project open" : "no project (the Hub)");
