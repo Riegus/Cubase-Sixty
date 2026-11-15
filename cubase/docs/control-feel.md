@@ -50,7 +50,9 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   and then, and the dB field did not follow the fader).
 - **The fader send view's dB field** (15.11.2026): drawn by the bridge from the send level curve while the hand moves
   the fader, as the V-pot send view's value line; the script's text is held back until 0.5 s after the hand, and the
-  last one shown then. Before, it followed the fader late (Cubase's text, one poll behind).
+  last one shown then. Before, it followed the fader late (Cubase's text, one poll behind). The curve learns from the
+  fader view too: a level still for ~0.5 s is sent with its exact position (SysEx 16), so the correction when the hand
+  stops gets smaller with use.
 - **Where it is used.** UF1 V-pots in DAW / SENDS (turns on CC 21–24 to custom values); UF8 fader send view and
   V-pot send view (the strip-mode messages 25–29); the same path as SSL Strip Mode.
 

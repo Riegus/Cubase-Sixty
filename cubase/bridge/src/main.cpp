@@ -1222,6 +1222,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_stripFader[s] = m[6] != 0;
             g_stripPan[s] = m.size() >= 9 && m[7] == 1;
             if (!g_stripFader[s] && g_volPb[s] >= 0 && !g_touched[s]) driveFader(s, uint16_t(g_volPb[s].load()));
+        } else if (m.size() >= 10 && m[4] == 0x16 && m[5] < kStrips) {
+            // A settled send level from the fader send view: its exact position and Cubase's text, for the level curve.
+            std::string t(m.begin() + 8, m.end() - 1);
+            if (t.find("dB") == std::string::npos) t += "dB";
+            cs::uf1LearnLevel((m[6] << 7) | m[7], t);
         } else if (m.size() >= 9 && m[4] == 0x27 && m[5] < kStrips) {
             const int s = m[5];
             if (g_stripFader[s] && !g_touched[s]) driveFader(s, uint16_t((m[6] << 7) | m[7]));

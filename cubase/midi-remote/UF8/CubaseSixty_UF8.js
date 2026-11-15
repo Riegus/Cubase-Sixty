@@ -1562,6 +1562,12 @@ function sendViewPoll(activeDevice) {
 				--st.fSettle
 				var ft = daText(skDa[i], st.fObj, st.fTag)
 				if (ft !== st.fTextPolled) { st.fTextPolled = ft; stripFaderShow(activeDevice, i) }
+				// Settled (~0.5 s still): the exact level with its text, for the bridge's send level curve (SysEx 16),
+				// so its own drawing while the hand moves gets closer and the correction at the end smaller.
+				if (st.fSettle === 0 && st.fKind === 'send' && ft) {
+					var p14 = Math.round(Math.max(0, Math.min(1, v)) * 16383)
+					sendMidi(activeDevice, SYSEX_HEADER.concat([0x16, i, (p14 >> 7) & 0x7F, p14 & 0x7F], toAscii7(ft), [0xF7]))
+				}
 			}
 		}
 		if (st.panOn && st.vKind === 'plugin' && st.vObj >= 0) {
