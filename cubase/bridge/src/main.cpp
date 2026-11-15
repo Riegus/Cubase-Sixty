@@ -128,6 +128,9 @@ constexpr int kViewCount = 8;
 constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA", "ARMED" };
 std::atomic<int> g_uf8View{0};
 std::array<std::atomic<bool>, 8> g_dead{};   // ARMED: strips without an armed track (see armedBlank)
+// The SOLO / CUT / SEL state Cubase last sent per strip, also while the strip was empty (not shown then): shown when a
+// track's name arrives there (15.11.2026: back from ARMED, strip 8's SEL came before its name and was lost).
+std::array<std::array<std::atomic<bool>, 3>, 8> g_ledWant{};
 std::atomic<bool> g_viewPick{false};
 std::atomic<int> g_viewPickGen{0};
 void switchView(int v);
@@ -1189,6 +1192,7 @@ void armedBlank(int s)
     g_panLine[s].clear();
     g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
     for (int cls = 0; cls < 4; ++cls) setLed(s, cls, false);
+    for (auto& w : g_ledWant[s]) w = false;
     if (!g_touched[s]) driveFader(s, 0);
 }
 void onMidiIn(std::vector<unsigned char>& msg)
@@ -1248,6 +1252,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 g_stripEmpty[n->strip] = false;
                 const std::string& v = g_dbText[n->strip];
                 g_dev.send(uf8::buildFaderDbReadout(uint8_t(n->strip), v, v.empty() ? "" : "dB"));
+                for (int cls = 0; cls < 3; ++cls) if (g_ledWant[n->strip][cls]) setLed(n->strip, cls, true);
             }
             if (t.empty()) {
                 // An empty strip (past the last track): Cubase stops sending its meter and level, so clear
@@ -1559,6 +1564,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         }
         if (auto t = noteToLed(m[1])) {
             const bool on = status != 0x80 && m[2] > 0;
+            if (t->cls <= 2 && t->strip >= 0 && t->strip < kStrips) g_ledWant[t->strip][t->cls] = on;
             if (on && t->cls <= 2 && t->strip >= 0 && t->strip < kStrips && g_stripEmpty[t->strip]) return;   // empty strip stays dark
             setLed(t->strip, t->cls, on);
         }
