@@ -65,6 +65,8 @@ Test: each view shows only its track type. Banking, fader modes, sends, SOLO / C
 
 Test: picking views from the surface, and that Q1 / Q2 / Nav Mode / soft keys are unchanged.
 
+**Done (15.11.2026, bridge only).** Tested on the UF8.
+
 ### 5. Follow selection and track numbers in a filtered view
 
 Both now find the strips by name in the Helper's list of all channels. In a filtered view the strips aren't next to each other in that list.
