@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.19.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.20.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -784,9 +784,12 @@ function meterToMidi(value) {
 // full one: a track not of the view's type is not on it, and the bank stays. The same-name rank for the UF1 keeps
 // going by the full list.
 var followRestart = function () {}, followStop = function () {}, driverActivations = 0
-// The bank moved by the script itself (TEST, 15.11.2026): the active view's bank zone actions triggered directly, as
-// many as needed at once, instead of bank notes from the bridge 100 ms apart (Cubase drops notes closer together).
-// kind: 0 shift right, 1 shift left, 2 next bank, 3 previous bank, 4 reset. Where the bank lands is logged.
+// The bank moved by the script itself (15.11.2026): the active view's bank zone actions triggered directly, as many as
+// needed at once, instead of bank notes from the bridge 100 ms apart (Cubase drops notes closer together, and more of
+// them right after a page switch). Measured: a reset + 5 next banks landed in 40-120 ms, the first time, every time.
+// kind: 0 shift right, 1 shift left, 2 next bank, 3 previous bank, 4 reset. Where the bank lands is logged. The bridge's
+// notes (SysEx 10 / 0B / 0F) stay as the fallback: at start-up (Cubase ignores bank moves at first) and from the third
+// try of a follow on.
 var bankTrig = { at: 0, what: '', logged: -2 }
 function bankTrigger(activeDevice, kind, count) {
 	if (!skAm || !curView || kind > 4) return false
@@ -961,9 +964,8 @@ var followQuietUntil = 0
 		if (jump) {
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
-			// (TEST) Triggered by the script, all at once; the UF8 held until it is there. Not at start-up (Cubase ignores
-			// bank moves at first), and only the first try (the others as before, through the bridge).
-			if (startupUntil <= 0 && followTries === 1 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
+			// By the script, all at once; the UF8 held until it is there (see bankTrigger).
+			if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
 				out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps (triggered)')
 				if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
 				dueMs = now + 600
@@ -978,6 +980,12 @@ var followQuietUntil = 0
 		// a jump right after loading lost most of its presses.
 		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
 		steps = Math.max(1, Math.min(steps, 64))
+		if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, delta < 0 ? 3 : 2, steps)) {
+			out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right') + ' (triggered)')
+			if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
+			dueMs = now + 600
+			return
+		}
 		out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right'))
 		sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
 		dueMs = now + steps * 100 + 800
@@ -1069,7 +1077,7 @@ var followQuietUntil = 0
 		pickCurrent(activeDevice)
 		if (dueMs > 0 && startupUntil <= 0) {
 			var now = nowMs()
-			dueMs = now + 800
+			dueMs = now + 300   // (the jump lands at once now; it needs the new page's names in)
 			viewFrozenUntil = now + 8000
 			startupFreeze(activeDevice, true)
 		}
@@ -1121,7 +1129,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
 		return
 	}
-	if (m[4] === 0x30 && m.length >= 8) {   // (TEST) the bridge asks the script to move the bank: 30 <kind> <count>
+	if (m[4] === 0x30 && m.length >= 8) {   // the bridge asks the script to move the bank: 30 <kind> <count>
 		bankTrigger(activeDevice, m[5], m[6])
 		return
 	}

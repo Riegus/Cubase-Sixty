@@ -1035,8 +1035,8 @@ void pageRightBurst(int count, int target)
     std::thread([count, target] {
         const int gen = count > 1 ? ++g_freezeGen : 0;
         if (count > 1) g_uf8Frozen = true;
-        // (TEST, 15.11.2026) The script moves the bank itself, all steps at once (SysEx 30 00 <count>: its shift-right
-        // action triggered); the notes only if the bank has not got there within 400 ms.
+        // The script moves the bank itself, all steps at once (SysEx 30 00 <count>: its shift-right action triggered,
+        // there in ~0.2 s, measured 15.11.2026); the notes only if the bank has not got there within 400 ms.
         const int before = g_bankOffset;
         sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x30, 0x00, uint8_t(count), 0xF7});
         int waited = 0;
