@@ -218,6 +218,7 @@ bool g_ownText = false;   // the bridge feeds its own text through onMidiIn ("Wa
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
 std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
 void note(uint8_t n, bool on);
+void pageRightBurst(int count);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
 {
@@ -227,13 +228,7 @@ bool userBankRight(bool pressed)
     if (remaining >= 8) return false;             // a full bank follows: the normal step
     if (!pressed) return false;                   // releases pass (a stray release does no harm)
     if (remaining <= 0) return true;              // the last track is already on a strip: stay
-    std::thread([remaining] {
-        for (int i = 0; i < remaining; ++i) {
-            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(60));
-            note(kNotePageRight, true);
-            note(kNotePageRight, false);
-        }
-    }).detach();
+    pageRightBurst(remaining);
     return true;
 }   // set once Cubase has sent us a name or colour
 
@@ -1030,6 +1025,26 @@ void paintStripNumbers(bool force = false)
 std::atomic<int> g_freezeGen{0};
 std::atomic<bool> g_freezeHeld{false};
 std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ... 13 00): bursts leave it on
+void replayUf8Cache();
+// Bank-right near the end: page-rights until the last track is on strip 8. With more than one, the UF8 frozen like a
+// jump so only the end shows (15.11.2026: each step moved the motors, heard as banking two or three times), and
+// 100 ms apart (at 60 ms a press was now and then lost, and the bank stopped one short).
+void pageRightBurst(int count)
+{
+    std::thread([count] {
+        const int gen = count > 1 ? ++g_freezeGen : 0;
+        if (count > 1) g_uf8Frozen = true;
+        for (int i = 0; i < count; ++i) {
+            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            note(kNotePageRight, true);
+            note(kNotePageRight, false);
+        }
+        if (count > 1) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(400));
+            if (g_freezeGen == gen && !g_freezeHeld) { g_uf8Frozen = false; replayUf8Cache(); }
+        }
+    }).detach();
+}
 void replayUf8Cache();
 void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated): every strip as an empty one (name, colour, meter, dB, its LEDs),
