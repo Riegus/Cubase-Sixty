@@ -124,8 +124,8 @@ std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle m
 // view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 opens the picker: the top
 // soft keys are the views (the current one lit), a press switches and closes it, Q3 again closes it unchanged.
 // Q3 is lit while a view other than ALL is on.
-constexpr int kViewCount = 7;
-constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA" };
+constexpr int kViewCount = 8;
+constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA", "ARMED" };
 std::atomic<int> g_uf8View{0};
 std::atomic<bool> g_viewPick{false};
 std::atomic<int> g_viewPickGen{0};
@@ -133,8 +133,8 @@ void switchView(int v);
 std::mutex g_numMx;
 // The filtered views' (1-6) numbers by position in the view's list (helper SysEx 1F), and which positions hold a
 // channel (helper 1E, passed on to the UF8 script): the picker dims a view with none. Both under g_numMx.
-std::vector<int> g_viewNumber[7];
-std::vector<bool> g_viewHas[7];
+std::vector<int> g_viewNumber[kViewCount];
+std::vector<bool> g_viewHas[kViewCount];   // (ARMED, 7: none, the script lays its strips out itself)
 int viewChannels(int v)   // (g_numMx held)
 {
     int n = 0;
@@ -378,6 +378,17 @@ void handleFrame(const uf8frames::Frame& fr)
     else if (d[1] == 0x20) { if (d[4] != 0 && cs::sleep::activity(true, "UF8 fader touch")) return; }
     else if (d[1] == 0x24) { if (cs::sleep::activity(true, "UF8 V-pot / encoder")) return; }
     else if (d[1] == 0x22) { if (cs::sleep::key(0, d[3], d[5] == 0x01, "UF8 key")) return; }
+    // The ARMED view: a strip without an armed track still has a channel behind it (its one-channel zone stays where it
+    // was, blanked): nothing from the hand reaches it.
+    if (g_uf8View == 7) {
+        int st = -1;
+        if (d[1] == 0x21 || d[1] == 0x20 || d[1] == 0x24) st = d[3] < kStrips ? d[3] : -1;
+        else if (d[1] == 0x22) {
+            if (d[3] >= 0x08 && d[3] <= 0x0F) st = d[3] - 0x08;   // V-pot pushes
+            else if (auto n = buttonToNote(d[3])) { if ((*n >= 8 && *n < 40) || (*n >= 48 && *n < 56)) st = *n % 8; }
+        }
+        if (st >= 0 && g_stripEmpty[st]) return;
+    }
     switch (d[1]) {
     case 0x21: {   // fader position: FF 21 03 strip lsb msb ck
         const uint8_t s = d[3];
@@ -1784,7 +1795,7 @@ int main(int argc, char** argv)
             }
             if (countChanged && g_viewPick) paintSoftKeys();
         }
-        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19 && msg[4] != 0x1E)) return;
+        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19 && msg[4] != 0x1E && msg[4] != 0x2F)) return;
         std::lock_guard<std::mutex> lk(g_outMx);
         try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
     });

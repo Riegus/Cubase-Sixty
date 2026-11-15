@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.5.0-dev'
+var SCRIPT_VERSION = '0.6.0-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -68,7 +68,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x1A: 2, 0x1D: 0, 0x1F: 3 }
+var RESEND = { 0x1A: 2, 0x1D: 0, 0x1F: 3, 0x2F: 1 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -345,6 +345,13 @@ var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroup
 for (var f = 0; f < recFilters.length; ++f) {
 	try { recZone[recFilters[f]]() } catch (e) { out('[CubaseSixty Helper] recordable list: ' + recFilters[f] + ' not available: ' + e) }
 }
+// Each recordable channel's record-enable (the UF8's ARMED view, docs/track-views.md step 6): SysEx 2F <slot> <0 / 1>
+// to the UF8 script, on change. (A value binding per slot: record-enable changes seldom, unlike the values that made
+// hidden banks with bindings pause Cubase.)
+var recArmed = []
+function sendArmed(activeDevice, slot) {
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x2F, slot & 0x7F, recArmed[slot] ? 1 : 0, 0xF7]))
+}
 for (var k = 0; k < REC_CHANNELS; ++k) {
 	var recChannel = recZone.makeMixerBankChannel()
 	;(function (slot, ch) {
@@ -352,6 +359,14 @@ for (var k = 0; k < REC_CHANNELS; ++k) {
 			if (recTitles[slot] === title) return
 			recTitles[slot] = title
 			sendRec(activeDevice, slot)
+		}
+		var arm = surface.makeCustomValueVariable('recArm' + slot)
+		page.makeValueBinding(arm, ch.mValue.mRecordEnable)
+		arm.mOnProcessValueChange = function (activeDevice, value) {
+			var on = value > 0.5
+			if (recArmed[slot] === on) return
+			recArmed[slot] = on
+			sendArmed(activeDevice, slot)
 		}
 	})(k, recChannel)
 }
@@ -367,7 +382,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (message.length < 6 || message[4] !== 0x1B) return
 	if (++resends <= 3 || resends % 20 === 0) out('[CubaseSixty Helper] lists requested (' + resends + ')')
 	for (var i = 0; i < CHANNELS; ++i) sendAll(activeDevice, i)
-	for (var s = 0; s < REC_CHANNELS; ++s) sendRec(activeDevice, s)
+	for (var s = 0; s < REC_CHANNELS; ++s) { sendRec(activeDevice, s); if (recArmed[s]) sendArmed(activeDevice, s) }
 	// The views' lists up to their last name, and one empty entry after it (a list that shrank).
 	for (var v = 1; v < VIEW_LISTS.length; ++v) {
 		var last = -1
