@@ -816,6 +816,31 @@ std::map<int, std::vector<unsigned char>> g_uf8Cache;
 // During a follow-selection jump the UF8 is frozen: what Cubase sends for the banks passed on the way is only
 // cached, and the end state is shown once, so the jump looks direct instead of banking one by one.
 std::atomic<bool> g_uf8Frozen{false};
+
+// The track numbers (15.11.2026; Rea-Sixty shows them too): the small number at the top left of each strip's colour
+// bar, as the UF1 shows the selected track's: counted as the MixConsole does, hidden tracks too. The Helper script
+// gives each channel of the UF8's bank list (visible channels, in order) its number (SysEx 1A); the UF8 script says
+// where the bank starts (12). Blank for an empty strip and with no project.
+std::mutex g_numMx;
+std::vector<int> g_chanNumber;   // by position in the bank list: its number (0 = not known)
+std::string g_numShown[8];       // what each strip shows ("" = not drawn since the UF8 connected)
+void paintStripNumbers(bool force = false)
+{
+    if (!g_uf8Running || g_uf8Frozen) return;
+    const int offset = g_bankOffset;
+    std::lock_guard<std::mutex> lk(g_numMx);
+    for (int s = 0; s < kStrips; ++s) {
+        std::string t = "  ";
+        const size_t i = size_t(offset + s);
+        if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
+            t = std::to_string(g_chanNumber[i]);
+        else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
+            continue;   // where the bank starts is not known for a moment: keep what is shown
+        if (!force && g_numShown[s] == t) continue;
+        g_numShown[s] = t;
+        g_dev.send(uf8::buildChannelNumber(uint8_t(s), t));
+    }
+}
 std::atomic<int> g_freezeGen{0};
 std::atomic<bool> g_freezeHeld{false};
 std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ... 13 00): bursts leave it on
@@ -905,6 +930,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
     // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
         g_projectOpen = m[5] != 0;
+        if (m[5] == 0) { { std::lock_guard<std::mutex> lk(g_numMx); g_chanNumber.clear(); } paintStripNumbers(); }
         if (m[5] == 0) uf8NoProject();
         else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
         // (Always logged: the tray app shows it.)
@@ -966,6 +992,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 g_autoW[n->strip] = false;
                 paintSel(n->strip);
             }
+            paintStripNumbers();   // a strip that went empty or got a track
         } else if (m.size() >= 7 && m[4] == 0x0C && m[5] < kStrips) {
             // Fader level text -> the strip's dB readout (6 characters + "dB").
             std::string v(m.begin() + 6, m.end() - 1);
@@ -1007,6 +1034,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             auto v = [&](int i) { return (m[i] == 0x7F && m[i + 1] == 0x7F) ? -1 : (m[i] << 7) | m[i + 1]; };
             g_bankTotal = v(5);
             g_bankOffset = v(7);
+            paintStripNumbers();
         } else if (m.size() >= 6 && m[4] == 0x11) {
             // The script asks for a "tick" in 300 ms (note 80): it has no timer of its own, and wants to look
             // at the bank only after Cubase has finished reacting to a new selection.
@@ -1228,6 +1256,7 @@ void replayUf8Cache()
     std::map<int, std::vector<unsigned char>> cache;
     { std::lock_guard<std::mutex> lk(g_uf8CacheMx); cache = g_uf8Cache; }
     for (auto& kv : cache) { auto msg = kv.second; onMidiIn(msg); }
+    paintStripNumbers(true);
 }
 
 } // namespace
@@ -1373,6 +1402,7 @@ bool uf8Connect(bool quiet)
     g_dev.setRawInputHandler(onUsbInput);
     { std::lock_guard<std::mutex> lk(g_faderMx); for (auto& e : g_engaged) e = false; }
     g_meterShown = {};
+    { std::lock_guard<std::mutex> lk(g_numMx); for (auto& n : g_numShown) n.clear(); }
     g_uf8Running = true;
     uf8ApplyBrightness();
     replayUf8Cache();
@@ -1455,6 +1485,17 @@ int main(int argc, char** argv)
     g_helperOpen = g_helperOut.open(kHelperTo) && g_helperIn.open(kHelperFrom, [](std::vector<unsigned char>& msg) {
         if (cs::scriptLogSysex(msg.data(), msg.size())) return;
         if (msg.size() >= 7 && msg[0] == 0xF0 && msg[4] == 0x1D) { cs::uf1SetSoloActive(msg[5] != 0); return; }   // anything soloed
+        if (msg.size() >= 10 && msg[0] == 0xF0 && msg[4] == 0x1A) {   // a channel's track number (UF8 strips)
+            const size_t i = (size_t(msg[5]) << 7) | msg[6];
+            const int n = (int(msg[7]) << 7) | msg[8];
+            if (i < 256) {
+                std::lock_guard<std::mutex> lk(g_numMx);
+                if (g_chanNumber.size() <= i) g_chanNumber.resize(i + 1, 0);
+                g_chanNumber[i] = n;
+            }
+            paintStripNumbers();
+            return;
+        }
         if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
         std::lock_guard<std::mutex> lk(g_outMx);
         try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
