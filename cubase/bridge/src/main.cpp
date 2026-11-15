@@ -829,7 +829,12 @@ void setLed(int strip, int cls, bool on)
     case 2:
         if (strip >= 0 && strip < 8) {
             g_selOn[strip] = on;
-            paintSel(strip);   // (and the lit-strip mask)
+            paintSel(strip);
+            // Which strips are selected, as SSL 360 and Rea-Sixty send it on every selection change (cap33). Sent since
+            // 15.11.2026, for the UF1's look of the colour bar (the selected strip's number box dimmed).
+            uint16_t mask = 0;
+            for (int i = 0; i < 8; ++i) if (g_selOn[i]) mask |= uint16_t(1u << i);
+            g_dev.send(uf8::buildSelectedStripBitmask(mask));
         }
         if (strip >= 0 && strip < 8) {
             // SEL: tell the UF1 which UF8 strip holds the selected track (its channel-number box shows it).
@@ -858,42 +863,26 @@ void setLed(int strip, int cls, bool on)
     }
 }
 
-// Which SEL keys are lit, for the firmware (FF 66, as SSL 360 and Rea-Sixty send it on every selection change, cap33;
-// sent since 15.11.2026 for the colour bar's dimmed number box). The firmware draws the SEL keys outside it at full
-// brightness whatever colour they get, so in REC / AUTO it is the armed / Write strips, not the selected ones (REC's
-// dim "can arm" was as bright as armed, 15.11.2026). The number box follows it.
-void sendSelMask()
-{
-    static int sent = -1;
-    const int mode = g_selMode;
-    int mask = 0;
-    for (int i = 0; i < kStrips; ++i) {
-        const bool lit = mode == kSelNorm ? g_selOn[i].load()
-            : mode == kSelRec ? (!g_noRec[i] && !g_stripEmpty[i] && g_recOn[i])
-            : (g_autoW[i] && !g_stripEmpty[i]);
-        if (lit) mask |= 1 << i;
-    }
-    if (mask == sent) return;
-    sent = mask;
-    g_dev.send(uf8::buildSelectedStripBitmask(uint16_t(mask)));
-}
+// REC / AUTO: solid colours (bright and dim bytes the same), as Rea-Sixty's ledColourFor: the firmware's selected-strip
+// mask (FF 66, sent on every selection change since 15.11.2026) and the on flag then cannot change how they look. With
+// a dim track colour and the on flag, REC's "can arm" showed as bright as armed outside the selected strip.
+const uf8::LedColour kSelDark{0x00, 0xF0, 0x00, 0xF0};   // no colour (cap41 00 F0)
 void paintSel(int strip)
 {
     if (strip < 0 || strip >= kStrips) return;
-    sendSelMask();
     const int mode = g_selMode;
     if (mode == kSelNorm) { sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, g_selOn[strip])); return; }
     if (mode == kSelRec) {
         // As the top soft keys: dark where the track cannot be armed, dim red where it can, red when armed.
         const bool can = !g_noRec[strip] && !g_stripEmpty[strip];
         const bool armed = can && g_recOn[strip];
-        sendLedFrames(can ? uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true,
-                                                    armed ? uf8::ledColourRed() : uf8::ledColourForTrackRgb(0x5A0000))
-                          : uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, false, uf8::ledColourRed()));
+        sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true,
+            !can ? kSelDark : armed ? uf8::ledColourRedBrightSolid() : uf8::ledColourRedDimSolid()));
         return;
     }
-    const bool on = g_autoW[strip].load();
-    sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, on && !g_stripEmpty[strip], uf8::ledColourRed()));
+    // AUTO: red with Write on, dim red without (as before: red's dim bytes), dark without a track.
+    sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, true, g_stripEmpty[strip] ? kSelDark
+        : g_autoW[strip] ? uf8::ledColourRedBrightSolid() : uf8::ledColourRedDimSolid()));
 }
 void paintSoftKeys()
 {
