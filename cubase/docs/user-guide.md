@@ -158,7 +158,7 @@ Eight strips on a bank of the MixConsole's channels.
 | Control | What it does |
 |---------|--------------|
 | Fader | The track's volume, with touch: Touch and Latch automation write while your finger is on it. |
-| Display | Track name, number (top left, as in the MixConsole and on the UF1) and colour, the SSL plug-in on the track in the colour bar (CS 2, 4K E, Link, BC 2 …, as on the UF1), the level in dB, a stereo meter, and a value line (pan, or what the V-pot is on). |
+| Display | Track name, number (top left, as in the MixConsole and on the UF1) and colour, the SSL plug-in on the track in the colour bar (CS 2, 4K E, Link, BC 2 …, as on the UF1; the selected track's number box is dimmed), the level in dB, a stereo meter, and a value line (pan, or what the V-pot is on). |
 | V-pot | Pan, with a position bar on the display. **Push: centres the pan** (Settings > Behaviour can make it open the track's channel editor instead). |
 | SOLO, CUT | Solo and mute. |
 | SEL | Selects the track. **On the track that is already selected (SEL lit): opens / closes its first SSL channel strip, or the channel editor on a track without one** (Settings > Behaviour can make it always the channel editor). (See [What SEL does](#what-sel-does-norm-rec-auto) for the other two modes.) |
