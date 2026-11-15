@@ -350,7 +350,17 @@ bool lateDbText(uint8_t s, const std::string& cubase)
     char* e1 = nullptr; char* e2 = nullptr;
     const double a = std::strtod(drawn.c_str(), &e1), b = std::strtod(cubase.c_str(), &e2);
     if (e1 == drawn.c_str() || e2 == cubase.c_str()) return false;
-    return std::fabs(a - b) > 0.06;
+    // Where the curve is a fit (below about -18 dB) the drawn value can be a few tenths off: Cubase's own is taken
+    // there when it is within 1 dB.
+    return std::fabs(a - b) > (a < -18.0 ? 1.0 : 0.06);
+}
+// A level as the dB field shows it (Cubase's way: two decimals under 10 dB, one above; "-oo" for silence).
+std::string levelFieldText(double db)
+{
+    if (db <= -199.0) return "-oo";
+    char buf[16];
+    std::snprintf(buf, sizeof buf, std::fabs(db) < 10.0 ? "%.2f" : "%.1f", db);
+    return buf;
 }
 std::string dbFieldText(std::string t)
 {
@@ -432,7 +442,9 @@ void handleFrame(const uf8frames::Frame& fr)
         if (g_stripFader[s] || g_routeSend >= 0) sendHandToScript(s, v);
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
         if (g_routeSend >= 0 && !g_stripEmpty[s]) {   // the dB field at once, from the send level curve
-            const std::string t = dbFieldText(cs::uf1LevelText(int(v)));
+            // From the whole curve (built-in points, a fit below the lowest): the learnt one alone had a gap below about
+            // -18 dB, where nothing was drawn and Cubase's late text showed (15.11.2026).
+            const std::string t = levelFieldText(cs::levelDbOf(int(v)));
             if (!t.empty()) {
                 g_dbOwnUntil[s] = nowMs8() + 500;
                 g_dev.send(uf8::buildFaderDbReadout(s, t, "dB"));
