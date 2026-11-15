@@ -1744,7 +1744,22 @@ var VIEWS = [
 	{ name: 'VCA', label: 'VCA', filters: ['includeVCAChannels'] },
 	// ARMED (step 6): each strip a bank zone of one channel of its own (the recordable types, the order of the helper's
 	// recordable list), moved by the script to the armed tracks; bank / page keys page through them (armedPage).
-	{ name: 'Armed', label: 'ARMED', armed: true, filters: ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels'] }
+	{ name: 'Armed', label: 'ARMED', armed: true, filters: ['includeVCAChannels'] }
+]
+// ARMED's eight strip zones: the recordable types (as the helper's recordable list), each with a filter set of its own
+// that holds the same channels. Zones with the same filters move together (one bank, whatever their names: tried
+// 15.11.2026), so the page's own zone (the bank keys are bound to it) is VCA only, and the strips' differ by excludes
+// of types they do not include anyway.
+var REC_INCLUDES = ['includeAudioChannels', 'includeInstrumentChannels', 'includeSamplerChannels', 'includeMIDIChannels']
+var ARMED_ZONE_FILTERS = [
+	['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels'],
+	REC_INCLUDES,
+	REC_INCLUDES.concat(['excludeGroupChannels']),
+	REC_INCLUDES.concat(['excludeFXChannels']),
+	REC_INCLUDES.concat(['excludeVCAChannels']),
+	REC_INCLUDES.concat(['excludeInputChannels']),
+	REC_INCLUDES.concat(['excludeOutputChannels']),
+	REC_INCLUDES.concat(['excludeGroupChannels', 'excludeFXChannels'])
 ]
 // The ARMED view: which recordable channels are armed (helper SysEx 2F, by its recordable slot), which of them the strips
 // start at, where each strip's one-channel zone is (pos, its slot), and which strips have no armed track (unused: name
@@ -1821,10 +1836,8 @@ function useView(view) {
 			view.zones = []
 			view.pos = []
 			for (var zk = 0; zk < STRIPS; ++zk) {
-				// A name each: zones with the same filters and no name moved together (one bank shared, 15.11.2026: the
-				// strip moved last took all eight with it).
 				var z = page.mHostAccess.mMixConsole.makeMixerBankZone('ARMED strip ' + (zk + 1))
-				for (var zf = 0; zf < VIEWS[v].filters.length; ++zf) z[VIEWS[v].filters[zf]]()
+				for (var zf = 0; zf < ARMED_ZONE_FILTERS[zk].length; ++zf) z[ARMED_ZONE_FILTERS[zk][zf]]()
 				view.zones.push(z)
 			}
 			bankZone = (function (zones, actions) {
