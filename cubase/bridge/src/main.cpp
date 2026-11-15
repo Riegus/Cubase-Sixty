@@ -44,6 +44,7 @@
 #endif
 #include "Favourites.h"
 #include "Settings.h"
+#include <fstream>
 #include "Uc1Bridge.h"
 #include "ScriptLog.h"
 namespace cs { int stopSslCore(); bool cubaseRunning(); }
@@ -132,6 +133,40 @@ std::array<std::atomic<bool>, 8> g_dead{};   // ARMED: strips without an armed t
 // track's name arrives there (15.11.2026: back from ARMED, strip 8's SEL came before its name and was lost).
 std::array<std::array<std::atomic<bool>, 3>, 8> g_ledWant{};
 std::atomic<bool> g_viewPick{false};
+// Settings (UF8 track views): the view at start (uf8-1-start-view: a view, or "last", kept in uf8-1-last-view.txt
+// beside settings.txt) and the views the picker offers (uf8-1-view-<name>; ALL always). "1": this UF8; a second one
+// gets keys of its own.
+constexpr const char* kViewKeys[kViewCount] = { "all", "audio", "instr", "midi", "groups", "fx", "vca", "armed" };
+bool viewOffered(int v)
+{
+    if (v <= 0) return true;
+    if (v >= kViewCount) return false;
+    return cs::settings::get(std::string("uf8-1-view-") + kViewKeys[v], "on") != "off";
+}
+int viewByKey(const std::string& k)
+{
+    for (int v = 0; v < kViewCount; ++v) if (k == kViewKeys[v]) return v;
+    return -1;
+}
+void saveLastView(int v)
+{
+    static int saved = -1;
+    if (v == saved || v < 0 || v >= kViewCount) return;
+    saved = v;
+    std::ofstream out(cs::settings::dir() / "uf8-1-last-view.txt", std::ios::trunc);
+    out << kViewKeys[v] << "\n";
+}
+int startView()
+{
+    std::string k = cs::settings::get("uf8-1-start-view", "all");
+    if (k == "last") {
+        std::ifstream in(cs::settings::dir() / "uf8-1-last-view.txt");
+        k.clear();
+        in >> k;
+    }
+    const int v = viewByKey(k);
+    return v < 0 ? 0 : v;
+}
 std::atomic<int> g_viewPickGen{0};
 void switchView(int v);
 std::mutex g_numMx;
@@ -402,6 +437,9 @@ void switchView(int v)
     if (v < 0 || v >= kViewCount) return;
     const bool same = g_uf8View.exchange(v) == v;
     std::printf("UF8 view: %s%s\n", kViewNames[v], same ? " (already on)" : "");
+    // The last view picked, for "the last view used" at start (not the script's own reports: a project opening on ALL
+    // would overwrite it before the start view is read).
+    saveLastView(v);
     if (same) return;
     // Leaving ARMED: its dead strips live again at once (Cubase sends the new page's LEDs before the script reports
     // the view: Audio FX's SEL was dropped, 15.11.2026).
@@ -649,7 +687,7 @@ void handleFrame(const uf8frames::Frame& fr)
         if (d[3] >= 0x18 && d[3] <= 0x1F && g_viewPick) {   // the picker: a view; shown lit for a moment, then closed
             if (!pressed) break;
             const int v = d[3] - 0x18;
-            if (v >= kViewCount) break;
+            if (v >= kViewCount || (!viewOffered(v) && v != g_uf8View)) break;   // (a view the settings leave out)
             switchView(v);
             const int gen = ++g_viewPickGen;
             paintSoftKeys();
@@ -972,9 +1010,10 @@ void paintSoftKeys()
             empty[7] = g_armedCount == 0;
         }
         for (int s = 0; s < kStrips; ++s) {
-            sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s >= kViewCount ? uf8::TopSoftKeyState::Off
+            const bool offered = s < kViewCount && (viewOffered(s) || s == cur);
+            sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), !offered ? uf8::TopSoftKeyState::Off
                 : s == cur ? uf8::TopSoftKeyState::On : empty[s] ? uf8::TopSoftKeyState::Off : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
-            g_dev.send(uf8::buildPluginSlotName(uint8_t(s), s < kViewCount ? kViewNames[s] : ""));
+            g_dev.send(uf8::buildPluginSlotName(uint8_t(s), offered ? kViewNames[s] : ""));
         }
         sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick1, false));
         sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick2, false));
@@ -1277,7 +1316,23 @@ void onMidiIn(std::vector<unsigned char>& msg)
             paintStripNumbers();
         }
         if (m[5] == 0) uf8NoProject();
-        else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
+        else {
+            g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1}));
+            uf8ProjectOpen();
+            // The view at start (settings): at once to the script (SysEx 34 <view>), which activates that page itself
+            // before its start-up follow banks (15.11.2026: on ALL first, it banked there and again in the start view
+            // 3 s later). If the UF8 is still on ALL 3 s later, the bridge switches (a view picked meanwhile, or kept
+            // across a project change, stays).
+            if (const int v = startView(); v > 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x34, uint8_t(v), 0xF7});
+            static std::atomic<int> gen{0};
+            const int g = ++gen;
+            std::thread([g] {
+                std::this_thread::sleep_for(std::chrono::seconds(3));
+                if (g != gen || !g_projectOpen || g_uf8View != 0) return;
+                const int v = startView();
+                if (v > 0) { std::printf("UF8 view at start: %s (settings; the bridge switched)\n", kViewNames[v]); switchView(v); }
+            }).detach();
+        }
         // (Always logged: the tray app shows it.)
         std::printf("Cubase: %s\n", m[5] ? "project open" : "no project (the Hub)");
         return;
@@ -1418,7 +1473,11 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (g_viewPick) paintSoftKeys();
         } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
             const int v = m[5] < kViewCount ? m[5] : 0;
-            if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+            if (g_uf8View.exchange(v) != v) {
+                // The script switched itself (the start view): a new page starts on volume / pan, so the route again.
+                std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+                std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
+            } else if (g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
             if (v != 7) for (auto& d : g_dead) d = false;   // (ARMED's dead strips live again in another view)
             paintStripNumbers(true);
             paintSoftKeys();   // Q3's LED, the picker

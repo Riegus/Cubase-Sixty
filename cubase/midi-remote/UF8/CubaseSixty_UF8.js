@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.22.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.23.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -1123,6 +1123,7 @@ deviceDriver.mOnDeactivate = function (activeDevice) {
 	flushLog(activeDevice)
 }
 deviceDriver.mOnActivate = function (activeDevice) {
+	startedAt = Date.now()   // (the view at start may come)
 	sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7]))
 	if (!driverActivations++) return   // the first activation is Cubase's start: everything starts anyway
 	out('[CubaseSixty] active again (a project is open)')
@@ -1147,6 +1148,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (m[4] === 0x7F && m[5] === 0x01) { out('[CubaseSixty] a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if (m[4] >= 0x21 && m[4] <= 0x2D) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
+		return
+	}
+	if (m[4] === 0x34 && m.length >= 7) {   // the view at start (settings): its page activated at the next idle
+		// Only at a start (10 s after the script loaded or a project opened): a new bridge also hears "project open".
+		if (Date.now() - startedAt < 10000) startViewWanted = m[5]
 		return
 	}
 	if (m[4] === 0x30 && m.length >= 8) {   // the bridge asks the script to move the bank: 30 <kind> <count>
@@ -1738,8 +1744,19 @@ function sendViewPoll(activeDevice) {
 		}
 	}
 }
+// The view at start (SysEx 34 from the bridge, as soon as the script reports itself): the page activated by the script,
+// before the start-up follow banks (its first check waits 2.5 s), so it banks once, in that view.
+var startViewWanted = -1, startedAt = Date.now()
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
+	if (startViewWanted >= 0) {
+		var sv = views[startViewWanted]
+		startViewWanted = -1
+		if (sv && sv !== curView) {
+			out('[CubaseSixty] view at start: ' + sv.label)
+			try { sv.page.mAction.mActivate.trigger(activeMapping) } catch (e) { out('[CubaseSixty] view at start: ' + e) }
+		}
+	}
 	if (armed.dirty && curView && curView.armed) { armed.dirty = false; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
 	if (curView && curView.armed) { armedIdle(activeDevice); armedCheck(activeDevice) }
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
