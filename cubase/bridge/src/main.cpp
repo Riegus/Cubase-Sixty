@@ -260,6 +260,9 @@ long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds
 // last one held is shown then (15.11.2026: the value followed the fader late).
 std::array<std::atomic<long long>, 8> g_dbOwnUntil{};
 std::array<std::atomic<int>, 8> g_dbHeldGen{};
+std::mutex g_dbDrawnMx;
+std::string g_dbDrawn[8];   // the last text drawn from the curve (for the log: how far off it was)
+int g_dbDrawnPos[8] = {};
 std::string dbFieldText(std::string t)
 {
     if (const size_t at = t.rfind("dB"); at != std::string::npos) t.erase(at);
@@ -330,6 +333,13 @@ void handleFrame(const uf8frames::Frame& fr)
             if (!t.empty()) {
                 g_dbOwnUntil[s] = nowMs8() + 500;
                 g_dev.send(uf8::buildFaderDbReadout(s, t, "dB"));
+                std::lock_guard<std::mutex> lk(g_dbDrawnMx);
+                g_dbDrawn[s] = t;
+                g_dbDrawnPos[s] = v;
+            } else {
+                std::lock_guard<std::mutex> lk(g_dbDrawnMx);
+                g_dbDrawn[s] = "(gap)";
+                g_dbDrawnPos[s] = v;
             }
         }
         // Echo the hand position so the motor does not jump back on release.
@@ -1086,6 +1096,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
                         if (gen != g_dbHeldGen[s]) return;
                         if (g_touched[s] || nowMs8() < g_dbOwnUntil[s]) continue;
                         if (g_routeSend >= 0 && !g_stripEmpty[s]) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+                        std::string drawn; int pos = 0;
+                        { std::lock_guard<std::mutex> lk(g_dbDrawnMx); drawn = g_dbDrawn[s]; pos = g_dbDrawnPos[s]; }
+                        std::printf("UF8 send fader %d stopped at %d: drawn %s, Cubase %s%s\n", s + 1, pos, drawn.c_str(), v.c_str(),
+                            drawn == v ? "" : " (corrected)");
                         return;
                     }
                 }).detach();
