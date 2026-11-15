@@ -829,13 +829,7 @@ void setLed(int strip, int cls, bool on)
     case 2:
         if (strip >= 0 && strip < 8) {
             g_selOn[strip] = on;
-            paintSel(strip);
-            // Which strips are selected, as SSL 360 and Rea-Sixty send it on every selection change (cap33). Not sent
-            // before 15.11.2026; tried for the UF1's look of the colour bar (its number box dimmed), which the UF1 may
-            // draw because its track is the selected one.
-            uint16_t mask = 0;
-            for (int i = 0; i < 8; ++i) if (g_selOn[i]) mask |= uint16_t(1u << i);
-            g_dev.send(uf8::buildSelectedStripBitmask(mask));
+            paintSel(strip);   // (and the lit-strip mask)
         }
         if (strip >= 0 && strip < 8) {
             // SEL: tell the UF1 which UF8 strip holds the selected track (its channel-number box shows it).
@@ -864,9 +858,29 @@ void setLed(int strip, int cls, bool on)
     }
 }
 
+// Which SEL keys are lit, for the firmware (FF 66, as SSL 360 and Rea-Sixty send it on every selection change, cap33;
+// sent since 15.11.2026 for the colour bar's dimmed number box). The firmware draws the SEL keys outside it at full
+// brightness whatever colour they get, so in REC / AUTO it is the armed / Write strips, not the selected ones (REC's
+// dim "can arm" was as bright as armed, 15.11.2026). The number box follows it.
+void sendSelMask()
+{
+    static int sent = -1;
+    const int mode = g_selMode;
+    int mask = 0;
+    for (int i = 0; i < kStrips; ++i) {
+        const bool lit = mode == kSelNorm ? g_selOn[i].load()
+            : mode == kSelRec ? (!g_noRec[i] && !g_stripEmpty[i] && g_recOn[i])
+            : (g_autoW[i] && !g_stripEmpty[i]);
+        if (lit) mask |= 1 << i;
+    }
+    if (mask == sent) return;
+    sent = mask;
+    g_dev.send(uf8::buildSelectedStripBitmask(uint16_t(mask)));
+}
 void paintSel(int strip)
 {
     if (strip < 0 || strip >= kStrips) return;
+    sendSelMask();
     const int mode = g_selMode;
     if (mode == kSelNorm) { sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), uf8::LedClass::Sel, g_selOn[strip])); return; }
     if (mode == kSelRec) {
