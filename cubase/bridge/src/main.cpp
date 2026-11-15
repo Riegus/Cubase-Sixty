@@ -693,7 +693,16 @@ void setLed(int strip, int cls, bool on)
         sendLedFrames(uf8::buildLedColourPair(uint8_t(strip), static_cast<uf8::LedClass>(cls), on));
         break;
     case 2:
-        if (strip >= 0 && strip < 8) { g_selOn[strip] = on; paintSel(strip); }
+        if (strip >= 0 && strip < 8) {
+            g_selOn[strip] = on;
+            paintSel(strip);
+            // Which strips are selected, as SSL 360 and Rea-Sixty send it on every selection change (cap33). Not sent
+            // before 15.11.2026; tried for the UF1's look of the colour bar (its number box dimmed), which the UF1 may
+            // draw because its track is the selected one.
+            uint16_t mask = 0;
+            for (int i = 0; i < 8; ++i) if (g_selOn[i]) mask |= uint16_t(1u << i);
+            g_dev.send(uf8::buildSelectedStripBitmask(mask));
+        }
         if (strip >= 0 && strip < 8) {
             // SEL: tell the UF1 which UF8 strip holds the selected track (its channel-number box shows it).
             static bool selOn[8] = {};
