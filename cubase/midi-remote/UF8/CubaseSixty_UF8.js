@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.18.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.19.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -570,6 +570,8 @@ var followOnStripTitle = function () {}   // set by the follow-selection block
 var followCurrentTitle = function () {}   // set by the follow-selection block
 var followStripSelect = function () {}    // set by the follow-selection block
 var onAllTitle = function () {}           // set by the follow-selection block
+var onViewTitle = function () {}          // set by the follow-selection block
+var followViewChanged = function () {}    // set by the follow-selection block
 var recTitles = []
 var armableSent = []
 
@@ -778,6 +780,9 @@ function meterToMidi(value) {
 //     second for 30 s from the first idle call, until the selected track has been seen on a strip.
 // ---------------------------------------------------------------------------
 
+// In a filtered view (docs/track-views.md, step 5) the same, on that view's list from the helper (SysEx 1E) instead of the
+// full one: a track not of the view's type is not on it, and the bank stays. The same-name rank for the UF1 keeps
+// going by the full list.
 var followRestart = function () {}, followStop = function () {}, driverActivations = 0
 // The UF1's BANK without a UF8 moves these strips and selects on them (SysEx 5D from the bridge): follow stays out
 // of it meanwhile, as the selection Cubase reports then is late and on the old bank (it banked back).
@@ -785,7 +790,14 @@ var followQuietUntil = 0
 ;(function () {
 	var CHANNELS = 256
 	var allTitles = []
-	var selectedIndex = -1
+	var viewLists = []         // [view][index]: the filtered views' channels (1 .. 6)
+	function curList() {
+		var v = curView ? curView.index : 0
+		if (v === 0) return allTitles
+		return viewLists[v] || (viewLists[v] = [])
+	}
+	var selectedIndex = -1     // the selected track's index in the current view's list
+	var allSelected = -1       // and in the full list (the same-name rank)
 	var followTries = 0
 	var lastTryOffset = -1   // the bank position when the last try was sent
 	var dueMs = 0            // when the next check is due (0 = none)
@@ -794,14 +806,24 @@ var followQuietUntil = 0
 	// At start-up the UF8 is held frozen while the tries run (Cubase ignores presses at first, so it can take
 	// several), and shows the bank once the selected track is on a strip (SysEx 13 01 / 13 00).
 	var startupFrozen = false
+	// After a view switch the same (until the selected track is on a strip, 8 s at most): Cubase drops bank presses
+	// right after a page switch, and the corrections were heard as banking twice or three times (15.11.2026).
+	var viewFrozenUntil = 0
+	function viewUnfreeze(activeDevice) {
+		if (!viewFrozenUntil) return
+		viewFrozenUntil = 0
+		if (startupUntil <= 0) startupFreeze(activeDevice, false)
+	}
 	// A project closed and another opened (the driver deactivated and activated again): the start-up follow again.
 	followRestart = function (activeDevice) {
 		startupUntil = 0
 		followTries = 0
 		dueMs = 0
 		selectedIndex = -1
+		allSelected = -1
 		lastTryOffset = -1
 		allTitles = []
+		viewLists = []
 	}
 	followStop = function (activeDevice) { startupUntil = -1; dueMs = 0; startupFreeze(activeDevice, false) }
 	function startupFreeze(activeDevice, on) {
@@ -819,32 +841,38 @@ var followQuietUntil = 0
 	// The selected track is found by Cubase's current track name. With several tracks of that name: the one
 	// whose UF8 strip is selected, if it is on the strips (exact); otherwise the one nearest to the previous
 	// selection (or to the bank, if there was none), since selection mostly moves step by step.
-	function pickCurrent(activeDevice) {
+	function pickIn(list, previous) {
 		var pick = -1
 		if (currentTitle) {
 			var candidates = []
-			for (var j = 0; j < allTitles.length; ++j) if (allTitles[j] === currentTitle) candidates.push(j)
+			for (var j = 0; j < list.length; ++j) if (list[j] === currentTitle) candidates.push(j)
 			if (candidates.length === 1) pick = candidates[0]
 			else if (candidates.length > 1) {
-				var offset = currentOffset()
+				var offset = offsetIn(list)
 				if (offset >= 0) {
 					for (var s = 0; s < STRIPS; ++s) {
 						if (stripSelected[s] && stripTitles[s] === currentTitle && candidates.indexOf(offset + s) >= 0) { pick = offset + s; break }
 					}
 				}
 				if (pick < 0) {
-					var near = selectedIndex >= 0 ? selectedIndex : Math.max(offset, 0)
+					var near = previous >= 0 ? previous : Math.max(offset, 0)
 					for (var c = 0; c < candidates.length; ++c) {
 						if (pick < 0 || Math.abs(candidates[c] - near) < Math.abs(pick - near)) pick = candidates[c]
 					}
 				}
 			}
 		}
-		sendSameNameRank(activeDevice, pick)
+		return pick
+	}
+	function pickCurrent(activeDevice) {
+		var list = curList()
+		var pick = pickIn(list, selectedIndex)
+		allSelected = list === allTitles ? pick : pickIn(allTitles, allSelected)
+		sendSameNameRank(activeDevice, allSelected)
 		// Only a real change may bank: Cubase re-sends the same values after every bank step.
 		if (pick === selectedIndex) return
 		selectedIndex = pick
-		if (FOLLOW_OBSERVE_ONLY) { out('[CubaseSixty] observe: selected #' + (pick + 1) + ' [' + allTitles[pick] + '], bank starts at #' + (currentOffset() + 1)); return }
+		if (FOLLOW_OBSERVE_ONLY) { out('[CubaseSixty] observe: selected #' + (pick + 1) + ' [' + list[pick] + '], bank starts at #' + (currentOffset() + 1)); return }
 		followTries = 0
 		if (pick < 0) { dueMs = 0; return }
 		dueMs = nowMs() + 300   // let Cubase move the bank first
@@ -876,40 +904,45 @@ var followQuietUntil = 0
 		}
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1C, rank & 0x7F], name, [0xF7]))
 	}
-	function currentOffset() {
-		// The bank position: where the strips' names appear in the full list. Only in the ALL view: in a filtered view
-		// the strips are not next to each other in it (docs/track-views.md, step 5).
-		if (curView && curView.index !== 0) return -1
+	// The bank position: where the strips' names appear in the list (the current view's: the full one in ALL, else the
+	// view's from the helper).
+	function offsetIn(list) {
 		for (var o = 0; o < CHANNELS; ++o) {
 			var match = true, any = false
 			for (var i = 0; i < STRIPS; ++i) {
 				var t = stripTitles[i]
 				if (!t) continue
 				any = true
-				if (allTitles[o + i] !== t) { match = false; break }
+				if (list[o + i] !== t) { match = false; break }
 			}
 			if (any && match) return o
 		}
 		return -1
 	}
+	function currentOffset() { return offsetIn(curList()) }
 	function follow(activeDevice) {
-		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0 || nowMs() < followQuietUntil) { followTries = 0; return }
+		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0 || nowMs() < followQuietUntil) { followTries = 0; viewUnfreeze(activeDevice); return }
 		var offset = currentOffset()
-		if (offset < 0) { followTries = 0; return }
+		if (offset < 0) {
+			followTries = 0
+			if (viewFrozenUntil) dueMs = nowMs() + 300   // a view switch: the new names not all in yet
+			return
+		}
 		var delta = selectedIndex - offset
 		if (delta >= 0 && delta < STRIPS) {   // on a strip: done
 			if (followTries > 0) out('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' is on strip ' + (delta + 1))
 			if (startupUntil > 0) { startupUntil = -1; startupFreeze(activeDevice, false); out('[CubaseSixty] follow: start-up done') }
+			viewUnfreeze(activeDevice)
 			followTries = 0
 			return
 		}
-		if (followTries >= 12) { out('[CubaseSixty] follow: gave up'); followTries = 0; return }
+		if (followTries >= 12) { out('[CubaseSixty] follow: gave up'); followTries = 0; viewUnfreeze(activeDevice); return }
 		var now = nowMs()
 		if (startupUntil > 0) startupFreeze(activeDevice, true)
 		var jump = followTries === 0 || offset === lastTryOffset
 		++followTries
 		lastTryOffset = offset
-		out('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' [' + allTitles[selectedIndex] + '], bank starts at #' + (offset + 1) + ', try ' + followTries)
+		out('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' [' + curList()[selectedIndex] + '], bank starts at #' + (offset + 1) + ', try ' + followTries + (curView && curView.index ? ' (' + curView.label + ')' : ''))
 		if (jump) {
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
@@ -926,10 +959,24 @@ var followQuietUntil = 0
 		sendMidi(activeDevice, SYSEX_HEADER.concat([delta < 0 ? 0x0F : 0x0B, steps, 0xF7]))
 		dueMs = now + steps * 100 + 800
 	}
+	// Is Cubase pausing? (control-feel.md, "How to measure": ~92 idle calls per 10 s, never more than ~0.12 s apart;
+	// fewer with long gaps = Cubase busy.) Logged only when it is.
+	var idleCount = 0, idleSince = 0, idleLast = 0, idleGap = 0
+	function idleMeasure(now) {
+		if (idleLast) idleGap = Math.max(idleGap, now - idleLast)
+		idleLast = now
+		++idleCount
+		if (!idleSince) idleSince = now
+		if (now - idleSince < 10000) return
+		if (idleCount < 75 || idleGap > 400) out('[CubaseSixty] Cubase busy: ' + idleCount + ' idle calls in ' + ((now - idleSince) / 1000).toFixed(1) + ' s, longest gap ' + idleGap + ' ms (view ' + (curView ? curView.label : '?') + ')')
+		idleCount = 0; idleSince = now; idleGap = 0
+	}
 	deviceDriver.mOnIdle = function (activeDevice) {
 		flushLog(activeDevice)
 		var now = nowMs()
 		if (now <= 0) return
+		idleMeasure(now)
+		if (viewFrozenUntil && now > viewFrozenUntil) { out('[CubaseSixty] follow: view switch, gave up after 8 s'); viewUnfreeze(activeDevice) }
 		requestListsIfNeeded(activeDevice, now)
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
@@ -948,8 +995,8 @@ var followQuietUntil = 0
 	// bit; 7F 7F = not known), so its bank-right stops at the bank where the last track is on strip 8.
 	var sentTotal = -2, sentOffset = -2
 	function reportBank(activeDevice) {
-		var total = 0
-		while (total < CHANNELS && allTitles[total]) ++total
+		var list = curList(), total = 0
+		while (total < CHANNELS && list[total]) ++total
 		var offset = currentOffset()
 		if (total === sentTotal && offset === sentOffset) return
 		sentTotal = total
@@ -966,8 +1013,39 @@ var followQuietUntil = 0
 	onAllTitle = function (activeDevice, index, title) {
 		if (allTitles[index] === title) return
 		allTitles[index] = title
+		if (curView && curView.index) return   // (a filtered view goes by its own list)
 		reportBank(activeDevice)
 		if (title && title === currentTitle) pickCurrent(activeDevice)
+	}
+	onViewTitle = function (activeDevice, v, index, title) {
+		if (v < 1 || v > 6 || index >= CHANNELS) return
+		var list = viewLists[v] || (viewLists[v] = [])
+		if (list[index] === title) return
+		list[index] = title
+		if (!curView || curView.index !== v) return
+		reportBank(activeDevice)
+		if (title && title === currentTitle) pickCurrent(activeDevice)
+	}
+	// Another view: the selected track looked up in its list, and banked to if it is there (after 300 ms, as a new
+	// selection); the bank's size and position for the bridge.
+	// Right after a page switch Cubase is busy re-sending the new page's values and drops bank presses (a jump of 5
+	// landed 2 or 3, then corrected, heard as banking two or three times, 15.11.2026). So: the UF8 held frozen from the
+	// switch until the selected track is on a strip (the tries then run unseen, and the end shows once); the first try
+	// once the names are in.
+	followViewChanged = function (activeDevice) {
+		selectedIndex = -1
+		followTries = 0
+		lastTryOffset = -1
+		dueMs = 0
+		viewUnfreeze(activeDevice)
+		reportBank(activeDevice)
+		pickCurrent(activeDevice)
+		if (dueMs > 0 && startupUntil <= 0) {
+			var now = nowMs()
+			dueMs = now + 800
+			viewFrozenUntil = now + 8000
+			startupFreeze(activeDevice, true)
+		}
 	}
 })()
 
@@ -1018,6 +1096,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	}
 	if (m[4] === 0x5D && m.length >= 7) {   // the UF1 banks these strips: no follow for <n> x 100 ms
 		followQuietUntil = Date.now() + m[5] * 100   // (nowMs is inside the follow block)
+		return
+	}
+	if (m[4] === 0x1E && m.length >= 9) {   // a filtered view's channel (track views)
+		++listNamesSeen
+		onViewTitle(activeDevice, m[5], (m[6] << 7) | m[7], decodeName(m, 8))
 		return
 	}
 	if (m[4] === 0x18 && m.length >= 8) {
@@ -1539,7 +1622,7 @@ eachPage(function (page, bankZone, view) {
 		skAm = activeMapping
 		var changed = curView !== view
 		useView(view)
-		if (changed) out('[CubaseSixty] view: ' + view.label)
+		if (changed) { out('[CubaseSixty] view: ' + view.label); followViewChanged(activeDevice) }
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x14, view.index, 0xF7]))   // the bridge: which view (its numbers, Q3)
 	}
 	page.mOnIdle = function (activeDevice, activeMapping) { pageIdle(activeDevice, activeMapping) }

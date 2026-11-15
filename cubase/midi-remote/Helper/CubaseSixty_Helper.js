@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.3.3-dev'
+var SCRIPT_VERSION = '0.4.0-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -68,7 +68,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x1A: 2, 0x1D: 0 }
+var RESEND = { 0x1A: 2, 0x1D: 0, 0x1F: 3 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -224,6 +224,61 @@ function sendNumbers(activeDevice) {
 	}
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// The UF8's track views (docs/track-views.md, step 5): each filtered view's channels, in the order of its bank (the
+// same filters as the UF8 script's views, following visibility as its bank does). Names only: SysEx 1E <view>
+// <index hi> <index lo> <name> to the UF8 script (follow selection, the bank position in a view), and each one's
+// track number as 1F <view> <index hi> <index lo> <number hi> <number lo> to the bridge (the strips' numbers), matched
+// against the numbers zone as the full list is. The bridge also counts them (the view picker dims empty views).
+// ---------------------------------------------------------------------------------------------------------------
+var VIEW_LISTS = [
+	null,   // 0 = ALL: the full list above
+	{ name: 'audio', size: 256, filters: ['includeAudioChannels'] },
+	{ name: 'instruments', size: 256, filters: ['includeInstrumentChannels', 'includeSamplerChannels'] },
+	{ name: 'MIDI', size: 256, filters: ['includeMIDIChannels'] },
+	{ name: 'groups', size: 128, filters: ['includeGroupChannels'] },
+	{ name: 'FX', size: 128, filters: ['includeFXChannels'] },
+	{ name: 'VCA', size: 128, filters: ['includeVCAChannels'] }
+]
+var viewTitles = [], sentViewNumbers = []
+function sendViewTitle(activeDevice, v, index) {
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, v, (index >> 7) & 0x7F, index & 0x7F], encodeName(viewTitles[v][index]), [0xF7]))
+}
+for (var vl = 1; vl < VIEW_LISTS.length; ++vl) {
+	viewTitles[vl] = []
+	sentViewNumbers[vl] = []
+	var vz = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: ' + VIEW_LISTS[vl].name)
+	for (var vf = 0; vf < VIEW_LISTS[vl].filters.length; ++vf) {
+		try { vz[VIEW_LISTS[vl].filters[vf]]() } catch (e) { out('[CubaseSixty Helper] ' + VIEW_LISTS[vl].name + ': ' + VIEW_LISTS[vl].filters[vf] + ' not available: ' + e) }
+	}
+	for (var vc = 0; vc < VIEW_LISTS[vl].size; ++vc) {
+		;(function (v, index, ch) {
+			ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+				if (viewTitles[v][index] === title) return
+				viewTitles[v][index] = title
+				sendViewTitle(activeDevice, v, index)
+				numbersDirty = true
+			}
+		})(vl, vc, vz.makeMixerBankChannel())
+	}
+}
+// A list's numbers: matched name by name, in order, against the numbers zone (as sendNumbers does the full list).
+function sendViewNumbers(activeDevice, v) {
+	var list = viewTitles[v], sent = sentViewNumbers[v], j = 0
+	for (var i = 0; i < VIEW_LISTS[v].size; ++i) {
+		var n = 0
+		if (list[i]) {
+			var k = j
+			while (k < CHANNELS && numTitles[k] !== list[i]) ++k
+			if (k < CHANNELS) { n = k + 1; j = k + 1 }
+		}
+		if (sent[i] === n) continue
+		if (sent[i] === undefined && n === 0) { sent[i] = 0; continue }
+		sent[i] = n
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1F, v, (i >> 7) & 0x7F, i & 0x7F, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
+	}
+}
+
 var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: recordable')
 var recFilters = ['excludeInputChannels', 'excludeOutputChannels', 'excludeGroupChannels', 'excludeFXChannels', 'excludeVCAChannels']
 for (var f = 0; f < recFilters.length; ++f) {
@@ -252,14 +307,29 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (++resends <= 3 || resends % 20 === 0) out('[CubaseSixty Helper] lists requested (' + resends + ')')
 	for (var i = 0; i < CHANNELS; ++i) sendAll(activeDevice, i)
 	for (var s = 0; s < REC_CHANNELS; ++s) sendRec(activeDevice, s)
+	// The views' lists up to their last name, and one empty entry after it (a list that shrank).
+	for (var v = 1; v < VIEW_LISTS.length; ++v) {
+		var last = -1
+		for (var vi = 0; vi < VIEW_LISTS[v].size; ++vi) if (viewTitles[v][vi]) last = vi
+		for (var vj = 0; vj <= last + 1 && vj < VIEW_LISTS[v].size; ++vj) sendViewTitle(activeDevice, v, vj)
+	}
 	soloSent = -1
 	sendSolo(activeDevice)
 }
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
 deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
-deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); resendLast = {}; sentNumbers = []; flushLog(activeDevice) }
+deviceDriver.mOnDeactivate = function (activeDevice) {
+	out('[CubaseSixty Helper] inactive (no project)')
+	resendLast = {}
+	sentNumbers = []
+	for (var v = 1; v < VIEW_LISTS.length; ++v) sentViewNumbers[v] = []
+	flushLog(activeDevice)
+}
 deviceDriver.mOnIdle = function (activeDevice) {
-	if (numbersDirty) sendNumbers(activeDevice)   // once the names have come in (they arrive in a burst)
+	if (numbersDirty) {   // once the names have come in (they arrive in a burst)
+		sendNumbers(activeDevice)
+		for (var v = 1; v < VIEW_LISTS.length; ++v) sendViewNumbers(activeDevice, v)
+	}
 	flushLog(activeDevice)
 }

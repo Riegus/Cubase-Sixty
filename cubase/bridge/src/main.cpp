@@ -130,6 +130,17 @@ std::atomic<int> g_uf8View{0};
 std::atomic<bool> g_viewPick{false};
 std::atomic<int> g_viewPickGen{0};
 void switchView(int v);
+std::mutex g_numMx;
+// The filtered views' (1-6) numbers by position in the view's list (helper SysEx 1F), and which positions hold a
+// channel (helper 1E, passed on to the UF8 script): the picker dims a view with none. Both under g_numMx.
+std::vector<int> g_viewNumber[7];
+std::vector<bool> g_viewHas[7];
+int viewChannels(int v)   // (g_numMx held)
+{
+    int n = 0;
+    for (bool b : g_viewHas[v]) n += b;
+    return n;
+}
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
 const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
@@ -207,6 +218,7 @@ bool g_ownText = false;   // the bridge feeds its own text through onMidiIn ("Wa
 std::atomic<int> g_bankTotal{-1}, g_bankOffset{-1};
 std::atomic<int> g_selStrip{0};   // the UF8 strip (1-8) holding the selected track, 0 = none (from Cubase's SEL LEDs)
 void note(uint8_t n, bool on);
+void pageRightBurst(int count, int target);
 // Returns true when it handled the press (the caller must then not send the bank note).
 bool userBankRight(bool pressed)
 {
@@ -216,13 +228,7 @@ bool userBankRight(bool pressed)
     if (remaining >= 8) return false;             // a full bank follows: the normal step
     if (!pressed) return false;                   // releases pass (a stray release does no harm)
     if (remaining <= 0) return true;              // the last track is already on a strip: stay
-    std::thread([remaining] {
-        for (int i = 0; i < remaining; ++i) {
-            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(60));
-            note(kNotePageRight, true);
-            note(kNotePageRight, false);
-        }
-    }).detach();
+    pageRightBurst(remaining, total - 8);
     return true;
 }   // set once Cubase has sent us a name or colour
 
@@ -869,9 +875,15 @@ void paintSoftKeys()
     if (g_noProject) return;
     if (g_viewPick) {   // the track view picker: the views, the current one lit
         const int cur = g_uf8View;
+        bool empty[kViewCount] = {};
+        {
+            // A view without channels (the helper's lists): its key dark (still a key: the list may not be in yet).
+            std::lock_guard<std::mutex> lk(g_numMx);
+            for (int v = 1; v < kViewCount; ++v) empty[v] = !g_viewHas[v].empty() && viewChannels(v) == 0;   // (nothing heard: not known)
+        }
         for (int s = 0; s < kStrips; ++s) {
             sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s >= kViewCount ? uf8::TopSoftKeyState::Off
-                : s == cur ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
+                : s == cur ? uf8::TopSoftKeyState::On : empty[s] ? uf8::TopSoftKeyState::Off : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
             g_dev.send(uf8::buildPluginSlotName(uint8_t(s), s < kViewCount ? kViewNames[s] : ""));
         }
         sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick1, false));
@@ -961,7 +973,6 @@ std::atomic<bool> g_uf8Frozen{false};
 // bar, as the UF1 shows the selected track's: counted as the MixConsole does, hidden tracks too. The Helper script
 // gives each channel of the UF8's bank list (visible channels, in order) its number (SysEx 1A); the UF8 script says
 // where the bank starts (12). Blank for an empty strip and with no project.
-std::mutex g_numMx;
 std::vector<int> g_chanNumber;   // by position in the bank list: its number (0 = not known)
 std::string g_numShown[8];       // what each strip shows ("" = not drawn since the UF8 connected)
 // The text cell in each strip's colour bar (15.11.2026), as Rea-Sixty and the UF1: the SSL plug-in on the strip's
@@ -990,10 +1001,10 @@ void paintStripNumbers(bool force = false)
         std::string t = "  ";
         int number = 0;
         const size_t i = size_t(offset + s);
-        if (g_uf8View != 0)
-            ;   // a filtered view: the bank position in the full list is not known (numbers by name: step 5)
-        else if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
-            t = std::to_string(number = g_chanNumber[i]);
+        const int view = g_uf8View;
+        const std::vector<int>& numbers = view > 0 && view < 7 ? g_viewNumber[view] : g_chanNumber;   // the view's list
+        if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < numbers.size() && numbers[i] > 0)
+            t = std::to_string(number = numbers[i]);
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
         if (force || g_numShown[s] != t) {
@@ -1014,6 +1025,28 @@ void paintStripNumbers(bool force = false)
 std::atomic<int> g_freezeGen{0};
 std::atomic<bool> g_freezeHeld{false};
 std::atomic<int> g_holdGen{0};   // the script holds the freeze (SysEx 13 01 ... 13 00): bursts leave it on
+void replayUf8Cache();
+// Bank-right near the end: page-rights until the last track is on strip 8. With more than one, the UF8 frozen like a
+// jump so only the end shows (15.11.2026: each step moved the motors, heard as banking two or three times), and
+// 100 ms apart (at 60 ms a press was now and then lost, and the bank stopped one short). The end is shown as soon as
+// the script reports the bank there (SysEx 12: it does once all eight names are in), else after 400 ms.
+void pageRightBurst(int count, int target)
+{
+    std::thread([count, target] {
+        const int gen = count > 1 ? ++g_freezeGen : 0;
+        if (count > 1) g_uf8Frozen = true;
+        for (int i = 0; i < count; ++i) {
+            if (i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            note(kNotePageRight, true);
+            note(kNotePageRight, false);
+        }
+        if (count > 1) {
+            for (int waited = 0; waited < 400 && g_bankOffset != target; waited += 20)
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            if (g_freezeGen == gen && !g_freezeHeld) { g_uf8Frozen = false; replayUf8Cache(); }
+        }
+    }).detach();
+}
 void replayUf8Cache();
 void onMidiIn(std::vector<unsigned char>& msg);
 // No project (the script's driver deactivated): every strip as an empty one (name, colour, meter, dB, its LEDs),
@@ -1100,7 +1133,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
     // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
         g_projectOpen = m[5] != 0;
-        if (m[5] == 0) { { std::lock_guard<std::mutex> lk(g_numMx); g_chanNumber.clear(); } paintStripNumbers(); }
+        if (m[5] == 0) {
+            { std::lock_guard<std::mutex> lk(g_numMx); g_chanNumber.clear(); for (auto& v : g_viewNumber) v.clear(); for (auto& v : g_viewHas) v.clear(); }
+            paintStripNumbers();
+        }
         if (m[5] == 0) uf8NoProject();
         else { g_dev.send(uf8::buildVPotMode(std::array<uint8_t, kStrips>{1, 1, 1, 1, 1, 1, 1, 1})); uf8ProjectOpen(); }
         // (Always logged: the tray app shows it.)
@@ -1713,7 +1749,33 @@ int main(int argc, char** argv)
             paintStripNumbers();
             return;
         }
-        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19)) return;
+        if (msg.size() >= 11 && msg[0] == 0xF0 && msg[4] == 0x1F && msg[5] > 0 && msg[5] < 7) {   // a view's track number
+            const size_t i = (size_t(msg[6]) << 7) | msg[7];
+            const int n = (int(msg[8]) << 7) | msg[9];
+            if (i < 256) {
+                std::lock_guard<std::mutex> lk(g_numMx);
+                auto& numbers = g_viewNumber[msg[5]];
+                if (numbers.size() <= i) numbers.resize(i + 1, 0);
+                numbers[i] = n;
+            }
+            if (g_uf8View == msg[5]) paintStripNumbers();
+            return;
+        }
+        if (msg.size() >= 9 && msg[0] == 0xF0 && msg[4] == 0x1E && msg[5] > 0 && msg[5] < 7) {   // a view's channel (or none)
+            const size_t i = (size_t(msg[6]) << 7) | msg[7];
+            bool countChanged = false;
+            if (i < 256) {
+                std::lock_guard<std::mutex> lk(g_numMx);
+                auto& has = g_viewHas[msg[5]];
+                if (has.size() <= i) has.resize(i + 1, false);
+                const bool now = msg.size() > 9;   // (a name follows)
+                const int before = viewChannels(msg[5]);
+                has[i] = now;
+                countChanged = (before == 0) != (viewChannels(msg[5]) == 0);
+            }
+            if (countChanged && g_viewPick) paintSoftKeys();
+        }
+        if (msg.size() < 6 || msg[0] != 0xF0 || (msg[4] != 0x18 && msg[4] != 0x19 && msg[4] != 0x1E)) return;
         std::lock_guard<std::mutex> lk(g_outMx);
         try { g_out.send(msg); } catch (const RtMidiError& e) { std::fprintf(stderr, "midi out: %s\n", e.getMessage().c_str()); }
     });

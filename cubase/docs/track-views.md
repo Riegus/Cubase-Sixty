@@ -75,7 +75,15 @@ Both now find the strips by name in the Helper's list of all channels. In a filt
 - Follow selection: selecting a track of the view's type banks to it. Selecting a track of another type leaves the bank alone.
 - The bank report (SysEx 12) per view.
 
+How it was built: the Helper has one names-only zone per filtered view (the same filters, following visibility as the UF8's banks do) and sends each list (1E) to the UF8 script and its project numbers (1F, matched against the numbers zone like the full list) to the bridge. The UF8 script's follow block works on the active view's list; switching views looks the selection up in the new list and banks to it. The picker darkens views whose list is empty.
+
 Test: numbers and follow selection in each view, including two tracks with the same name. Selecting a track of the view's type in the MixConsole or project window banks the UF8 to it (in the spike's AUDIO page it did not: the follow only ran on the Mixer page).
+
+**Done (15.11.2026; UF8 script 0.19.0, Helper 0.4.0).** Tested on the UF8. Found on the way:
+- The bridge dropped the views' numbers (it expected 1F one byte longer).
+- After a view switch Cubase drops bank presses for a second or more. The UF8 is held frozen from the switch until it is on the selected track, so only the end shows.
+- Near the end of a list, bank-right's single steps each moved the motors ("banking twice"), and at 60 ms apart one could be lost. The bridge now freezes the UF8, spaces the steps 100 ms apart, and shows the end as soon as the script reports it.
+- The UF8 script logs when Cubase pauses (idle calls). Banking and selecting were found acceptable with the Helper's six extra lists.
 
 ### 6. ARMED
 
