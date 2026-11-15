@@ -139,6 +139,7 @@ std::mutex g_numMx;
 // channel (helper 1E, passed on to the UF8 script): the picker dims a view with none. Both under g_numMx.
 std::vector<int> g_viewNumber[kViewCount];
 std::array<int, 8> g_armedAll{-1, -1, -1, -1, -1, -1, -1, -1};   // ARMED: each strip's track in the full list (SysEx 32)
+int g_armedCount = -1;   // how many tracks are armed (SysEx 33; -1 not known): the picker darkens ARMED with none
 std::vector<bool> g_viewHas[kViewCount];   // (ARMED, 7: none, the script lays its strips out itself)
 int viewChannels(int v)   // (g_numMx held)
 {
@@ -967,7 +968,8 @@ void paintSoftKeys()
         {
             // A view without channels (the helper's lists): its key dark (still a key: the list may not be in yet).
             std::lock_guard<std::mutex> lk(g_numMx);
-            for (int v = 1; v < kViewCount; ++v) empty[v] = !g_viewHas[v].empty() && viewChannels(v) == 0;   // (nothing heard: not known)
+            for (int v = 1; v < 7; ++v) empty[v] = !g_viewHas[v].empty() && viewChannels(v) == 0;   // (nothing heard: not known)
+            empty[7] = g_armedCount == 0;
         }
         for (int s = 0; s < kStrips; ++s) {
             sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s >= kViewCount ? uf8::TopSoftKeyState::Off
@@ -1411,6 +1413,9 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (dead && !g_dead[s]) { armedBlank(s); g_dead[s] = true; }
             else if (!dead) g_dead[s] = false;
             paintStripNumbers();
+        } else if (m.size() >= 8 && m[4] == 0x33) {   // how many tracks are armed (the picker)
+            { std::lock_guard<std::mutex> lk(g_numMx); g_armedCount = (m[5] << 7) | m[6]; }
+            if (g_viewPick) paintSoftKeys();
         } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
             const int v = m[5] < kViewCount ? m[5] : 0;
             if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);

@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.21.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.22.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -62,7 +62,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x32: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
+var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x32: 1, 0x33: 0, 0x26: 1, 0x27: 1, 0x7C: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -1165,8 +1165,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		++listNamesSeen
 		onRecTitle(activeDevice, m[5], decodeName(m, 6))
 		armed.dirty = true
+		armedCountSend(activeDevice)
 	} else if (m[4] === 0x2F && m.length >= 8) {   // a recordable channel's record-enable (helper): the ARMED view
 		if (recArmed[m[5]] !== (m[6] === 1)) { recArmed[m[5]] = m[6] === 1; armed.dirty = true }
+		armedCountSend(activeDevice)
 	}
 }
 
@@ -1767,9 +1769,9 @@ var VIEWS = [
 // 15.11.2026), so the page's own zone (the bank keys are bound to it) is VCA only, and the strips' differ by excludes
 // of types they do not include anyway.
 var REC_INCLUDES = ['includeAudioChannels', 'includeInstrumentChannels', 'includeSamplerChannels', 'includeMIDIChannels']
-// (TEST 15.11.2026: excludes of inputs / outputs on top of includes seemed to count for nothing, those zones moved with
-// the plain includes one; group / FX / VCA ones did separate. And the helper's recordable list is the includes too now:
-// the exclude-style list held one channel more, so the positions were off by one.)
+// (15.11.2026: excludes of inputs / outputs on top of includes count for nothing, those zones moved with the plain
+// includes one; group / FX / VCA ones separate. The helper's recordable list uses the same includes: an exclude-style
+// list held one channel more, so the positions were off by one.)
 var ARMED_ZONE_FILTERS = []
 for (var azf = 0; azf < 8; ++azf) {
 	var fl = REC_INCLUDES.slice()
@@ -1841,19 +1843,12 @@ function armedLayout(activeDevice) {
 	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
 	if (moves) armed.checkAt = Date.now() + 600
 }
-// (TEST) Where the strips landed: the names they show against the armed list, 1.5 s after a layout.
+// 0.6 s after the strips moved: their fader positions sent again from what Cubase gave them (the motors did not always
+// follow the move, 15.11.2026).
 function armedCheck(activeDevice) {
 	if (!armed.checkAt || Date.now() < armed.checkAt) return
 	armed.checkAt = 0
-	var pos = []
-	for (var f = 0; f < STRIPS; ++f) pos.push(armed.unused[f] || !faderPosResend[f] ? '-' : faderPosResend[f](activeDevice))
-	out('[CubaseSixty] ARMED faders sent again: ' + pos.join(' '))
-	var list = armedList(), parts = []
-	for (var k = 0; k < STRIPS; ++k) {
-		var slot = list[armed.offset + k]
-		parts.push((k + 1) + ': ' + (slot === undefined ? '(none)' : '"' + recTitles[slot] + '"') + ' -> "' + (stripTitles[k] || '') + '"')
-	}
-	out('[CubaseSixty] ARMED check (wanted -> shown): ' + parts.join(', '))
+	for (var f = 0; f < STRIPS; ++f) if (!armed.unused[f] && faderPosResend[f]) faderPosResend[f](activeDevice)
 }
 // A track selected: Cubase scrolls every zone of the page to show it, so all eight one-channel zones jumped to the
 // selected track (15.11.2026). The UF8 held (SysEx 13 01), then 0.3 s later every strip laid out afresh, and shown
@@ -1865,6 +1860,13 @@ function armedSelectionMoved(activeDevice, title) {
 	var first = armed.selTitle === undefined
 	armed.selTitle = title
 	if (first) return   // (the page's first report: nothing has moved)
+	// Follow the selection: an armed track off the strips, its page of eight (by name).
+	var list = armedList()
+	for (var i = 0; i < list.length; ++i) {
+		if (recTitles[list[i]] !== title) continue
+		if (i < armed.offset || i >= armed.offset + STRIPS) armed.offset = Math.min(i - (i % STRIPS), Math.max(0, list.length - STRIPS))
+		break
+	}
 	if (!armed.relayoutAt) sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 1, 0xF7]))
 	armed.relayoutAt = Date.now() + 300
 	armed.showAt = 0
@@ -1878,6 +1880,13 @@ function armedIdle(activeDevice) {
 		armed.showAt = now + 400
 	}
 	if (armed.showAt && now >= armed.showAt) { armed.showAt = 0; sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 0, 0xF7])) }
+}
+// How many are armed, for the picker (it darkens ARMED with none): SysEx 33 <count hi> <count lo>, on change.
+function armedCountSend(activeDevice) {
+	var count = armedList().length
+	if (count === armed.countSent) return
+	armed.countSent = count
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x33, (count >> 7) & 0x7F, count & 0x7F, 0xF7]))
 }
 function armedPage(activeDevice, step) {
 	var n = armedList().length
