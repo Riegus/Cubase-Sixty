@@ -806,6 +806,14 @@ var followQuietUntil = 0
 	// At start-up the UF8 is held frozen while the tries run (Cubase ignores presses at first, so it can take
 	// several), and shows the bank once the selected track is on a strip (SysEx 13 01 / 13 00).
 	var startupFrozen = false
+	// After a view switch the same (until the selected track is on a strip, 8 s at most): Cubase drops bank presses
+	// right after a page switch, and the corrections were heard as banking twice or three times (15.11.2026).
+	var viewFrozenUntil = 0
+	function viewUnfreeze(activeDevice) {
+		if (!viewFrozenUntil) return
+		viewFrozenUntil = 0
+		if (startupUntil <= 0) startupFreeze(activeDevice, false)
+	}
 	// A project closed and another opened (the driver deactivated and activated again): the start-up follow again.
 	followRestart = function (activeDevice) {
 		startupUntil = 0
@@ -913,17 +921,22 @@ var followQuietUntil = 0
 	}
 	function currentOffset() { return offsetIn(curList()) }
 	function follow(activeDevice) {
-		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0 || nowMs() < followQuietUntil) { followTries = 0; return }
+		if (FOLLOW_OBSERVE_ONLY || seek.active || selectedIndex < 0 || nowMs() < followQuietUntil) { followTries = 0; viewUnfreeze(activeDevice); return }
 		var offset = currentOffset()
-		if (offset < 0) { followTries = 0; return }
+		if (offset < 0) {
+			followTries = 0
+			if (viewFrozenUntil) dueMs = nowMs() + 300   // a view switch: the new names not all in yet
+			return
+		}
 		var delta = selectedIndex - offset
 		if (delta >= 0 && delta < STRIPS) {   // on a strip: done
 			if (followTries > 0) out('[CubaseSixty] follow: selected #' + (selectedIndex + 1) + ' is on strip ' + (delta + 1))
 			if (startupUntil > 0) { startupUntil = -1; startupFreeze(activeDevice, false); out('[CubaseSixty] follow: start-up done') }
+			viewUnfreeze(activeDevice)
 			followTries = 0
 			return
 		}
-		if (followTries >= 12) { out('[CubaseSixty] follow: gave up'); followTries = 0; return }
+		if (followTries >= 12) { out('[CubaseSixty] follow: gave up'); followTries = 0; viewUnfreeze(activeDevice); return }
 		var now = nowMs()
 		if (startupUntil > 0) startupFreeze(activeDevice, true)
 		var jump = followTries === 0 || offset === lastTryOffset
@@ -963,6 +976,7 @@ var followQuietUntil = 0
 		var now = nowMs()
 		if (now <= 0) return
 		idleMeasure(now)
+		if (viewFrozenUntil && now > viewFrozenUntil) { out('[CubaseSixty] follow: view switch, gave up after 8 s'); viewUnfreeze(activeDevice) }
 		requestListsIfNeeded(activeDevice, now)
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
@@ -1014,16 +1028,24 @@ var followQuietUntil = 0
 	}
 	// Another view: the selected track looked up in its list, and banked to if it is there (after 300 ms, as a new
 	// selection); the bank's size and position for the bridge.
-	// Not at once: right after a page switch Cubase is busy re-sending the new page's values and dropped bank presses
-	// (a jump of 5 landed 3, then corrected: "it banks two times", 15.11.2026). 1.2 s, when the names are in.
+	// Right after a page switch Cubase is busy re-sending the new page's values and drops bank presses (a jump of 5
+	// landed 2 or 3, then corrected, heard as banking two or three times, 15.11.2026). So: the UF8 held frozen from the
+	// switch until the selected track is on a strip (the tries then run unseen, and the end shows once); the first try
+	// once the names are in.
 	followViewChanged = function (activeDevice) {
 		selectedIndex = -1
 		followTries = 0
 		lastTryOffset = -1
 		dueMs = 0
+		viewUnfreeze(activeDevice)
 		reportBank(activeDevice)
 		pickCurrent(activeDevice)
-		if (dueMs > 0) dueMs = nowMs() + 1200
+		if (dueMs > 0 && startupUntil <= 0) {
+			var now = nowMs()
+			dueMs = now + 800
+			viewFrozenUntil = now + 8000
+			startupFreeze(activeDevice, true)
+		}
 	}
 })()
 
