@@ -1677,7 +1677,7 @@ eachPage(function (page, bankZone, view) {
 		var changed = curView !== view
 		useView(view)
 		if (changed) { out('[CubaseSixty] view: ' + view.label); followViewChanged(activeDevice) }
-		if (view.armed) { try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
+		if (view.armed) { armed.sentAll = []; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }   // (the bridge forgot the dead strips when another view came)
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x14, view.index, 0xF7]))   // the bridge: which view (its numbers, Q3)
 	}
 	page.mOnIdle = function (activeDevice, activeMapping) { pageIdle(activeDevice, activeMapping) }
@@ -1799,24 +1799,31 @@ function armedLayout(activeDevice) {
 	var list = armedList()
 	if (armed.offset >= list.length) armed.offset = Math.max(0, Math.floor((list.length - 1) / STRIPS) * STRIPS)
 	var t0 = Date.now(), moves = 0
+	// First each strip's track in the full list (SysEx 32 <strip> <index hi> <index lo>, 7F 7F = none): the bridge's
+	// numbers and SSL plug-in names go by it, and it drops what Cubase sends for a strip without one (dead). Before the
+	// moves, so what Cubase sends for a strip that has a track again is not dropped.
+	for (var n = 0; n < STRIPS; ++n) {
+		var at = list[armed.offset + n] === undefined ? -1 : recToAll(list[armed.offset + n])
+		if (armed.sentAll[n] === at) continue
+		armed.sentAll[n] = at
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x32, n], at < 0 ? [0x7F, 0x7F] : [(at >> 7) & 0x7F, at & 0x7F], [0xF7]))
+	}
 	for (var k = 0; k < STRIPS; ++k) {
 		var slot = list[armed.offset + k]
 		var unused = slot === undefined
 		var target = unused ? (view.pos[k] >= 0 ? view.pos[k] : 0) : slot
-		if (view.pos[k] !== target) {
+		// A strip with a track again, its zone already there: moved away and back, so Cubase sends its values again (the
+		// bridge dropped them while the strip was dead).
+		var revive = armed.unused[k] === true && !unused && view.pos[k] === target
+		if (view.pos[k] !== target || revive) {
 			var a = view.zones[k].mAction
-			if (!(view.pos[k] >= 0) || target < view.pos[k]) { a.mResetBank.trigger(skAm); view.pos[k] = 0; ++moves }
-			while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
+			if (revive && target === 0) { a.mShiftRight.trigger(skAm); a.mResetBank.trigger(skAm); moves += 2 }
+			else {
+				if (!(view.pos[k] >= 0) || target <= view.pos[k]) { a.mResetBank.trigger(skAm); view.pos[k] = 0; ++moves }
+				while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
+			}
 		}
 		if (armed.unused[k] !== unused) { armed.unused[k] = unused; paintStripName(activeDevice, k) }
-	}
-	// Each strip's track in the full list (SysEx 32 <strip> <index hi> <index lo>, 7F 7F = none): the bridge's numbers and
-	// SSL plug-in names go by it in ARMED.
-	for (var n = 0; n < STRIPS; ++n) {
-		var at = armed.unused[n] ? -1 : recToAll(list[armed.offset + n])
-		if (armed.sentAll[n] === at) continue
-		armed.sentAll[n] = at
-		sendMidi(activeDevice, SYSEX_HEADER.concat([0x32, n], at < 0 ? [0x7F, 0x7F] : [(at >> 7) & 0x7F, at & 0x7F], [0xF7]))
 	}
 	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
 	if (moves) armed.checkAt = Date.now() + 600

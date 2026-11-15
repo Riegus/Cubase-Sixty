@@ -1153,11 +1153,47 @@ void uf8ProjectOpen()
 
 void uf8NoProject();
 void uf8IdleText(int kind);
+// ARMED: a strip without an armed track is dead. Its one-channel zone still has a channel behind it (where it was),
+// so what Cubase sends for that strip is dropped, and the strip is blanked once: name, colour, dB, meter, value line,
+// LEDs off, fader down (15.11.2026: with only the name blank, the first armed track's meter, CUT and fader showed).
+std::array<std::atomic<bool>, 8> g_dead{};
+int stripOfMsg(const std::vector<unsigned char>& m)
+{
+    if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D) {
+        switch (m[4]) {
+            case 0x01: case 0x02: case 0x06: case 0x07: case 0x0C: case 0x0D: case 0x0E: case 0x20: case 0x26: case 0x27:
+                return m[5] < kStrips ? m[5] : -1;
+            default: return -1;
+        }
+    }
+    if (m.size() < 3) return -1;
+    const uint8_t st = m[0] & 0xF0;
+    if (st == 0xE0) return (m[0] & 0x0F) < kStrips ? (m[0] & 0x0F) : -1;
+    if (st == 0xB0 && m[1] >= kCcMeter && m[1] < kCcMeter + 2 * kStrips) return (m[1] - kCcMeter) % kStrips;
+    if ((st == 0x90 || st == 0x80 || st == 0xA0) && m[0] == st) {   // (MIDI channel 1: the strips' keys)
+        const int n = m[1];
+        if ((n >= 8 && n < 32) || (n >= 48 && n < 56) || (n >= 64 && n < 72) || (n >= 112 && n < 120)) return n % 8;
+    }
+    return -1;
+}
+void armedBlank(int s)
+{
+    std::vector<unsigned char> name{0xF0, 0x7D, 0x52, 0x36, 0x01, uint8_t(s), 0xF7};
+    std::vector<unsigned char> colour{0xF0, 0x7D, 0x52, 0x36, 0x02, uint8_t(s), 0, 0, 0, 0xF7};
+    std::vector<unsigned char> db{0xF0, 0x7D, 0x52, 0x36, 0x0C, uint8_t(s), 0xF7};
+    std::vector<unsigned char> ml{0xB0, uint8_t(kCcMeter + s), 0}, mr{0xB0, uint8_t(kCcMeter + kStrips + s), 0};
+    for (auto* v : {&name, &colour, &db, &ml, &mr}) onMidiIn(*v);
+    g_panLine[s].clear();
+    g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
+    for (int cls = 0; cls < 4; ++cls) setLed(s, cls, false);
+    if (!g_touched[s]) driveFader(s, 0);
+}
 void onMidiIn(std::vector<unsigned char>& msg)
 {
     const auto& m = msg;
     if (m.empty()) return;
     if (cs::scriptLogSysex(m.data(), m.size())) return;
+    if (const int ds = stripOfMsg(m); ds >= 0 && g_dead[ds]) return;   // ARMED: a strip without a track
     // The script's driver: 7C 00 = deactivated (Cubase closed the project and shows the Hub), 7C 01 = active again.
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D && m[4] == 0x7C) {
         g_projectOpen = m[5] != 0;
@@ -1295,11 +1331,16 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_bankOffset = v(7);
             paintStripNumbers();
         } else if (m.size() >= 9 && m[4] == 0x32 && m[5] < kStrips) {   // ARMED: a strip's track in the full list
-            g_armedAll[m[5]] = (m[6] == 0x7F && m[7] == 0x7F) ? -1 : (m[6] << 7) | m[7];
+            const int s = m[5], a = (m[6] == 0x7F && m[7] == 0x7F) ? -1 : (m[6] << 7) | m[7];
+            g_armedAll[s] = a;
+            const bool dead = g_uf8View == 7 && a < 0;
+            if (dead && !g_dead[s]) { armedBlank(s); g_dead[s] = true; }
+            else if (!dead) g_dead[s] = false;
             paintStripNumbers();
         } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
             const int v = m[5] < kViewCount ? m[5] : 0;
             if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+            if (v != 7) for (auto& d : g_dead) d = false;   // (ARMED's dead strips live again in another view)
             paintStripNumbers(true);
             paintSoftKeys();   // Q3's LED, the picker
         } else if (m.size() >= 6 && m[4] == 0x11) {
