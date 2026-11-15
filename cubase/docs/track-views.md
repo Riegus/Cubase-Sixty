@@ -53,6 +53,8 @@ Test: the whole UF8 part of test-checklist.md, unchanged. This is the step where
 
 Test: each view shows only its track type. Banking, fader modes, sends, SOLO / CUT / SEL, meters and colours all work in every view.
 
+**Done (15.11.2026, script 0.18.0-dev).** Tested on the UF8: every view, banking, the route carried over by the bridge's route notes. Found on the way: the fader send view's dB value lagged, and the fader and the value jumped when the hand stopped. The bridge wrote the hand to Cubase 50+ times a second and Cubase fell seconds behind. Fixed: at most one write every 60 ms, the dB value drawn from the send level curve, and late values and positions ignored for 3 s after the hand (see control-feel.md).
+
 ### 4. Picking a view on the UF8
 
 - Q3 opens the picker. The top soft keys show the view names, and the current view is lit. Pressing one switches view and closes the picker; Q3 again closes it unchanged. It works the same way as Nav Mode on Q1 / Q2.
