@@ -44,9 +44,13 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   its number) but still a 0 dB level. Treat it as no send: fader at the bottom, no value.
 - **Following the mouse.** Cubase reports a Direct Access change only when an edit ends (a mouse drag showed only at
   the release), and the text read right after a write is not updated yet. In the send views the script reads the
-  levels each idle tick (~9 a second) and sends what changed, value or text. SSL Strip Mode is polled the same way
-  (15.11.2026: before, a plug-in fader or pan moved with the mouse showed on the UF8 only now and then, and the dB
-  field did not follow the fader).
+  levels each idle tick (~9 a second) and sends what changed. The text trails the value, so it is read again for
+  ~0.5 s after each change (reading it on every strip every tick made the send views feel slow). SSL Strip Mode is
+  polled the same way (15.11.2026: before, a plug-in fader or pan moved with the mouse showed on the UF8 only now
+  and then, and the dB field did not follow the fader).
+- **The fader send view's dB field** (15.11.2026): drawn by the bridge from the send level curve while the hand moves
+  the fader, as the V-pot send view's value line; the script's text is held back until 0.5 s after the hand, and the
+  last one shown then. Before, it followed the fader late (Cubase's text, one poll behind).
 - **Where it is used.** UF1 V-pots in DAW / SENDS (turns on CC 21–24 to custom values); UF8 fader send view and
   V-pot send view (the strip-mode messages 25–29); the same path as SSL Strip Mode.
 

@@ -1553,10 +1553,16 @@ function sendViewPoll(activeDevice) {
 	for (var i = 0; i < STRIPS; ++i) {
 		var st = skStrip[i]
 		if (!st) continue
+		// The text is read for ~0.5 s after each value change (it trails the value), not all the time: reading it on
+		// every strip each tick made the send views feel slow (15.11.2026).
 		if (st.faderOn && (st.fKind === 'send' || st.fKind === 'plugin') && st.fObj >= 0) {
 			var v = skDa[i].getParameterProcessValue(skAm, st.fObj, st.fTag)
-			var ft = st.fKind === 'plugin' ? daText(skDa[i], st.fObj, st.fTag) : null   // (the send views as before: value only)
-			if (v !== st.fPolled || ft !== st.fTextPolled) { st.fPolled = v; st.fTextPolled = ft; stripFaderSend(activeDevice, i) }
+			if (v !== st.fPolled) { st.fPolled = v; st.fSettle = 5; st.fTextPolled = daText(skDa[i], st.fObj, st.fTag); stripFaderSend(activeDevice, i) }
+			else if (st.fSettle > 0) {
+				--st.fSettle
+				var ft = daText(skDa[i], st.fObj, st.fTag)
+				if (ft !== st.fTextPolled) { st.fTextPolled = ft; stripFaderShow(activeDevice, i) }
+			}
 		}
 		if (st.panOn && st.vKind === 'plugin' && st.vObj >= 0) {
 			var pv = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)

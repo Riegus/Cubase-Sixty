@@ -255,6 +255,19 @@ void driveFader(int s, uint16_t v14)
 }
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
 long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+// The fader send view's dB field while the hand moves a fader: drawn at once from the send level curve (as the V-pot
+// send view's value line), and the script's text (0C, which trails) held back until 0.5 s after the hand; the
+// last one held is shown then (15.11.2026: the value followed the fader late).
+std::array<std::atomic<long long>, 8> g_dbOwnUntil{};
+std::array<std::atomic<int>, 8> g_dbHeldGen{};
+std::string dbFieldText(std::string t)
+{
+    if (const size_t at = t.rfind("dB"); at != std::string::npos) t.erase(at);
+    while (!t.empty() && t.back() == ' ') t.pop_back();
+    while (!t.empty() && t.front() == ' ') t.erase(0, 1);
+    if (t.size() > 6) t.resize(6);
+    return t;
+}
 void note2(uint8_t n) { sendMidi({0x91, n, 127}); sendMidi({0x81, n, 0}); }
 // FINE: the V-pots move a quarter as far while it is held; a double press latches it (a press unlatches).
 // PAN: the V-pots back on pan (out of a focused soft-key parameter, the V-pot send view and FLIP); lit while they are.
@@ -312,6 +325,13 @@ void handleFrame(const uf8frames::Frame& fr)
         // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
         if (g_stripFader[s] || g_routeSend >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
+        if (g_routeSend >= 0 && !g_stripEmpty[s]) {   // the dB field at once, from the send level curve
+            const std::string t = dbFieldText(cs::uf1LevelText(int(v)));
+            if (!t.empty()) {
+                g_dbOwnUntil[s] = nowMs8() + 500;
+                g_dev.send(uf8::buildFaderDbReadout(s, t, "dB"));
+            }
+        }
         // Echo the hand position so the motor does not jump back on release.
         g_dev.send(uf8fader::echo(s, r.pbOut));
         break;
@@ -1055,7 +1075,24 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (g_routeSend < 0 && !g_routeFlip && !g_stripFader[m[5]] && !g_noProject) cs::fader0dbSeen(v, g_volPb[m[5]]);
-            if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+            const uint8_t s = m[5];
+            if (g_routeSend >= 0 && (g_touched[s] || nowMs8() < g_dbOwnUntil[s])) {
+                // The hand is on it (fader send view): this one shown once the hand has been off for 0.5 s, unless a
+                // newer one comes.
+                const int gen = ++g_dbHeldGen[s];
+                std::thread([s, gen, v] {
+                    for (;;) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        if (gen != g_dbHeldGen[s]) return;
+                        if (g_touched[s] || nowMs8() < g_dbOwnUntil[s]) continue;
+                        if (g_routeSend >= 0 && !g_stripEmpty[s]) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+                        return;
+                    }
+                }).detach();
+            } else {
+                ++g_dbHeldGen[s];   // (a held one is older)
+                if (!g_stripEmpty[s]) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+            }
         } else if (m.size() >= 7 && m[4] == 0x1C) {
             // Which of several same-named tracks the UF8 script found selected: for the UF1 script's track number.
             cs::uf1SendToScript(std::vector<unsigned char>(m.begin(), m.end()));
