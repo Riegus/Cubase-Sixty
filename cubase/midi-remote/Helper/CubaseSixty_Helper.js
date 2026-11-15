@@ -125,6 +125,7 @@ function sendSolo(activeDevice) {
 // Track steps: which channel is selected (-1: none of the list, e.g. a folder or the Stereo Out), the last one that
 // was, and the last step's target (a quick next press counts from it: Cubase reports the selection late).
 var selVars = []
+var selSeen = []   // (test, 15.11.2026)
 var hostMapping = null   // for Cubase's next / previous track (from the callbacks that pass it)
 page.mOnActivate = function (activeDevice, activeMapping) { hostMapping = activeMapping }
 var selIndex = -1
@@ -162,7 +163,8 @@ for (var c = 0; c < CHANNELS; ++c) {
 		var sel = surface.makeCustomValueVariable('sel' + index)
 		page.makeValueBinding(sel, ch.mValue.mSelected)
 		sel.mOnProcessValueChange = function (activeDevice, value) {
-			if (value > 0.5 && selIndex !== index) out('[CubaseSixty Helper] selected: #' + index + ' "' + (allTitles[index] || '') + '"' + scanState())
+			if ((value > 0.5) !== !!selSeen[index]) out('[CubaseSixty Helper] sel value: #' + index + ' "' + (allTitles[index] || '') + '" ' + (value > 0.5 ? 'on' : 'off') + scanState())
+			selSeen[index] = value > 0.5
 			if (value > 0.5) selIndex = index
 			else if (selIndex === index) selIndex = -1
 		}
@@ -308,6 +310,9 @@ function scanStep(activeDevice) {
 		scan.found[base + k] = t
 		if (!t) full = false
 	}
+	var shown = scanSlots[v].filter(function (x) { return !!x })
+	var selT = selIndex >= 0 ? allTitles[selIndex] : ''
+	out('[CubaseSixty Helper] reading ' + VIEW_LISTS[v].name + ' bank ' + scan.bank + ': ' + shown.length + ' names, "' + (shown[0] || '') + '" .. "' + (shown[shown.length - 1] || '') + '"' + (selT && shown.indexOf(selT) >= 0 ? ', the selected track among them' : ''))
 	if (full && base + SCAN_WIDTH < VIEW_MAX) {
 		++scan.bank
 		if (scanMove('next')) return
