@@ -665,6 +665,7 @@ eachPage(function (page, bankZone, view) {
 		seek.selectedTitle = title
 		seekCheck(activeDevice)
 		followCurrentTitle(activeDevice, title)
+		if (view.armed) armedSelectionMoved(activeDevice)
 	}
 })
 
@@ -1142,6 +1143,9 @@ midiInput.mOnSysex = function (activeDevice, message) {
 		return
 	}
 	if (m[4] === 0x30 && m.length >= 8) {   // the bridge asks the script to move the bank: 30 <kind> <count>
+		// ARMED: kinds 5-8 page through the armed tracks (bank right / left, page right / left). The bank keys' own
+		// callback did not reach the script there (15.11.2026).
+		if (m[5] >= 5 && m[5] <= 8) { if (curView && curView.armed) armedPage(activeDevice, [STRIPS, -STRIPS, 1, -1][m[5] - 5]); return }
 		bankTrigger(activeDevice, m[5], m[6])
 		return
 	}
@@ -1728,7 +1732,7 @@ function sendViewPoll(activeDevice) {
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	if (armed.dirty && curView && curView.armed) { armed.dirty = false; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
-	if (curView && curView.armed) armedCheck(activeDevice)
+	if (curView && curView.armed) { armedIdle(activeDevice); armedCheck(activeDevice) }
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
 	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
@@ -1850,6 +1854,24 @@ function armedCheck(activeDevice) {
 		parts.push((k + 1) + ': ' + (slot === undefined ? '(none)' : '"' + recTitles[slot] + '"') + ' -> "' + (stripTitles[k] || '') + '"')
 	}
 	out('[CubaseSixty] ARMED check (wanted -> shown): ' + parts.join(', '))
+}
+// A track selected: Cubase scrolls every zone of the page to show it, so all eight one-channel zones jumped to the
+// selected track (15.11.2026). The UF8 held (SysEx 13 01), then 0.3 s later every strip laid out afresh, and shown
+// 0.4 s after that (13 00).
+function armedSelectionMoved(activeDevice) {
+	if (!armed.relayoutAt) sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 1, 0xF7]))
+	armed.relayoutAt = Date.now() + 300
+	armed.showAt = 0
+}
+function armedIdle(activeDevice) {
+	var now = Date.now()
+	if (armed.relayoutAt && now >= armed.relayoutAt) {
+		armed.relayoutAt = 0
+		curView.pos = []
+		try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) }
+		armed.showAt = now + 400
+	}
+	if (armed.showAt && now >= armed.showAt) { armed.showAt = 0; sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 0, 0xF7])) }
 }
 function armedPage(activeDevice, step) {
 	var n = armedList().length

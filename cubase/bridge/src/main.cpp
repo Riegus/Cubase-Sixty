@@ -750,6 +750,14 @@ void handleFrame(const uf8frames::Frame& fr)
             // connect (at start, and when the UF8 is plugged in again).
             const bool foot = (*n == 62 || *n == 63);
             if (foot && std::chrono::steady_clock::now() - g_uf8ConnectedAt.load() < std::chrono::seconds(4)) break;
+            // ARMED: the bank / page keys page through the armed tracks, by the script (SysEx 30, kinds 5-8).
+            if (g_uf8View == 7 && (*n == kNoteBankRight || *n == kNoteBankLeft || *n == 44 || *n == 45)) {
+                if (pressed) {
+                    const uint8_t kind = *n == kNoteBankRight ? 5 : *n == kNoteBankLeft ? 6 : *n == 45 ? 7 : 8;
+                    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x30, kind, 1, 0xF7});
+                }
+                break;
+            }
             if (*n == kNoteBankRight && userBankRight(pressed)) break;
             note(*n, pressed);
             if (pressed && *n >= kNoteAutoOff && *n <= kNoteAutoTouch) cs::autoModePressed(*n);
