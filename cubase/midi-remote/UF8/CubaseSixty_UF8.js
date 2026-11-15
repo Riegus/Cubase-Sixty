@@ -665,7 +665,7 @@ eachPage(function (page, bankZone, view) {
 		seek.selectedTitle = title
 		seekCheck(activeDevice)
 		followCurrentTitle(activeDevice, title)
-		if (view.armed) armedSelectionMoved(activeDevice)
+		if (view.armed) armedSelectionMoved(activeDevice, title)
 	}
 })
 
@@ -1858,7 +1858,13 @@ function armedCheck(activeDevice) {
 // A track selected: Cubase scrolls every zone of the page to show it, so all eight one-channel zones jumped to the
 // selected track (15.11.2026). The UF8 held (SysEx 13 01), then 0.3 s later every strip laid out afresh, and shown
 // 0.4 s after that (13 00).
-function armedSelectionMoved(activeDevice) {
+// Only a real change: Cubase reports the selected track again after every layout (the zones moved), which made this a
+// loop, the UF8 held all the time (15.11.2026).
+function armedSelectionMoved(activeDevice, title) {
+	if (title === armed.selTitle) return
+	var first = armed.selTitle === undefined
+	armed.selTitle = title
+	if (first) return   // (the page's first report: nothing has moved)
 	if (!armed.relayoutAt) sendMidi(activeDevice, SYSEX_HEADER.concat([0x13, 1, 0xF7]))
 	armed.relayoutAt = Date.now() + 300
 	armed.showAt = 0
