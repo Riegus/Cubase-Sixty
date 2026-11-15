@@ -85,6 +85,10 @@ Test: numbers and follow selection in each view, including two tracks with the s
 - Near the end of a list, bank-right's single steps each moved the motors ("banking twice"), and at 60 ms apart one could be lost. The bridge now freezes the UF8, spaces the steps 100 ms apart, and shows the end as soon as the script reports it.
 - The UF8 script logs when Cubase pauses (idle calls). Banking and selecting were found acceptable with the Helper's six extra lists.
 
+**Then, the same day:**
+- **Bank moves by the script itself** (`bankZone.mAction.….trigger(activeMapping)`), all at once. A follow jump landed in 40–120 ms, every time, also right after a view switch. Bank-right near the end landed in ~0.2 s. Now the normal path; the bridge's bank notes are the fallback.
+- **The Helper's lists cost ~0.9 s of stall after every selection change** (A/B: the longest gap 2.0 s with them, 1.1 s without). They are now read through a 16-channel window per view that the Helper banks through itself: 96 channels instead of 1,280. The stall is back to ~1.0–1.1 s. Reading all six takes 6–8 s in the background, 1 s after the full list last changed (a track added, removed, renamed or hidden).
+
 ### 6. ARMED
 
 Starts with its own spike. Two candidate routes:
