@@ -103,6 +103,12 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   text of 0.00 with its position, the position seen most often and at least twice: a fader moving past 0 dB once
   gave 6256 instead of 12928; kept in `cubase\fader-0db.txt`); until it is
   known they stay put. The cache keeps Cubase's values, so they go back when the project opens.
+- **On the printed scale** (15.11.2026). A level goes Cubase position -> dB (Cubase's fader curve, which is also its
+  send level curve: the learnt level curve plus built-in points, a log fit below the lowest) -> motor position from
+  the UF8's marks, measured on the hardware (a fader set on each mark, its position logged: +12 15583, +6 14108,
+  0 12593, -5 10961, -10 9380, -20 7168, -30 5487, -40 3585, -60 1922; below -60 straight to the bottom at -100 dB).
+  The hand back the same way. Before, Cubase's position went straight onto the motor and -14 dB sat near "30".
+  Linear still: pan under FLIP, an SSL strip's fader (Strip Mode). Not the UF1's fader yet.
 - "Touch selects the track" is a setting.
 
 ## Buttons
