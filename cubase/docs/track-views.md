@@ -96,10 +96,21 @@ Starts with its own spike. Two candidate routes:
 - **a.** Have the Helper select the armed tracks, then run Cubase's "Show Only Selected Tracks" from the project window. This needs testing first: does it work without the MixConsole selected, and does the UF8 bank follow? Leaving the view must give back the user's own hidden tracks, so the selection and visibility must be restored. That is the risky part.
 - **b.** If (a) fails: a RECORD view, showing the tracks that can record (audio, instrument, sampler and MIDI), with the armed ones marked. This is safe but not quite "armed only".
 
+**Built instead (15.11.2026, branch wip-views-armed): a route c, made possible by the script's own bank moves.** The ARMED page gives each strip a bank zone of one channel (the recordable types), and the script moves each one to an armed track. The Helper reports every recordable channel's record-enable (value bindings on its recordable list, SysEx 2F). What was found on the way:
+- **Zones with the same filters on one page move together**, whatever their names: Cubase keeps one bank position for them. Each strip's zone needs a filter set of its own that holds the same channels. Includes of audio, instrument, sampler and MIDI, plus each combination of "exclude groups / FX / VCA" (8 sets) work. "Exclude inputs / outputs" on top of includes counted for nothing.
+- **Include filters and exclude filters don't hold the same channels.** "Exclude inputs, outputs, groups, FX and VCA" also held one channel (probably a rack instrument's return, "Northern Texture") that the includes leave out. The Helper's recordable list now uses the includes too, so the positions match.
+- **Cubase puts a page's zones back to the start each time the page is activated.** ARMED lays its strips out afresh on every activation (~120 moves in ~50 ms, no stall).
+- **A strip without an armed track still has a channel behind it.** The bridge marks it dead (SysEx 32 with 7F 7F) and blanks it: name, colour, dB, meter, LEDs and fader down. It drops what Cubase sends for that strip, and ignores the hand on it. The script tells the bridge each strip's track in the full list (SysEx 32), for the numbers and SSL plug-in names.
+- REC mode's SEL colours had to become solid colours (as Rea-Sixty's) once the selected-strip mask was sent.
+
 ### 7. Settings and docs
 
 - Settings: which views the picker offers, and the view at start-up (ALL, or the last one).
 - user-guide.md (regenerate the HTML), test-checklist.md, bridge-midi-protocol.md (the new notes and SysEx), banking.md, and known-issues / cubase-limitations for anything Cubase can't do.
+
+## After the views
+
+- **The UF8 faders follow Cubase's fader curve, not the UF8's printed dB scale** (all views, from the start; see known-issues.md). To place them by dB as Rea-Sixty does.
 
 ## Decided (2026-11-15)
 
