@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.3.2-dev'
+var SCRIPT_VERSION = '0.3.3-dev'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -68,7 +68,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x1D: 0 }
+var RESEND = { 0x1A: 2, 0x1D: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -180,8 +180,48 @@ for (var c = 0; c < CHANNELS; ++c) {
 			if (allTitles[index] === title) return
 			allTitles[index] = title
 			sendAll(activeDevice, index)
+			numbersDirty = true
 		}
 	})(c, ch)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Track numbers for the UF8's strips (15.11.2026): each channel of the list above (the MixConsole's visible channels,
+// the UF8 bank's order) gets its number as the MixConsole counts it, hidden channels too, the way the UF1 numbers the
+// selected track (its 'Track numbers' zone): SysEx 1A <index hi> <index lo> <number hi> <number lo>, 0 = not known.
+// Names only in this zone (value bindings in a hidden bank made Cubase pause). The visible list is the full list
+// without the hidden channels, in the same order, so it is matched name by name from the top; with several channels
+// of one name and some of them hidden, a number can be off.
+// ---------------------------------------------------------------------------------------------------------------
+var numTitles = []
+var sentNumbers = []
+var numbersDirty = false
+var numZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: numbers').excludeInputChannels().excludeOutputChannels()
+	.setFollowVisibility(false)
+for (var nc = 0; nc < CHANNELS; ++nc) {
+	;(function (index, ch) {
+		ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+			if (numTitles[index] === title) return
+			numTitles[index] = title
+			numbersDirty = true
+		}
+	})(nc, numZone.makeMixerBankChannel())
+}
+function sendNumbers(activeDevice) {
+	numbersDirty = false
+	var j = 0
+	for (var i = 0; i < CHANNELS; ++i) {
+		var n = 0
+		if (allTitles[i]) {
+			var k = j
+			while (k < CHANNELS && numTitles[k] !== allTitles[i]) ++k
+			if (k < CHANNELS) { n = k + 1; j = k + 1 }
+		}
+		if (sentNumbers[i] === n) continue
+		if (sentNumbers[i] === undefined && n === 0) { sentNumbers[i] = 0; continue }   // nothing to say yet
+		sentNumbers[i] = n
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1A, (i >> 7) & 0x7F, i & 0x7F, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
+	}
 }
 
 var recZone = page.mHostAccess.mMixConsole.makeMixerBankZone('Helper: recordable')
@@ -218,5 +258,8 @@ midiInput.mOnSysex = function (activeDevice, message) {
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
 deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
-deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); resendLast = {}; flushLog(activeDevice) }
-deviceDriver.mOnIdle = function (activeDevice) { flushLog(activeDevice) }
+deviceDriver.mOnDeactivate = function (activeDevice) { out('[CubaseSixty Helper] inactive (no project)'); resendLast = {}; sentNumbers = []; flushLog(activeDevice) }
+deviceDriver.mOnIdle = function (activeDevice) {
+	if (numbersDirty) sendNumbers(activeDevice)   // once the names have come in (they arrive in a burst)
+	flushLog(activeDevice)
+}
