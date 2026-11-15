@@ -257,6 +257,7 @@ std::atomic<bool> g_stripMode{false};
 std::array<std::atomic<bool>, 8> g_stripFader{};
 std::array<std::atomic<bool>, 8> g_stripPan{};   // the V-pot on the strip's pan (turns as 28, push as 29)
 std::array<std::atomic<int>, 8> g_volPb{-1, -1, -1, -1, -1, -1, -1, -1};
+std::array<std::atomic<int>, 8> g_handHw{};   // the hand's last fader position, in the motor's units
 void driveFader(int s, uint16_t v14)
 {
     std::vector<std::vector<uint8_t>> frames;
@@ -386,6 +387,7 @@ void handleFrame(const uf8frames::Frame& fr)
         const auto r = uf8fader::read(pb14, (d[4] & 0x80) != 0, /*grabValid=*/false);
         if (!r.usable) return;
         const uint16_t v = pbToMidi14(r.pbOut);
+        g_handHw[s] = r.pbOut;   // (the motor's own units: the fader-scale calibration logs it on release)
         // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
         if (g_stripFader[s] || g_routeSend >= 0) sendHandToScript(s, v);
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
@@ -411,6 +413,8 @@ void handleFrame(const uf8frames::Frame& fr)
         const uint8_t s = d[3];
         if (s >= kStrips) return;
         const bool down = d[4] != 0;
+        // (Fader scale calibration, 15.11.2026: where a fader was let go, in the motor's units, 0-15583.)
+        if (!down && g_touched[s]) std::printf("UF8 fader %d let go at %d (motor units, top 15583)\n", s + 1, g_handHw[s].load());
         g_touched[s] = down;
         if (down) {
             { std::lock_guard<std::mutex> lk(g_faderMx); g_engaged[s] = false; }
