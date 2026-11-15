@@ -1261,7 +1261,7 @@ function stripModeUpdate(activeDevice, index) {
 	st.vKind = vKind
 	st.vDa = vDa
 	st.vOn = vOn
-	if (changed) { st.fPolled = st.vPolled = st.vOnPolled = null }
+	if (changed) { st.fPolled = st.vPolled = st.vOnPolled = st.fTextPolled = st.vTextPolled = null }
 	if (changed) {
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x26, index, on ? 1 : 0, pan ? 1 : 0, 0xF7]))
 		flipResets[index](activeDevice)   // the track's own values where the script no longer has them
@@ -1539,13 +1539,21 @@ eachPage(function (page, bankZone, view) {
 // The send views' levels read about nine times a second (each idle tick) and sent when changed: Cubase reports a
 // Direct Access change only when an edit ends (a mouse drag showed only at the release), and right after a write the
 // text was not updated yet (10.11.2026).
+// SSL Strip Mode the same way (15.11.2026: a plug-in fader or pan moved with the mouse showed on the UF8 only now and
+// then, and the dB field did not follow the fader). Text too: right after a write it is not updated yet.
 function sendViewPoll(activeDevice) {
 	for (var i = 0; i < STRIPS; ++i) {
 		var st = skStrip[i]
 		if (!st) continue
-		if (st.faderOn && st.fKind === 'send' && st.fObj >= 0) {
+		if (st.faderOn && (st.fKind === 'send' || st.fKind === 'plugin') && st.fObj >= 0) {
 			var v = skDa[i].getParameterProcessValue(skAm, st.fObj, st.fTag)
-			if (v !== st.fPolled) { st.fPolled = v; stripFaderSend(activeDevice, i) }
+			var ft = daText(skDa[i], st.fObj, st.fTag)
+			if (v !== st.fPolled || ft !== st.fTextPolled) { st.fPolled = v; st.fTextPolled = ft; stripFaderSend(activeDevice, i) }
+		}
+		if (st.panOn && st.vKind === 'plugin' && st.vObj >= 0) {
+			var pv = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
+			var pt = daText(st.vDa, st.vObj, st.vTag)
+			if (pv !== st.vPolled || pt !== st.vTextPolled) { st.vPolled = pv; st.vTextPolled = pt; stripPanSend(activeDevice, i) }
 		}
 		if (st.panOn && st.vKind === 'send' && st.vObj >= 0) {
 			var w = st.vDa.getParameterProcessValue(skAm, st.vObj, st.vTag)
@@ -1560,7 +1568,7 @@ function sendViewPoll(activeDevice) {
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
-	if (route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
+	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
 		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
