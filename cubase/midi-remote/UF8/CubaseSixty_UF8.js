@@ -1558,6 +1558,7 @@ function spikeActivated(activeDevice, name) {
 }
 var spikePressAt = 0
 var spikeQ3 = null
+out('[spike] step: Q3 key')
 try {
 	spikeQ3 = cmdButton()
 	spikeQ3.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 96)
@@ -1566,19 +1567,22 @@ try {
 	}
 } catch (e) { out('[spike] FAILED making the Q3 key: ' + e) }
 function makeSpikePage(name, filters) {
+	out('[spike] step: ' + name + ' makePage')
 	var p = deviceDriver.mMapping.makePage(name)
+	out('[spike] step: ' + name + ' makeMixerBankZone')
 	var z = p.mHostAccess.mMixConsole.makeMixerBankZone()
 	for (var f = 0; f < filters.length; ++f) {
+		out('[spike] step: ' + name + ' ' + filters[f])
 		try { z[filters[f]]() } catch (e) { out('[spike] ' + name + ': ' + filters[f] + ' failed: ' + e) }
 	}
 	spikeCache[name] = { titles: [], colors: [] }
 	for (var i = 0; i < STRIPS; ++i) {
-		spikeStep = name + ' strip ' + (i + 1) + ' channel'
+		spikeStep = name + ' strip ' + (i + 1) + ' channel'; out('[spike] step: ' + spikeStep)
 		var ch = z.makeMixerBankChannel()
-		spikeStep = name + ' strip ' + (i + 1) + ' fader / SEL'
+		spikeStep = name + ' strip ' + (i + 1) + ' fader / SEL'; out('[spike] step: ' + spikeStep)
 		p.makeValueBinding(strips[i].fader.mSurfaceValue, ch.mValue.mVolume).setValueTakeOverModeJump()
 		p.makeValueBinding(strips[i].select.mSurfaceValue, ch.mValue.mSelected)
-		spikeStep = name + ' strip ' + (i + 1) + ' callbacks / meter / Direct Access'
+		spikeStep = name + ' strip ' + (i + 1) + ' callbacks / meter / Direct Access'; out('[spike] step: ' + spikeStep)
 		;(function (index, ch) {
 			ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
 				spikeCount(name + ' title')
@@ -1590,6 +1594,7 @@ function makeSpikePage(name, filters) {
 				spikeCache[name].colors[index] = [r, g, b]
 				if (spikeCur === name) sendStripColor(activeDevice, index, r, g, b)
 			}
+			if (index === 0) out('[spike] step: ' + name + ' meter')
 			var meter = surface.makeCustomValueVariable('spikeMeter' + name.replace(/\W/g, '') + index)
 			try { p.makeValueBinding(meter, ch.mValue.getVUChannelMeterByChannelIndex(0)) } catch (e) { p.makeValueBinding(meter, ch.mValue.mVUMeter) }
 			var last = -1
@@ -1602,30 +1607,32 @@ function makeSpikePage(name, filters) {
 				sendMidi(activeDevice, [0xB0, 80 + index, v])
 				sendMidi(activeDevice, [0xB0, 88 + index, v])
 			}
+			if (index === 0) out('[spike] step: ' + name + ' Direct Access')
 			try {
 				var da = p.mHostAccess.makeDirectAccess(ch)
 				da.mOnParameterChange = function () { spikeCount(name + ' DA') }
 			} catch (e) { if (index === 0) out('[spike] ' + name + ': no Direct Access: ' + e) }
 		})(i, ch)
 	}
-	spikeStep = name + ' bank keys'
+	spikeStep = name + ' bank keys'; out('[spike] step: ' + spikeStep)
 	p.makeActionBinding(bankLeft.mSurfaceValue, z.mAction.mPrevBank)
 	p.makeActionBinding(bankRight.mSurfaceValue, z.mAction.mNextBank)
+	out('[spike] step: ' + name + ' page callbacks')
 	p.mOnActivate = function (activeDevice) { spikeActivated(activeDevice, name) }
 	p.mOnIdle = function () { spikeCount(name + ' page idle') }
 	return p
 }
-var spikeStep = 'start'
+var spikeStep = 'start'; out('[spike] step: ' + spikeStep)
 try {
-	spikeStep = 'AUDIO page'
+	spikeStep = 'AUDIO page'; out('[spike] step: ' + spikeStep)
 	var spikeAudio = makeSpikePage('AUDIO', ['includeAudioChannels'])
-	spikeStep = 'AUDIO + INSTR page'
+	spikeStep = 'AUDIO + INSTR page'; out('[spike] step: ' + spikeStep)
 	var spikeAudioInstr = makeSpikePage('AUDIO + INSTR', ['includeAudioChannels', 'includeInstrumentChannels'])
-	spikeStep = 'Q3 bindings'
+	spikeStep = 'Q3 bindings'; out('[spike] step: ' + spikeStep)
 	page.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudio.mAction.mActivate)
 	spikeAudio.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudioInstr.mAction.mActivate)
 	spikeAudioInstr.makeActionBinding(spikeQ3.mSurfaceValue, page.mAction.mActivate)
-	spikeStep = 'done'
+	spikeStep = 'done'; out('[spike] step: ' + spikeStep)
 } catch (e) { out('[spike] FAILED at ' + spikeStep + ': ' + e + (e && e.stack ? ' | ' + e.stack : '')) }
 ;(function () {
 	var mixerActivate = page.mOnActivate
@@ -1634,6 +1641,7 @@ try {
 		if (spikeSwitchAt || spikePressAt) spikeActivated(activeDevice, 'Mixer')
 	}
 })()
+out('[spike] step: Mixer activate hook done')
 var spikeLogAt = 0
 function spikeIdle(activeDevice) {
 	var now = Date.now()
