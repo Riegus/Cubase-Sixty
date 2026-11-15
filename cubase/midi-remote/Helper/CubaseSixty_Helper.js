@@ -54,7 +54,7 @@ function flushLog(activeDevice) {
 var SYSEX_HEADER = [0xF0, 0x7D, 0x52, 0x36]
 var CHANNELS = 256
 var REC_CHANNELS = 128
-var SCRIPT_VERSION = '0.4.0-dev'
+var SCRIPT_VERSION = '0.4.0-dev (TEST: no view lists)'
 out('[CubaseSixty Helper] script loaded, version ' + SCRIPT_VERSION)
 
 var deviceDriver = midiremote_api.makeDeviceDriver('CubaseSixty', 'Helper', 'Riegus')
@@ -240,6 +240,9 @@ var VIEW_LISTS = [
 	{ name: 'FX', size: 128, filters: ['includeFXChannels'] },
 	{ name: 'VCA', size: 128, filters: ['includeVCAChannels'] }
 ]
+// (TEST A/B, 15.11.2026: does Cubase stall longer after a selection change with these lists? false = not built.)
+var VIEW_LISTS_ON = false
+if (!VIEW_LISTS_ON) for (var vo = 1; vo < VIEW_LISTS.length; ++vo) VIEW_LISTS[vo].size = 0
 var viewTitles = [], sentViewNumbers = []
 function sendViewTitle(activeDevice, v, index) {
 	sendMidi(activeDevice, SYSEX_HEADER.concat([0x1E, v, (index >> 7) & 0x7F, index & 0x7F], encodeName(viewTitles[v][index]), [0xF7]))
