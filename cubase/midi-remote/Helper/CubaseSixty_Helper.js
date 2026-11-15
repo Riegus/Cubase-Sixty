@@ -162,6 +162,7 @@ for (var c = 0; c < CHANNELS; ++c) {
 		var sel = surface.makeCustomValueVariable('sel' + index)
 		page.makeValueBinding(sel, ch.mValue.mSelected)
 		sel.mOnProcessValueChange = function (activeDevice, value) {
+			if (value > 0.5 && selIndex !== index) out('[CubaseSixty Helper] selected: #' + index + ' "' + (allTitles[index] || '') + '"' + scanState())
 			if (value > 0.5) selIndex = index
 			else if (selIndex === index) selIndex = -1
 		}
@@ -275,11 +276,19 @@ for (var vl = 1; vl < VIEW_LISTS.length; ++vl) {
 // window has settled: 150 ms without a new name after one came, or 400 ms after the move if none came (the same names).
 var scan = { v: 0, bank: 0, found: [], movedAt: 0, queue: [], dueAt: 0, started: 0 }
 function scanSoon(delayMs) { scan.dueAt = Date.now() + delayMs }
+// (Test, 15.11.2026: the selection moved by itself while the lists were read at a project's start; when, against the
+// reading's moves.)
+var helperStart = Date.now()
+function scanState() {
+	var now = Date.now()
+	return ' at +' + (now - helperStart) + ' ms' + (scan.v ? ' (reading ' + VIEW_LISTS[scan.v].name + ', bank ' + scan.bank + ', moved ' + (now - scan.movedAt) + ' ms ago)' : ' (not reading)')
+}
 function scanMove(kind) {
 	if (!hostMapping) return false
 	var a = viewZones[scan.v].mAction
 	try { (kind === 'reset' ? a.mResetBank : a.mNextBank).trigger(hostMapping) } catch (e) { out('[CubaseSixty Helper] view lists: ' + e); return false }
 	scan.movedAt = Date.now()
+	out('[CubaseSixty Helper] reading ' + VIEW_LISTS[scan.v].name + ': ' + kind + ' at +' + (scan.movedAt - helperStart) + ' ms')
 	return true
 }
 function scanNextView(activeDevice) {
@@ -396,7 +405,7 @@ midiInput.mOnSysex = function (activeDevice, message) {
 }
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
-deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
+deviceDriver.mOnActivate = function (activeDevice) { helperStart = Date.now(); out('[CubaseSixty Helper] active (a project is open)') }
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	out('[CubaseSixty Helper] inactive (no project)')
 	resendLast = {}
