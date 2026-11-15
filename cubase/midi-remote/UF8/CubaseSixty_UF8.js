@@ -44,7 +44,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.17.0-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.18.0-dev (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -62,7 +62,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x20: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
+var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x26: 1, 0x27: 1, 0x7C: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -877,7 +877,9 @@ var followQuietUntil = 0
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1C, rank & 0x7F], name, [0xF7]))
 	}
 	function currentOffset() {
-		// The bank position: where the strips' names appear in the full list.
+		// The bank position: where the strips' names appear in the full list. Only in the ALL view: in a filtered view
+		// the strips are not next to each other in it (docs/track-views.md, step 5).
+		if (curView && curView.index !== 0) return -1
 		for (var o = 0; o < CHANNELS; ++o) {
 			var match = true, any = false
 			for (var i = 0; i < STRIPS; ++i) {
@@ -1533,7 +1535,13 @@ function skMessage(activeDevice, m) {
 	skReport(activeDevice, index)
 }
 eachPage(function (page, bankZone, view) {
-	page.mOnActivate = function (activeDevice, activeMapping) { skAm = activeMapping; useView(view) }
+	page.mOnActivate = function (activeDevice, activeMapping) {
+		skAm = activeMapping
+		var changed = curView !== view
+		useView(view)
+		if (changed) out('[CubaseSixty] view: ' + view.label)
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x14, view.index, 0xF7]))   // the bridge: which view (its numbers, Q3)
+	}
 	page.mOnIdle = function (activeDevice, activeMapping) { pageIdle(activeDevice, activeMapping) }
 })
 // The send views' levels read about nine times a second (each idle tick) and sent when changed: Cubase reports a
@@ -1578,11 +1586,26 @@ function pageIdle(activeDevice, activeMapping) {
 
 // ---------------------------------------------------------------------------
 // The views (docs/track-views.md): one mapping page each, with the bank zone's filters (called one by one: their
-// return value is not used). Inputs and outputs are never on the UF8.
+// return value is not used; two include filters give both types, measured). Inputs and outputs are never on the
+// UF8. The bridge switches views with channel 2 notes 100 + the view's index, and the page's activation reports the
+// view back (SysEx 14 <index>). Cubase sends the new page's names, colours, values and meters by itself; the fader /
+// V-pot sub-pages start on volume / pan on every activation, so the bridge sends its route notes again after a switch.
+// The page names show in Cubase's MIDI Remote tab ("Mixer" is the page the script always had).
 // ---------------------------------------------------------------------------
 var VIEWS = [
-	{ name: 'Mixer', filters: ['excludeInputChannels', 'excludeOutputChannels'] }
+	{ name: 'Mixer', label: 'ALL', filters: ['excludeInputChannels', 'excludeOutputChannels'] },
+	{ name: 'Audio', label: 'AUDIO', filters: ['includeAudioChannels'] },
+	{ name: 'Instruments', label: 'INSTR', filters: ['includeInstrumentChannels', 'includeSamplerChannels'] },
+	{ name: 'MIDI', label: 'MIDI', filters: ['includeMIDIChannels'] },
+	{ name: 'Groups', label: 'GROUPS', filters: ['includeGroupChannels'] },
+	{ name: 'FX', label: 'FX', filters: ['includeFXChannels'] },
+	{ name: 'VCA', label: 'VCA', filters: ['includeVCAChannels'] }
 ]
+var viewKeys = []
+for (var vk = 0; vk < VIEWS.length; ++vk) {
+	viewKeys.push(cmdButton())
+	viewKeys[vk].mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 100 + vk)
+}
 var views = []
 // The active view's Cubase objects under the names the code uses.
 function useView(view) {
@@ -1597,9 +1620,15 @@ function useView(view) {
 		var page = deviceDriver.mMapping.makePage(VIEWS[v].name)
 		var bankZone = page.mHostAccess.mMixConsole.makeMixerBankZone()
 		for (var f = 0; f < VIEWS[v].filters.length; ++f) bankZone[VIEWS[v].filters[f]]()
-		var view = { index: v, name: VIEWS[v].name, page: page, bankZone: bankZone }
+		var view = { index: v, name: VIEWS[v].name, label: VIEWS[v].label, page: page, bankZone: bankZone }
 		for (var b = 0; b < pageBuilders.length; ++b) pageBuilders[b](page, bankZone, view)
 		views.push(view)
+	}
+	// Every page has the keys to every other view (a page's own key does nothing).
+	for (var p = 0; p < views.length; ++p) {
+		for (var t = 0; t < views.length; ++t) {
+			if (t !== p) views[p].page.makeActionBinding(viewKeys[t].mSurfaceValue, views[t].page.mAction.mActivate)
+		}
 	}
 	useView(views[0])
 })()

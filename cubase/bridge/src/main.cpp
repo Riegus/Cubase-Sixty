@@ -120,6 +120,12 @@ std::atomic<bool> g_nav{false};
 std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's own keys stay dark
 std::atomic<std::chrono::steady_clock::time_point> g_uf8ConnectedAt{};   // the foot switches are ignored just after it
 std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle markers (Q1)
+// Track views (docs/track-views.md): which channel types the UF8 banks over. The script has one mapping page per
+// view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 steps through them (step 3;
+// the picker on the soft keys is step 4).
+constexpr int kViewCount = 7;
+constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA" };
+std::atomic<int> g_uf8View{0};
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
 const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
@@ -457,6 +463,16 @@ void handleFrame(const uf8frames::Frame& fr)
                 if (g_nav) g_navView = d[3] == 0x43 ? 1 : 0;
                 else g_skDomain = d[3] == 0x44 ? 1 : 0;
                 paintSoftKeys();
+            }
+            break;
+        }
+        if (d[3] == 0x45) {   // Q3: the next track view; then the route again (a new page starts on volume / pan)
+            if (pressed) {
+                const int v = (g_uf8View + 1) % kViewCount;
+                g_uf8View = v;
+                std::printf("UF8 Q3: view %s\n", kViewNames[v]);
+                note2(uint8_t(100 + v));
+                std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
             }
             break;
         }
@@ -860,7 +876,9 @@ void paintStripNumbers(bool force = false)
         std::string t = "  ";
         int number = 0;
         const size_t i = size_t(offset + s);
-        if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
+        if (g_uf8View != 0)
+            ;   // a filtered view: the bank position in the full list is not known (numbers by name: step 5)
+        else if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
             t = std::to_string(number = g_chanNumber[i]);
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
@@ -1073,6 +1091,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_bankTotal = v(5);
             g_bankOffset = v(7);
             paintStripNumbers();
+        } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
+            const int v = m[5] < kViewCount ? m[5] : 0;
+            if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+            paintStripNumbers(true);
         } else if (m.size() >= 6 && m[4] == 0x11) {
             // The script asks for a "tick" in 300 ms (note 80): it has no timer of its own, and wants to look
             // at the bank only after Cubase has finished reacting to a new selection.
