@@ -1825,7 +1825,14 @@ function armedLayout(activeDevice) {
 				while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
 			}
 		}
-		if (armed.unused[k] !== unused) { armed.unused[k] = unused; paintStripName(activeDevice, k) }
+		if (armed.unused[k] !== unused) {
+			armed.unused[k] = unused
+			// The bridge blanks a strip without a track and drops what comes for it: what this script last sent there
+			// (dB, pan) is not on it any more, so it is sent again, not skipped as unchanged (vox2 came back without
+			// its dB value, 15.11.2026).
+			if (flipResets[k]) flipResets[k](unused ? null : activeDevice)
+			paintStripName(activeDevice, k)
+		}
 	}
 	out('[CubaseSixty] ARMED: ' + list.length + ' armed, strips from #' + (armed.offset + 1) + ', ' + moves + ' moves in ' + (Date.now() - t0) + ' ms')
 	if (moves) armed.checkAt = Date.now() + 600

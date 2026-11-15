@@ -127,6 +127,7 @@ std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle m
 constexpr int kViewCount = 8;
 constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA", "ARMED" };
 std::atomic<int> g_uf8View{0};
+std::array<std::atomic<bool>, 8> g_dead{};   // ARMED: strips without an armed track (see armedBlank)
 std::atomic<bool> g_viewPick{false};
 std::atomic<int> g_viewPickGen{0};
 void switchView(int v);
@@ -349,6 +350,9 @@ void switchView(int v)
     const bool same = g_uf8View.exchange(v) == v;
     std::printf("UF8 view: %s%s\n", kViewNames[v], same ? " (already on)" : "");
     if (same) return;
+    // Leaving ARMED: its dead strips live again at once (Cubase sends the new page's LEDs before the script reports
+    // the view: Audio FX's SEL was dropped, 15.11.2026).
+    if (v != 7) for (auto& d : g_dead) d = false;
     note2(uint8_t(100 + v));
     std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
 }
@@ -1156,7 +1160,6 @@ void uf8IdleText(int kind);
 // ARMED: a strip without an armed track is dead. Its one-channel zone still has a channel behind it (where it was),
 // so what Cubase sends for that strip is dropped, and the strip is blanked once: name, colour, dB, meter, value line,
 // LEDs off, fader down (15.11.2026: with only the name blank, the first armed track's meter, CUT and fader showed).
-std::array<std::atomic<bool>, 8> g_dead{};
 int stripOfMsg(const std::vector<unsigned char>& m)
 {
     if (m.size() >= 7 && m[0] == 0xF0 && m[1] == 0x7D) {
