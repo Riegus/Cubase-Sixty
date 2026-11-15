@@ -1677,7 +1677,9 @@ eachPage(function (page, bankZone, view) {
 		var changed = curView !== view
 		useView(view)
 		if (changed) { out('[CubaseSixty] view: ' + view.label); followViewChanged(activeDevice) }
-		if (view.armed) { armed.sentAll = []; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }   // (the bridge forgot the dead strips when another view came)
+		// ARMED again: the bridge forgot the dead strips when another view came, and Cubase put the page's zones back to
+		// the start (as it does every page's bank on activation): every strip laid out afresh.
+		if (view.armed) { armed.sentAll = []; armed.unused = []; view.pos = []; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x14, view.index, 0xF7]))   // the bridge: which view (its numbers, Q3)
 	}
 	page.mOnIdle = function (activeDevice, activeMapping) { pageIdle(activeDevice, activeMapping) }
