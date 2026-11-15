@@ -43,6 +43,8 @@ Move everything that is bound per page into `buildView(view)`: the bank zone, st
 
 Test: the whole UF8 part of test-checklist.md, unchanged. This is the step where regressions would come from, so it ships alone.
 
+**Done (15.11.2026, 0.17.0-dev).** `eachPage(function (page, bankZone, view) {...})` blocks, built by `buildViews()` at the end of the script, and `useView()` for the per-view Cubase objects. Checked offline with `cubase/midi-remote/tools/binding-snapshot.js`: the same 851 bindings and callbacks as before. Tested on the UF8. Found on the way (already on `cubase`, fixed): SSL Strip Mode didn't follow the plug-in's fader and pan, and its dB field didn't follow the fader. It is now polled like the send views. The send views' lag is unchanged (the known Cubase issue).
+
 ### 3. The type views
 
 - Build the pages ALL, AUDIO, INSTR (instrument + sampler), MIDI, GROUPS, FX and VCA. Inputs and outputs stay out, as today.
