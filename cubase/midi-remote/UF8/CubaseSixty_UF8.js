@@ -33,6 +33,15 @@ function flushLog(activeDevice) {
 		sendMidi(activeDevice, body)
 	}
 }
+// SPIKE (track views, step 1): how often each page's callbacks fire, logged every 3 s (see the end of the file).
+var spikeT0 = Date.now()
+var spikeCounts = {}
+var spikeCur = 'Mixer', spikeSwitchAt = 0
+function spikeCount(k) {
+	spikeCounts[k] = (spikeCounts[k] || 0) + 1
+	// The first second after a page switch: which callbacks come in by themselves.
+	if (spikeSwitchAt && Date.now() - spikeSwitchAt < 1000) spikeCounts['(<1s after switch) ' + k] = (spikeCounts['(<1s after switch) ' + k] || 0) + 1
+}
 
 // SysEx constants live at the top: the name/colour callbacks fire while the
 // mapping below is still being built, before later `var` lines have run.
@@ -44,7 +53,7 @@ var MAX_NAME_BYTES = 32
 // Debug logging to the MIDI Remote Script Console. Set to true to log every
 // fader, solo, mute, name and colour change (very chatty while a fader moves).
 var DEBUG = false
-var SCRIPT_VERSION = '0.16.1-dev (ports: to Cubase / from Cubase)'
+var SCRIPT_VERSION = '0.17.0-spike (ports: to Cubase / from Cubase)'
 function dbg(text) {
 	if (DEBUG) out('[CubaseSixty] ' + text)
 }
@@ -222,6 +231,7 @@ function routeChanged(activeDevice) {
 }
 // The name a strip shows: the send's destination in a send view, else the track's.
 function paintStripName(activeDevice, index) {
+	if (spikeCur !== 'Mixer') return   // SPIKE: a test page shows its own names
 	var text = stripTitles[index] || ''
 	// (A track without that send shows a blank name, not an empty one: the bridge takes an empty name as no track
 	// on the strip and switches its LEDs off.)
@@ -235,7 +245,7 @@ function paintStripName(activeDevice, index) {
 		var k = cmdButton()
 		k.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, note)
 		page.makeActionBinding(k.mSurfaceValue, sub.mAction.mActivate)
-		sub.mOnActivate = function (activeDevice) { apply(); routeChanged(activeDevice) }
+		sub.mOnActivate = function (activeDevice) { out('[spike] sub page activated: note ' + note + ' (page ' + spikeCur + ')'); apply(); routeChanged(activeDevice) }
 	}
 	key(80, faderVol, function () { route.fader = 'vol' })
 	key(81, faderPan, function () { route.fader = 'pan' })
@@ -309,6 +319,7 @@ for (var i = 0; i < STRIPS; ++i) {
 		try { skDa[index] = page.mHostAccess.makeDirectAccess(ch) } catch (e) { if (index === 0) out('[CubaseSixty] no Direct Access, the SSL soft keys do nothing: ' + e) }
 		if (!skDa[index]) return
 		skDa[index].mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
+			spikeCount('Mixer DA')
 			skAm = activeMapping
 			var st = skStrip[index]
 			if (st.faderOn && objectID === st.fObj && tag === st.fTag) stripFaderSend(activeDevice, index)
@@ -330,6 +341,8 @@ for (var i = 0; i < STRIPS; ++i) {
 			page.makeValueBinding(meter, hostValue)
 			var last = -1
 			meter.mOnProcessValueChange = function (activeDevice, value) {
+				spikeCount('Mixer meter')
+				if (spikeCur !== 'Mixer') return
 				var v = meterToMidi(value)
 				if (v === last) return
 				last = v
@@ -356,6 +369,7 @@ for (var i = 0; i < STRIPS; ++i) {
 	;(function (index) {
 		channel.mOnTitleChange = function (activeDevice, activeMapping, title) {
 			dbg('title strip ' + (index + 1) + ': [' + title + ']')
+			spikeCount('Mixer title')
 			stripTitles[index] = title
 			paintStripName(activeDevice, index)
 			if (skStrip[index]) { skStrip[index].scanned = false; skStrip[index].wanted = null; skAm = activeMapping; skRescanAt = Date.now() + 150 }
@@ -885,6 +899,7 @@ var followQuietUntil = 0
 		dueMs = now + steps * 100 + 800
 	}
 	deviceDriver.mOnIdle = function (activeDevice) {
+		spikeIdle(activeDevice)
 		flushLog(activeDevice)
 		var now = nowMs()
 		if (now <= 0) return
@@ -1504,6 +1519,7 @@ function sendViewPoll(activeDevice) {
 	}
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
+	spikeCount('Mixer page idle')
 	skAm = activeMapping
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
 	if (route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
@@ -1513,3 +1529,103 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SPIKE (track views, step 1; not for merging). Two test pages with type-filtered bank zones: AUDIO, and
+// AUDIO + INSTR (do two include filters give both types?). Q3 (bridge note 96, MIDI channel 2) steps
+// Mixer -> AUDIO -> AUDIO + INSTR -> Mixer. On the test pages only the faders (volume), SEL, the bank keys,
+// names, colours and meters work. The log (scripts.log, "[spike]") tells:
+//   - which page's callbacks fire while it is not the active page (counts every 3 s),
+//   - which callbacks arrive by themselves in the first second after a switch,
+//   - whether the fader / V-pot sub-pages of the Mixer page are activated again when coming back,
+//   - how long the script took to build.
+// On every switch the new page's names and colours are sent from the cache, so the displays are right either way.
+// ---------------------------------------------------------------------------
+var spikeCache = {}   // page name -> { titles: [], colors: [] }
+function spikeShow(activeDevice, name) {
+	if (name === 'Mixer') { for (var i = 0; i < STRIPS; ++i) paintStripName(activeDevice, i); return }
+	var c = spikeCache[name]
+	for (var j = 0; j < STRIPS; ++j) {
+		sendStripName(activeDevice, j, c.titles[j] || '')
+		if (c.colors[j]) sendStripColor(activeDevice, j, c.colors[j][0], c.colors[j][1], c.colors[j][2])
+	}
+}
+function spikeActivated(activeDevice, name) {
+	out('[spike] page ' + name + ' active (' + (spikePressAt ? Date.now() - spikePressAt : 0) + ' ms after the Q3 press)')
+	spikeCur = name
+	spikeSwitchAt = Date.now()
+	spikeShow(activeDevice, name)
+}
+var spikePressAt = 0
+var spikeQ3 = cmdButton()
+spikeQ3.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(1, 96)
+spikeQ3.mSurfaceValue.mOnProcessValueChange = function (activeDevice, value) {
+	if (value > 0.5) { spikePressAt = Date.now(); out('[spike] Q3 pressed on page ' + spikeCur) }
+}
+function makeSpikePage(name, filters) {
+	var p = deviceDriver.mMapping.makePage(name)
+	var z = p.mHostAccess.mMixConsole.makeMixerBankZone()
+	for (var f = 0; f < filters.length; ++f) z = z[filters[f]]()
+	spikeCache[name] = { titles: [], colors: [] }
+	for (var i = 0; i < STRIPS; ++i) {
+		var ch = z.makeMixerBankChannel()
+		p.makeValueBinding(strips[i].fader.mSurfaceValue, ch.mValue.mVolume).setValueTakeOverModeJump()
+		p.makeValueBinding(strips[i].select.mSurfaceValue, ch.mValue.mSelected)
+		;(function (index, ch) {
+			ch.mOnTitleChange = function (activeDevice, activeMapping, title) {
+				spikeCount(name + ' title')
+				spikeCache[name].titles[index] = title
+				if (spikeCur === name) sendStripName(activeDevice, index, title)
+			}
+			ch.mOnColorChange = function (activeDevice, activeMapping, r, g, b) {
+				spikeCount(name + ' colour')
+				spikeCache[name].colors[index] = [r, g, b]
+				if (spikeCur === name) sendStripColor(activeDevice, index, r, g, b)
+			}
+			var meter = surface.makeCustomValueVariable('spikeMeter' + name.replace(/\W/g, '') + index)
+			try { p.makeValueBinding(meter, ch.mValue.getVUChannelMeterByChannelIndex(0)) } catch (e) { p.makeValueBinding(meter, ch.mValue.mVUMeter) }
+			var last = -1
+			meter.mOnProcessValueChange = function (activeDevice, value) {
+				spikeCount(name + ' meter')
+				if (spikeCur !== name) return
+				var v = meterToMidi(value)
+				if (v === last) return
+				last = v
+				sendMidi(activeDevice, [0xB0, 80 + index, v])
+				sendMidi(activeDevice, [0xB0, 88 + index, v])
+			}
+			try {
+				var da = p.mHostAccess.makeDirectAccess(ch)
+				da.mOnParameterChange = function () { spikeCount(name + ' DA') }
+			} catch (e) { if (index === 0) out('[spike] ' + name + ': no Direct Access: ' + e) }
+		})(i, ch)
+	}
+	p.makeActionBinding(bankLeft.mSurfaceValue, z.mAction.mPrevBank)
+	p.makeActionBinding(bankRight.mSurfaceValue, z.mAction.mNextBank)
+	p.mOnActivate = function (activeDevice) { spikeActivated(activeDevice, name) }
+	p.mOnIdle = function () { spikeCount(name + ' page idle') }
+	return p
+}
+var spikeAudio = makeSpikePage('AUDIO', ['includeAudioChannels'])
+var spikeAudioInstr = makeSpikePage('AUDIO + INSTR', ['includeAudioChannels', 'includeInstrumentChannels'])
+page.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudio.mAction.mActivate)
+spikeAudio.makeActionBinding(spikeQ3.mSurfaceValue, spikeAudioInstr.mAction.mActivate)
+spikeAudioInstr.makeActionBinding(spikeQ3.mSurfaceValue, page.mAction.mActivate)
+;(function () {
+	var mixerActivate = page.mOnActivate
+	page.mOnActivate = function (activeDevice, activeMapping) {
+		mixerActivate(activeDevice, activeMapping)
+		if (spikeSwitchAt || spikePressAt) spikeActivated(activeDevice, 'Mixer')
+	}
+})()
+var spikeLogAt = 0
+function spikeIdle(activeDevice) {
+	var now = Date.now()
+	if (now < spikeLogAt) return
+	spikeLogAt = now + 3000
+	var keys = Object.keys(spikeCounts).sort()
+	if (!keys.length) return
+	out('[spike] page ' + spikeCur + ', last 3 s: ' + keys.map(function (k) { return k + ' ' + spikeCounts[k] }).join(', '))
+	spikeCounts = {}
+}
+out('[spike] script built in ' + (Date.now() - spikeT0) + ' ms')

@@ -460,6 +460,10 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             break;
         }
+        if (d[3] == 0x45) {   // Q3 (SPIKE, track views step 1): the UF8 script's next test page
+            if (pressed) { note2(96); std::printf("UF8 Q3: next view (spike)\n"); }
+            break;
+        }
         if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
             if (pressed) { g_skBank = d[3] - 0x68; paintSoftKeys(); }
             break;
