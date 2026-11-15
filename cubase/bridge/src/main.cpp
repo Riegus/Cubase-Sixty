@@ -120,6 +120,12 @@ std::atomic<bool> g_nav{false};
 std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's own keys stay dark
 std::atomic<std::chrono::steady_clock::time_point> g_uf8ConnectedAt{};   // the foot switches are ignored just after it
 std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle markers (Q1)
+// Track views (docs/track-views.md): which channel types the UF8 banks over. The script has one mapping page per
+// view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 steps through them (step 3;
+// the picker on the soft keys is step 4).
+constexpr int kViewCount = 7;
+constexpr const char* kViewNames[kViewCount] = { "ALL", "AUDIO", "INSTR", "MIDI", "GROUPS", "FX", "VCA" };
+std::atomic<int> g_uf8View{0};
 const char* skLabel(int domain, int bank, int slot) { return domain ? kBcSoftKeyLabels[bank][slot] : kSoftKeyLabels[bank][slot]; }
 // A focus key: domain * 48 + bank * 8 + slot.
 const char* skLabelOfKey(int key) { return skLabel(key / 48, key % 48 / 8, key % 8); }
@@ -249,6 +255,62 @@ void driveFader(int s, uint16_t v14)
 }
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
 long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+// The fader send view's dB field while the hand moves a fader: drawn at once from the send level curve (as the V-pot
+// send view's value line), and the script's text (0C, which trails) held back until 0.5 s after the hand; the
+// last one held is shown then (15.11.2026: the value followed the fader late).
+std::array<std::atomic<long long>, 8> g_dbOwnUntil{};
+std::array<std::atomic<int>, 8> g_dbHeldGen{};
+std::mutex g_dbDrawnMx;
+std::string g_dbDrawn[8];   // the last text drawn from the curve (for the log: how far off it was)
+int g_dbDrawnPos[8] = {};
+// The hand on a fader that is the script's (SysEx 25: a send level or an SSL strip's fader, written through Direct
+// Access): at most one every 60 ms, the last one always, as the V-pot send view's 2A (control-feel.md rule 8). Sent
+// with every position report (50+ a second), Cubase fell behind by seconds: the text that came back when the hand
+// stopped was a level from far back, and corrected itself again later (15.11.2026, "jumps 4 dB and more").
+std::array<std::atomic<int>, 8> g_handPos{};          // the hand's last position on a fader that is the script's
+std::array<std::atomic<long long>, 8> g_handAt{};
+void sendHandToScript(uint8_t s, uint16_t v)
+{
+    g_handPos[s] = v;
+    g_handAt[s] = nowMs8();
+    static std::array<std::atomic<long long>, 8> lastTx{};
+    static std::array<std::atomic<int>, 8> pending{};   // position + 1 waiting to go, 0 = none
+    const auto tx = [](uint8_t strip, int pos) {
+        sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, strip, uint8_t((pos >> 7) & 0x7F), uint8_t(pos & 0x7F), 0xF7});
+    };
+    const long long now = nowMs8(), since = now - lastTx[s];
+    if (since >= 60 && pending[s] == 0) { lastTx[s] = now; tx(s, v); return; }
+    if (pending[s].exchange(v + 1) == 0) {
+        std::thread([s, since, tx] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::max<long long>(1, 60 - since)));
+            lastTx[s] = nowMs8();
+            const int p = pending[s].exchange(0);
+            if (p > 0) tx(s, p - 1);
+        }).detach();
+    }
+}
+// Cubase's text not what the bridge drew for where the hand stopped (more than 0.06 dB off): a late one, from a level
+// the hand has passed. Not shown (the drawn one stays); one that agrees, or anything once 3 s have passed, is. (1.5 dB
+// let the last few late ones through, a few tenths each, 15.11.2026; the drawn value is within the curve's error, a
+// few hundredths where it has points, and the settled pair makes that spot exact for next time.)
+bool lateDbText(uint8_t s, const std::string& cubase)
+{
+    std::string drawn;
+    { std::lock_guard<std::mutex> lk(g_dbDrawnMx); drawn = g_dbDrawn[s]; }
+    if (drawn.empty() || drawn == "(gap)" || cubase.empty()) return false;
+    char* e1 = nullptr; char* e2 = nullptr;
+    const double a = std::strtod(drawn.c_str(), &e1), b = std::strtod(cubase.c_str(), &e2);
+    if (e1 == drawn.c_str() || e2 == cubase.c_str()) return false;
+    return std::fabs(a - b) > 0.06;
+}
+std::string dbFieldText(std::string t)
+{
+    if (const size_t at = t.rfind("dB"); at != std::string::npos) t.erase(at);
+    while (!t.empty() && t.back() == ' ') t.pop_back();
+    while (!t.empty() && t.front() == ' ') t.erase(0, 1);
+    if (t.size() > 6) t.resize(6);
+    return t;
+}
 void note2(uint8_t n) { sendMidi({0x91, n, 127}); sendMidi({0x81, n, 0}); }
 // FINE: the V-pots move a quarter as far while it is held; a double press latches it (a press unlatches).
 // PAN: the V-pots back on pan (out of a focused soft-key parameter, the V-pot send view and FLIP); lit while they are.
@@ -304,8 +366,22 @@ void handleFrame(const uf8frames::Frame& fr)
         if (!r.usable) return;
         const uint16_t v = pbToMidi14(r.pbOut);
         // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
-        if (g_stripFader[s] || g_routeSend >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x25, s, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F), 0xF7});
+        if (g_stripFader[s] || g_routeSend >= 0) sendHandToScript(s, v);
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
+        if (g_routeSend >= 0 && !g_stripEmpty[s]) {   // the dB field at once, from the send level curve
+            const std::string t = dbFieldText(cs::uf1LevelText(int(v)));
+            if (!t.empty()) {
+                g_dbOwnUntil[s] = nowMs8() + 500;
+                g_dev.send(uf8::buildFaderDbReadout(s, t, "dB"));
+                std::lock_guard<std::mutex> lk(g_dbDrawnMx);
+                g_dbDrawn[s] = t;
+                g_dbDrawnPos[s] = v;
+            } else {
+                std::lock_guard<std::mutex> lk(g_dbDrawnMx);
+                g_dbDrawn[s] = "(gap)";
+                g_dbDrawnPos[s] = v;
+            }
+        }
         // Echo the hand position so the motor does not jump back on release.
         g_dev.send(uf8fader::echo(s, r.pbOut));
         break;
@@ -457,6 +533,16 @@ void handleFrame(const uf8frames::Frame& fr)
                 if (g_nav) g_navView = d[3] == 0x43 ? 1 : 0;
                 else g_skDomain = d[3] == 0x44 ? 1 : 0;
                 paintSoftKeys();
+            }
+            break;
+        }
+        if (d[3] == 0x45) {   // Q3: the next track view; then the route again (a new page starts on volume / pan)
+            if (pressed) {
+                const int v = (g_uf8View + 1) % kViewCount;
+                g_uf8View = v;
+                std::printf("UF8 Q3: view %s\n", kViewNames[v]);
+                note2(uint8_t(100 + v));
+                std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); applyRoute(); }).detach();
             }
             break;
         }
@@ -860,7 +946,9 @@ void paintStripNumbers(bool force = false)
         std::string t = "  ";
         int number = 0;
         const size_t i = size_t(offset + s);
-        if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
+        if (g_uf8View != 0)
+            ;   // a filtered view: the bank position in the full list is not known (numbers by name: step 5)
+        else if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < g_chanNumber.size() && g_chanNumber[i] > 0)
             t = std::to_string(number = g_chanNumber[i]);
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
@@ -1037,7 +1125,32 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (v.size() > 6) v.resize(6);
             g_dbText[m[5]] = v;
             if (g_routeSend < 0 && !g_routeFlip && !g_stripFader[m[5]] && !g_noProject) cs::fader0dbSeen(v, g_volPb[m[5]]);
-            if (!g_stripEmpty[m[5]]) g_dev.send(uf8::buildFaderDbReadout(uint8_t(m[5]), v, v.empty() ? "" : "dB"));
+            const uint8_t s = m[5];
+            if (g_routeSend >= 0 && (g_touched[s] || nowMs8() < g_dbOwnUntil[s])) {
+                // The hand is on it (fader send view): this one shown once the hand has been off for 0.5 s, unless a
+                // newer one comes.
+                const int gen = ++g_dbHeldGen[s];
+                std::thread([s, gen, v] {
+                    for (;;) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                        if (gen != g_dbHeldGen[s]) return;
+                        if (g_touched[s] || nowMs8() < g_dbOwnUntil[s]) continue;
+                        const bool late = lateDbText(s, v);
+                        if (g_routeSend >= 0 && !g_stripEmpty[s] && !late) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+                        std::string drawn; int pos = 0;
+                        { std::lock_guard<std::mutex> lk(g_dbDrawnMx); drawn = g_dbDrawn[s]; pos = g_dbDrawnPos[s]; }
+                        std::printf("UF8 send fader %d stopped at %d: drawn %s, Cubase %s%s\n", s + 1, pos, drawn.c_str(), v.c_str(),
+                            late ? " (late: not shown)" : drawn == v ? "" : " (corrected)");
+                        return;
+                    }
+                }).detach();
+            } else {
+                ++g_dbHeldGen[s];   // (a held one is older)
+                const bool recent = g_routeSend >= 0 && nowMs8() < g_dbOwnUntil[s] + 3000;
+                const bool late = recent && lateDbText(s, v);
+                if (!g_stripEmpty[s] && !late) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+                if (recent) std::printf("UF8 send fader %d: Cubase later %s%s\n", s + 1, v.c_str(), late ? " (late: not shown)" : "");
+            }
         } else if (m.size() >= 7 && m[4] == 0x1C) {
             // Which of several same-named tracks the UF8 script found selected: for the UF1 script's track number.
             cs::uf1SendToScript(std::vector<unsigned char>(m.begin(), m.end()));
@@ -1073,6 +1186,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_bankTotal = v(5);
             g_bankOffset = v(7);
             paintStripNumbers();
+        } else if (m.size() >= 7 && m[4] == 0x14) {   // the track view the script's active page is (Q3)
+            const int v = m[5] < kViewCount ? m[5] : 0;
+            if (g_uf8View.exchange(v) != v || g_trace8) std::printf("UF8 view: %s (from the script)\n", kViewNames[v]);
+            paintStripNumbers(true);
         } else if (m.size() >= 6 && m[4] == 0x11) {
             // The script asks for a "tick" in 300 ms (note 80): it has no timer of its own, and wants to look
             // at the bank only after Cubase has finished reacting to a new selection.
@@ -1163,9 +1280,26 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_stripFader[s] = m[6] != 0;
             g_stripPan[s] = m.size() >= 9 && m[7] == 1;
             if (!g_stripFader[s] && g_volPb[s] >= 0 && !g_touched[s]) driveFader(s, uint16_t(g_volPb[s].load()));
+        } else if (m.size() >= 10 && m[4] == 0x16 && m[5] < kStrips) {
+            // A settled send level from the fader send view: its exact position and Cubase's text, for the level curve.
+            std::string t(m.begin() + 8, m.end() - 1);
+            if (t.find("dB") == std::string::npos) t += "dB";
+            // A pair far from what the curve says there is a late text (Cubase behind the hand): not learnt.
+            const int pos = (m[6] << 7) | m[7];
+            const std::string known = cs::uf1LevelText(pos);
+            const double a = std::strtod(known.c_str(), nullptr), b = std::strtod(t.c_str(), nullptr);
+            if (!known.empty() && std::fabs(a - b) > 1.5)
+                std::printf("UF8 send level %s at %d not learnt: the curve says %s\n", t.c_str(), pos, known.c_str());
+            else cs::uf1LearnLevel(pos, t);
         } else if (m.size() >= 9 && m[4] == 0x27 && m[5] < kStrips) {
-            const int s = m[5];
-            if (g_stripFader[s] && !g_touched[s]) driveFader(s, uint16_t((m[6] << 7) | m[7]));
+            const int s = m[5], pos = (m[6] << 7) | m[7];
+            // Within 3 s of the hand, a position away from where it let go is a late one (Cubase still catching up with
+            // the writes): the motor stays (15.11.2026: the fader jumped back now and then after the hand let go).
+            if (g_stripFader[s] && !g_touched[s]) {
+                if (nowMs8() - g_handAt[s] < 3000 && std::abs(pos - g_handPos[s]) > 64)
+                    std::printf("UF8 fader %d: late position %d from Cubase ignored (hand at %d)\n", s + 1, pos, g_handPos[s].load());
+                else driveFader(s, uint16_t(pos));
+            }
         } else if (m.size() >= 7 && m[4] == 0x0D && m[5] < kStrips) {
             // A send level on the V-pot (the selected track's sends): "Send" left, the level right.
             std::string v(m.begin() + 6, m.end() - 1);

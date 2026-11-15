@@ -44,9 +44,23 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   its number) but still a 0 dB level. Treat it as no send: fader at the bottom, no value.
 - **Following the mouse.** Cubase reports a Direct Access change only when an edit ends (a mouse drag showed only at
   the release), and the text read right after a write is not updated yet. In the send views the script reads the
-  levels each idle tick (~9 a second) and sends what changed, value or text. SSL Strip Mode is polled the same way
-  (15.11.2026: before, a plug-in fader or pan moved with the mouse showed on the UF8 only now and then, and the dB
-  field did not follow the fader).
+  levels each idle tick (~9 a second) and sends what changed. The text trails the value, so it is read again for
+  ~0.5 s after each change (reading it on every strip every tick made the send views feel slow). SSL Strip Mode is
+  polled the same way (15.11.2026: before, a plug-in fader or pan moved with the mouse showed on the UF8 only now
+  and then, and the dB field did not follow the fader).
+- **The fader send view's dB field** (15.11.2026): drawn by the bridge from the send level curve while the hand moves
+  the fader, as the V-pot send view's value line; the script's text is held back until 0.5 s after the hand, and the
+  last one shown then. Before, it followed the fader late (Cubase's text, one poll behind). The curve learns from the
+  fader view too: a level still for ~0.5 s is sent with its exact position (SysEx 16), so the correction when the hand
+  stops gets smaller with use.
+- **Faders write at most every 60 ms too** (15.11.2026). The hand's position went to the script with every report
+  (50+ a second) and Cubase fell seconds behind: when the hand stopped, the text that came back was a level passed
+  long before, "jumping 4 dB and more" (bridge.log: drawn -4.74, Cubase -18.2). Now throttled as the V-pot's 2A, the
+  last one always sent. And a Cubase text more than 0.06 dB from what was drawn for the hand's position, within 3 s
+  of the hand, is taken as late and not shown (1.5 dB still let a few late ones through, a few tenths each); pairs
+  more than 1.5 dB off are not learnt either. The motor the same way: within 3 s of the hand,
+  a position from Cubase more than 64 (of 16383) from where the hand let go is late, and the fader stays (it jumped
+  back now and then).
 - **Where it is used.** UF1 V-pots in DAW / SENDS (turns on CC 21–24 to custom values); UF8 fader send view and
   V-pot send view (the strip-mode messages 25–29); the same path as SSL Strip Mode.
 
