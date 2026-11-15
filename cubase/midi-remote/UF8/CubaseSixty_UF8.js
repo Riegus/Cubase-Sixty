@@ -1769,8 +1769,9 @@ function armedLayout(activeDevice) {
 		if (view.pos[k] !== target) {
 			var a = view.zones[k].mAction
 			if (!(view.pos[k] >= 0) || target < view.pos[k]) { a.mResetBank.trigger(skAm); view.pos[k] = 0; ++moves }
-			// (mShiftRight did nothing on a one-channel zone, 15.11.2026: every strip stayed on the first track.)
-			while (view.pos[k] < target) { a.mNextBank.trigger(skAm); ++view.pos[k]; ++moves }
+			// (Neither mShiftRight nor mNextBank moved a one-channel zone, 15.11.2026: every strip stayed on the first track.
+			// TEST: two-channel zones, the strip on the first, shifted by one.)
+			while (view.pos[k] < target) { a.mShiftRight.trigger(skAm); ++view.pos[k]; ++moves }
 		}
 		if (armed.unused[k] !== unused) { armed.unused[k] = unused; paintStripName(activeDevice, k) }
 	}
@@ -1832,6 +1833,8 @@ function useView(view) {
 			})(view.zones, bankZone.mAction)
 		}
 		for (var b = 0; b < pageBuilders.length; ++b) pageBuilders[b](page, bankZone, view)
+		// ARMED (TEST): a second, unbound channel in each strip's zone (a one-channel zone would not move).
+		if (view.armed) for (var zk2 = 0; zk2 < STRIPS; ++zk2) view.zones[zk2].makeMixerBankChannel()
 		views.push(view)
 	}
 	// Every page has the keys to every other view (a page's own key does nothing).
