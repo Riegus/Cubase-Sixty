@@ -1547,7 +1547,7 @@ function sendViewPoll(activeDevice) {
 		if (!st) continue
 		if (st.faderOn && (st.fKind === 'send' || st.fKind === 'plugin') && st.fObj >= 0) {
 			var v = skDa[i].getParameterProcessValue(skAm, st.fObj, st.fTag)
-			var ft = daText(skDa[i], st.fObj, st.fTag)
+			var ft = st.fKind === 'plugin' ? daText(skDa[i], st.fObj, st.fTag) : null   // (the send views as before: value only)
 			if (v !== st.fPolled || ft !== st.fTextPolled) { st.fPolled = v; st.fTextPolled = ft; stripFaderSend(activeDevice, i) }
 		}
 		if (st.panOn && st.vKind === 'plugin' && st.vObj >= 0) {
