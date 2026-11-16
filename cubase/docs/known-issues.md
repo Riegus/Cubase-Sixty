@@ -15,12 +15,11 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## All surfaces
 
-- **To be confirmed (16.11.2026, wip-track-numbers): the SSL plug-ins were looked up by the wrong track number in a
-  project with disabled tracks.** A disabled track has no mixer channel but keeps its track index, and the SSL plug-ins
-  announce that index: "Vio S 2" was 13 in the MixConsole and 022 in its plug-in. The UF1's EQ graph (and METER's
-  AUTO, the UF8's plug-in names) asked for the plug-in on track 13 and showed another track's; the UC1's 7-segment
-  showed 22. Now the surfaces show the MixConsole's number and ask SSL's connection with the track index (the UF1
-  script sends both; see bridge-midi-protocol.md, SSL track numbers).
+- **To be confirmed (16.11.2026, wip-track-numbers): wrong track numbers in a project with disabled tracks.** A
+  disabled track has no mixer channel but keeps its track index; the MixConsole numbers by that index and the SSL
+  plug-ins announce it ("Vio S 2": 22). The UF1 and UF8 counted mixer channels (13), showed that, and asked SSL's
+  connection for the plug-in on track 13: the UF1's EQ graph was another track's. Now they show and use the track index
+  (the UF1 script sends it; see bridge-midi-protocol.md, Track numbers), as the UC1 always did.
 
 ## UF8
 

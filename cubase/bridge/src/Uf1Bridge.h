@@ -52,9 +52,9 @@ std::string uf1LevelText(int pos14);                          // "" where the cu
 void uf1LearnLevel(int pos14, const std::string& text);       // Cubase's text for a position ("-6.02 dB")
 double levelDbOf(int pos14);   // Cubase's fader / send level curve: a position's dB (-200 = silence)
 int levelPosOf(double db);     // and back
-// The number the SSL plug-ins on a track announce (the host's track index) for a MixConsole number: the same unless
-// the project has disabled tracks (from the UF1 script, SysEx 10 / 11). And the selected track's MixConsole number
-// (0 = not known).
+// A track's number as the MixConsole shows it and the SSL plug-ins on it announce it (the track index), for its place
+// among the mixer channels (what the scripts count): the same unless the project has disabled tracks (from the UF1
+// script, SysEx 10 / 11). And the selected track's counted place (0 = not known).
 int uf1SslTrackOf(int mixNumber);
 int uf1MixNumber();
 // Defined in main.cpp: the UF8's strip numbers and plug-in names drawn again (the SSL numbers changed).

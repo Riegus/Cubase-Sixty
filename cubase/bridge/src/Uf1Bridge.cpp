@@ -1026,9 +1026,11 @@ std::string sendCellLine(const SendCell& c)
 std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
 std::atomic<bool> g_cycleRunning{false};
 std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected track's MixConsole position, 0 = unknown
-// The SSL plug-ins' number for the selected track (the host's track index they announce; script SysEx 0F), 0 = not
-// known: the MixConsole's number is not it in a project with disabled tracks (16.11.2026: "Vio S 2" 13 / 22, and the
-// EQ graph showed another track's plug-in). And that index for every MixConsole number (script SysEx 10 / 11).
+// The selected track's number as the MixConsole shows it and as the SSL plug-ins on it announce it: the track index
+// (script SysEx 0F), 0 = not known. The script's own count (0E, the channel's place among the mixer channels) is lower
+// in a project with disabled tracks, which keep their index without a channel (16.11.2026: "Vio S 2" counted 13, is 22
+// in the MixConsole and to its plug-in; the EQ graph showed another track's plug-in). And the index for every counted
+// place (script SysEx 10 / 11), for the UF8's strips.
 std::atomic<int> g_sslTrack{0};
 std::mutex g_sslTableMx;
 std::vector<int> g_sslTable;
@@ -1605,7 +1607,7 @@ void showStripNumber()
     if (g_noProject) { screenText(::uf1::scr::kChNumber, ""); return; }
     // The track number when the script knows it, else the UF8 strip; blank on MASTER.
     if (!g_open) return;
-    const int n = g_trackNo > 0 ? int(g_trackNo) : int(g_stripNo);
+    const int n = g_trackNo > 0 ? sslTrackSelected() : int(g_stripNo);   // (the track index: the MixConsole's number)
     screenText(::uf1::scr::kChNumber, (g_master || n == 0) ? std::string() : std::to_string(n));
 }
 
@@ -1919,9 +1921,9 @@ void onSysex(const std::vector<unsigned char>& m)
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
-        uc1RedrawSevenSeg();
     } else if (m[4] == 0x0F && m.size() >= 8) {
         g_sslTrack = (int(m[5]) << 7) | int(m[6]);
+        showStripNumber();
     } else if (m[4] == 0x10 && m.size() >= 8) {
         const size_t first = (size_t(m[5]) << 7) | m[6];
         std::lock_guard<std::mutex> lk(g_sslTableMx);
