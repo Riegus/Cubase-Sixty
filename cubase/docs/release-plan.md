@@ -88,6 +88,8 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
 - 15.11.2026: the UF8 track views are done (track-views.md) and held the release back until then. Also left: Geir
   retests the UF1's EQ graph (PLUGIN view: an SSL channel strip's curve, flat with its EQ out; Cubase's own channel EQ
   on a track without one).
+- 16.11.2026: the FOCUS test log lines are debug-only (the script's with DEBUG, the bridge's with --trace). Left: the
+  guide read against the hardware, the uninstaller and the tray's Quit tried, the GitHub release.
 - 16.11.2026: the UF1's EQ graph retested (Geir). It showed another track's curve in a project with disabled tracks
   (wrong track numbers; fixed, see known-issues.md, All surfaces); right after the fix, METER too. `dev-restart.ps1 -Hub`
   starts Cubase without a project.

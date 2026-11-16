@@ -1587,7 +1587,7 @@ function mouseStep(activeDevice, up, steps) {
 	if (!mouse.value || !skAm) return
 	var before = mouse.process
 	for (var k = 0; k < steps; ++k) (up ? mouse.value.increment : mouse.value.decrement).call(mouse.value, skAm)
-	if (mouse.used < 20) {   // the first uses, for the test: what is under the mouse and whether it moved
+	if (DEBUG && mouse.used < 20) {   // (debugging only: what is under the mouse and whether it moved)
 		++mouse.used
 		out('[CubaseSixty] FOCUS: ' + (up ? '+' : '-') + steps + ' on "' + mouse.title + '" = ' + mouse.display + ' (process ' + before.toFixed(3) + ' before)')
 	}

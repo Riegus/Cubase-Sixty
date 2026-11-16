@@ -655,7 +655,7 @@ void handleFrame(const uf8frames::Frame& fr)
             if (pressed) {
                 g_encMode = g_encMode == kEncMouse ? kEncSelect : kEncMouse;
                 paintEncLeds();
-                std::printf("UF8 FOCUS: encoder on %s\n", g_encMode == kEncMouse ? "the value under the mouse" : "Ch Sel");
+                if (g_trace8) std::printf("UF8 FOCUS: encoder on %s\n", g_encMode == kEncMouse ? "the value under the mouse" : "Ch Sel");
             }
             break;
         }
