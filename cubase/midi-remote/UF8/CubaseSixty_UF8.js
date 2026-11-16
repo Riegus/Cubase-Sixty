@@ -1037,6 +1037,9 @@ var followQuietUntil = 0
 		if (holdUntil && now > holdUntil) {
 			holdUntil = 0
 			if (dueMs === 0 && followTries === 0 && !viewFrozenUntil) startupFreeze(activeDevice, false)
+			// No track selected: nothing to find, so the start-up ends here. (16.11.2026: its checks went on for 30 s,
+			// and the first SEL press in that time was held back by them: the UF8 frozen for a second.)
+			if (selectedIndex < 0 && startupUntil > 0) { startupUntil = -1; out('[CubaseSixty] follow: start-up done (no track selected)') }
 		}
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
