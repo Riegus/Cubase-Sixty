@@ -1034,7 +1034,11 @@ std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected tra
 std::atomic<int> g_sslTrack{0};
 std::mutex g_sslTableMx;
 std::vector<int> g_sslTable;
-int sslTrackSelected() { const int t = g_sslTrack; return t > 0 ? t : int(g_trackNo); }
+// Past the list's end (the script's tree does not hold every channel; 16.11.2026: it ended at index 46, "Vocals All"
+// after it showed its counted 33 instead of 47): the pairs of the channels that have been selected (place -> index),
+// and from the nearest pair or the list's end, counted on.
+std::map<int, int> g_sslLearnt;
+int sslTrackSelected() { const int t = g_sslTrack; return t > 0 ? t : cs::uf1SslTrackOf(g_trackNo); }
 void screenText(uint16_t addr, const std::string& text);
 void restoreChannelView();
 void put(uint16_t addr, std::initializer_list<uint8_t> p)
@@ -1923,7 +1927,13 @@ void onSysex(const std::vector<unsigned char>& m)
         showStripNumber();
     } else if (m[4] == 0x0F && m.size() >= 8) {
         g_sslTrack = (int(m[5]) << 7) | int(m[6]);
+        if (m.size() >= 10) {
+            const int place = (int(m[7]) << 7) | int(m[8]);
+            std::lock_guard<std::mutex> lk(g_sslTableMx);
+            if (place > 0 && g_sslTrack > 0 && size_t(place) > g_sslTable.size()) g_sslLearnt[place] = g_sslTrack;
+        }
         showStripNumber();
+        uf8RedrawNumbers();
     } else if (m[4] == 0x10 && m.size() >= 8) {
         const size_t first = (size_t(m[5]) << 7) | m[6];
         std::lock_guard<std::mutex> lk(g_sslTableMx);
@@ -1937,6 +1947,7 @@ void onSysex(const std::vector<unsigned char>& m)
         {
             std::lock_guard<std::mutex> lk(g_sslTableMx);
             g_sslTable.resize(count, 0);
+            for (auto it = g_sslLearnt.begin(); it != g_sslLearnt.end();) it = size_t(it->first) <= count ? g_sslLearnt.erase(it) : std::next(it);
             for (size_t k = 0; k < count; ++k) if (g_sslTable[k] != int(k) + 1) ++differ;
         }
         std::printf("SSL track numbers: %d channels, %d with another number than the MixConsole's\n", int(count), differ);
@@ -2475,8 +2486,11 @@ int uf1SslTrackOf(int mixNumber)
 {
     if (mixNumber <= 0) return mixNumber;
     std::lock_guard<std::mutex> lk(g_sslTableMx);
-    if (size_t(mixNumber) > g_sslTable.size() || g_sslTable[size_t(mixNumber) - 1] <= 0) return mixNumber;
-    return g_sslTable[size_t(mixNumber) - 1];
+    if (size_t(mixNumber) <= g_sslTable.size()) return g_sslTable[size_t(mixNumber) - 1] > 0 ? g_sslTable[size_t(mixNumber) - 1] : mixNumber;
+    auto it = g_sslLearnt.upper_bound(mixNumber);
+    if (it != g_sslLearnt.begin()) { --it; return it->second + (mixNumber - it->first); }
+    if (g_sslTable.empty() || g_sslTable.back() <= 0) return mixNumber;
+    return g_sslTable.back() + (mixNumber - int(g_sslTable.size()));
 }
 int uf1MixNumber() { return g_trackNo; }
 } // namespace cs

@@ -725,6 +725,9 @@ var stepListed = false   // (the channel list is logged once, when the selected 
 // plug-in). So the bridge gets the selected channel's index (SysEx 0F <hi> <lo>) and, for the UF8's strips, the index
 // of every MixConsole number (SysEx 10 <first hi> <first lo> <hi> <lo> ..., 40 a message; 11 <count hi> <count lo>
 // ends the list): the VST Mixer's channels except inputs and outputs, in index order. The list is only sent when the
+// (The tree does not hold every channel: in the test project it ended at index 46, the groups and FX channels after it
+// missing. The bridge counts on from the list's end, and from the selected channels' pairs: 0F carries the counted
+// place too, <index hi> <index lo> <place hi> <place lo>.)
 // selected channel's place in it is the number sent (else the one sent before stays; with none, the bridge takes the
 // numbers as they are).
 var sslIndexSent = -1
@@ -747,16 +750,19 @@ function sslNumbers(activeDevice) {
 		if (!seen[idx]) { seen[idx] = true; list.push(idx) }
 	}
 	list.sort(function (a, b) { return a - b })
-	if (curIdx !== sslIndexSent) {
-		sslIndexSent = curIdx
-		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0F, (curIdx >> 7) & 0x7F, curIdx & 0x7F, 0xF7]))
+	// (The selected channel itself is asked too: it may not be in the tree. As the UC1 script's 7-segment number.)
+	try { var own = plugDa.getMixerChannelIndex(plugAm, cur); if (own > 0) curIdx = own } catch (e) {}
+	var pairKey = curIdx + ':' + probeSent
+	if (pairKey !== sslIndexSent) {
+		sslIndexSent = pairKey
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0F, (curIdx >> 7) & 0x7F, curIdx & 0x7F, (probeSent >> 7) & 0x7F, probeSent & 0x7F, 0xF7]))
 	}
 	if (!curIdx || probeSent <= 0) return   // (not a channel: the list is left as it is)
 	var key = list.join(',')
 	if (key === sslTableKey) return
 	// (Not at its place: two tracks of one name and the number guessed, or the list still loading. The list sent
 	// stays; the next selection checks again.)
-	if (list[probeSent - 1] !== curIdx) { if (sslTableKey === null) list = []; else return }
+	if (probeSent <= list.length && list[probeSent - 1] !== curIdx) { if (sslTableKey === null) list = []; else return }
 	sslTableKey = list.length ? key : null
 	var differ = 0
 	for (var d = 0; d < list.length; ++d) if (list[d] !== d + 1) ++differ
