@@ -342,6 +342,22 @@ var SKIP_TYPES = { QuickControls: 1, InputFilter: 1, Panner: 1, Modulators: 1, S
 	Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
 // Inside the selected track the channel strip and input filter are wanted, so only these are skipped there.
 var SKIP_TYPES_TRACK = { QuickControls: 1, Panner: 1, Modulators: 1, Sends: 1, Outputs: 1, Foldbacks: 1, DirectRouting: 1 }
+// The VST Mixer's children (16.11.2026). The mixer says how many channels there are, but hands them out by track
+// index: in a project with disabled tracks (an index without a channel) the holes repeat other channels, and the
+// channels whose index is past the count are only reached by asking on (traced: 46 children, the channels with index
+// 46-56 at 46-56, then id -1). So: asked on until 16 in a row come back empty, each id once.
+function mixerChildIds(acc, am, base) {
+	var n = 0, ids = [], seen = {}, empty = 0
+	try { n = acc.getNumberOfChildObjects(am, base) } catch (e) { return ids }
+	for (var i = 0; i < 4096 && (i < n || empty < 16); ++i) {
+		var id = -1
+		try { id = acc.getChildObjectID(am, base, i) } catch (e) {}
+		if (id < 0) { if (i >= n) ++empty; continue }
+		if (i >= n) empty = 0
+		if (!seen[id]) { seen[id] = true; ids.push(id) }
+	}
+	return ids
+}
 function walk(acc, base, maxDepth, limit, skip) {
 	skip = skip || SKIP_TYPES
 	var out = []
@@ -356,6 +372,11 @@ function walk(acc, base, maxDepth, limit, skip) {
 		var inChannel = parent >= 0 && /Channel$/.test(out[parent].type)
 		if (depth >= maxDepth || (inChannel && skip[type])) return
 		var n = 0
+		if (type === 'VST Mixer') {   // every channel once (mixerChildIds)
+			var ids = mixerChildIds(acc, am, id)
+			for (var k = 0; k < ids.length; ++k) rec(ids[k], depth + 1, me)
+			return
+		}
 		try { n = acc.getNumberOfChildObjects(am, id) } catch (e) { return }
 		for (var i = 0; i < n && i < 512; ++i) rec(acc.getChildObjectID(am, id, i), depth + 1, me)
 	}

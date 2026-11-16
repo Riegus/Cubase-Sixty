@@ -20,10 +20,11 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   plug-ins announce it ("Vio S 2": 22). The UF1 and UF8 counted mixer channels (13), showed that, and asked SSL's
   connection for the plug-in on track 13: the UF1's EQ graph was another track's. Now they show and use the track index
   (the UF1 script sends it; see bridge-midi-protocol.md, Track numbers), as the UC1 always did.
-  The script's channel tree (the VST Mixer's children) did not hold every channel (it ended at index 46; the last group
-  and the FX channels were missing, cause unknown): past its end the bridge counts on, corrected by each selected
-  channel's own index. A disabled track after the tree's end would put the UF8's numbers off from there until a track
-  in that part is selected.
+  The script's channel tree (the VST Mixer's children) ended early (at index 46; the last group and the FX channels
+  missing): the mixer reports as many children as there are channels but hands them out by track index, so with
+  disabled tracks the holes repeat other channels and the last channels are past the count. The scripts now ask on
+  until the list is empty (`mixerChildIds`): the track numbers, track stepping, the UF1's METER search and the UC1's
+  bus comp search. (Should a list still end early, the bridge counts on from its end.)
 
 ## UF8
 
