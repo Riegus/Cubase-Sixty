@@ -210,7 +210,7 @@ for (var nc = 0; nc < CHANNELS; ++nc) {
 }
 function sendNumbers(activeDevice) {
 	numbersDirty = false
-	var j = 0
+	var j = 0, sent = 0
 	for (var i = 0; i < CHANNELS; ++i) {
 		var n = 0
 		if (allTitles[i]) {
@@ -221,8 +221,10 @@ function sendNumbers(activeDevice) {
 		if (sentNumbers[i] === n) continue
 		if (sentNumbers[i] === undefined && n === 0) { sentNumbers[i] = 0; continue }   // nothing to say yet
 		sentNumbers[i] = n
+		++sent
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x1A, (i >> 7) & 0x7F, i & 0x7F, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
 	}
+	if (sent) out('[CubaseSixty Helper] track numbers: ' + sent + ' sent')
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -396,7 +398,16 @@ midiInput.mOnSysex = function (activeDevice, message) {
 }
 
 // Closing a project (Cubase shows the Hub) deactivates the scripts' drivers, opening one activates them again: logged.
-deviceDriver.mOnActivate = function (activeDevice) { out('[CubaseSixty Helper] active (a project is open)') }
+// (16.11.2026: the UF8's track numbers and plug-in names stayed blank after a project was closed and opened again.
+// The bridge forgets the numbers when a project closes, and they were only sent again when a channel's name changed,
+// which it does not when the same project comes back. So they are sent again at each activation, and 3 s later for
+// names still coming in.)
+var numbersAgainAt = 0
+deviceDriver.mOnActivate = function (activeDevice) {
+	out('[CubaseSixty Helper] active (a project is open)')
+	numbersDirty = true
+	numbersAgainAt = Date.now() + 3000
+}
 deviceDriver.mOnDeactivate = function (activeDevice) {
 	out('[CubaseSixty Helper] inactive (no project)')
 	resendLast = {}
@@ -407,6 +418,7 @@ deviceDriver.mOnDeactivate = function (activeDevice) {
 }
 deviceDriver.mOnIdle = function (activeDevice) {
 	try { scanIdle(activeDevice) } catch (e) { out('[CubaseSixty Helper] view lists: ' + e); scan.v = 0 }
+	if (numbersAgainAt && Date.now() >= numbersAgainAt) { numbersAgainAt = 0; numbersDirty = true }
 	if (numbersDirty) {   // once the names have come in (they arrive in a burst)
 		sendNumbers(activeDevice)
 		for (var v = 1; v < VIEW_LISTS.length; ++v) sendViewNumbers(activeDevice, v)

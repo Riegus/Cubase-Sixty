@@ -28,6 +28,9 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF8
 
+- **Fixed (16.11.2026): the track numbers and plug-in names were blank after the same project was closed and opened
+  again.** The bridge forgets the numbers when a project closes; the Helper sent them again only when a channel's name
+  changed, which none does when the same project comes back. It now sends them at every activation (and 3 s later).
 - **Not ours (15.11.2026): another controller's MIDI Remote scripts moved the selection when a project opened.** The
   selected track jumped twice a few seconds after the project opened (Vocals Main → the track before it → Audio FX, the
   last audio track), with every surface following. Traced to the zone moves at a project's start, before Cubase has a

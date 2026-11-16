@@ -83,7 +83,8 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
   is the selected track's plug-in's; the UF8's plug-in names are right.
 - UF8 track numbers (top left of each strip): the MixConsole's numbers, the same as the UF1 shows for the selected
   track, also with hidden tracks between; they follow banking and follow-selection; blank on empty strips and with no
-  project; back after a bridge restart and a UF8 reconnect.
+  project; back after a bridge restart, a UF8 reconnect, and the same project closed and opened again (also in
+  another view).
 - UF1 METER: a V-pot push does nothing (no send of the selected track switches); in the presets browser V-pot 4's
   push still loads.
 - UF1 soft keys in DAW / SENDS: labelled First / Prev / Next / Last Marker and do that (First: the earliest marker,
