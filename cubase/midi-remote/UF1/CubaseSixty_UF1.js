@@ -734,8 +734,53 @@ var sslIndexSent = -1
 var sslDueAt = 0
 var sslTableKey = null
 var probeSent = 0
+// (Test, 16.11.2026: the tree ended at index 46 in one project, the last group and the FX channels missing. The whole
+// tree, three levels deep, with each object's type, title, index and child count; once per size. And the selected
+// channel's parents, to see where a channel that is not among the mixer's children hangs.)
+var treeLogged = ''
+function treeProbe() {
+	var base = stepMix.getBaseObjectID(plugAm)
+	var rows = [], count = 0
+	function walk(id, depth, path) {
+		var n = 0
+		try { n = stepMix.getNumberOfChildObjects(plugAm, id) } catch (e) {}
+		for (var i = 0; i < n && i < 400 && count < 1500; ++i) {
+			var c = stepMix.getChildObjectID(plugAm, id, i)
+			var type = '', title = '', idx = '?', kids = 0
+			try { type = stepMix.getObjectTypeName(plugAm, c) } catch (e) {}
+			try { title = stepMix.getObjectTitle(plugAm, c) } catch (e) {}
+			try { idx = stepMix.getMixerChannelIndex(plugAm, c) } catch (e) {}
+			try { kids = stepMix.getNumberOfChildObjects(plugAm, c) } catch (e) {}
+			++count
+			if (depth === 0 || /Channel|Synth|Folder|Group|Fx|VCA/i.test(type)) rows.push(path + i + ' ' + type + ' "' + title + '" idx ' + idx + ' kids ' + kids)
+			if (depth < 2 && /Channel|Synth|Folder|Group|Fx|VCA|Mixer/i.test(type) && depth < 1) walk(c, depth + 1, path + i + '.')
+		}
+	}
+	var baseType = '', baseTitle = ''
+	try { baseType = stepMix.getObjectTypeName(plugAm, base) } catch (e) {}
+	try { baseTitle = stepMix.getObjectTitle(plugAm, base) } catch (e) {}
+	walk(base, 0, '')
+	var key = rows.length + ':' + count
+	var cur = plugDa.getBaseObjectID(plugAm), chain = []
+	for (var id = cur, g = 0; g < 6 && id >= 0; ++g) {
+		var t = '', ti = ''
+		try { t = stepMix.getObjectTypeName(plugAm, id) } catch (e) { t = '?' }
+		try { ti = stepMix.getObjectTitle(plugAm, id) } catch (e) {}
+		chain.push(t + ' "' + ti + '"')
+		var up = -1
+		try { up = stepMix.getParentObjectID(plugAm, id) } catch (e) { chain.push('(no parent: ' + e + ')'); break }
+		if (up === id) break
+		id = up
+	}
+	out('[CubaseSixty UF1] tree probe: selected "' + selectedInfo.title + '" counted ' + probeSent + ': ' + chain.join(' < '))
+	if (key === treeLogged) return
+	treeLogged = key
+	out('[CubaseSixty UF1] tree probe: base ' + baseType + ' "' + baseTitle + '", ' + rows.length + ' rows of ' + count + ' objects')
+	for (var r = 0; r < rows.length; r += 4) out('[CubaseSixty UF1] tree: ' + rows.slice(r, r + 4).join(' | '))
+}
 function sslNumbers(activeDevice) {
 	if (!stepMix || !plugAm || !plugDa) return
+	try { treeProbe() } catch (e) { out('[CubaseSixty UF1] tree probe: ' + e) }
 	var base = stepMix.getBaseObjectID(plugAm)
 	var n = stepMix.getNumberOfChildObjects(plugAm, base)
 	var cur = plugDa.getBaseObjectID(plugAm)
