@@ -56,7 +56,7 @@ measured, what failed and why. Newest findings go in their section with the date
 - **A script can move a bank itself, at once** (15.11.2026): `bankZone.mAction.mResetBank / mNextBank / mPrevBank /
   mShiftLeft / mShiftRight .trigger(activeMapping)`, several in a row in one callback. Cubase carried out a reset + 5
   next banks in 40-120 ms, every time, also right after a page switch (where bank notes from the bridge lost 2-3 of
-  5). No spacing needed. Not tried at start-up, where Cubase ignores bank notes for its first seconds.
+  5). No spacing needed. At start-up too since 16.11.2026 (tested: the jump landed on the first try, in 40-900 ms; the bridge's presses there took three tries and 5 s).
 
 ## What works (keep)
 
@@ -65,7 +65,7 @@ measured, what failed and why. Newest findings go in their section with the date
   script's SysEx 12 total / offset), the UF8 frozen until the script reports the bank there; bank notes 100 ms apart
   only if that fails.
 - **UF8 follow selection**: on the idle timer; if the selected track is not on a strip, a jump (reset + n next banks)
-  triggered by the script, the UF8 frozen until it is there. At start-up, and from a follow's third try, the bridge's
+  triggered by the script, the UF8 frozen until it is there. From a follow's third try, the bridge's
   bank notes instead (SysEx 10: reset + n bank-rights 100 ms apart, then one burst of the remaining steps). The
   bridge freezes the UF8 during multi-step bursts and shows only the end state (SysEx 13 holds the freeze; released
   after 30 s by itself).
@@ -148,3 +148,11 @@ follow pulls the strips back to where the late selection report says.**
 - Never chain decisions on selection reports during a burst; they are late and include the tracks passed.
 - Space notes (40 ms; bank steps 60–100 ms). Better: let the script trigger the bank actions (no spacing, no losses).
 - Add a trace (`dev-restart.ps1 -Trace`, `cubase\logs\bridge.log`) before guessing: every finding above came from one.
+
+## A project opens (16.11.2026)
+
+- The UF8 is held (SysEx 13) from the script's activation until the start-up follow has the selected track on a strip,
+  then shows the end at once. Before, the page Cubase opened the UF8 on (the last one used), the view at start and
+  bank 1 were seen passing.
+- With no track selected (or one of another view) the hold ends after 4 s, and with no track selected the start-up
+  ends with it: its checks went on for 30 s and held back the first SEL press in that time by about a second.

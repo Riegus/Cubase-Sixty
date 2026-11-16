@@ -800,7 +800,7 @@ function meterToMidi(value) {
 // In a filtered view (docs/track-views.md, step 5) the same, on that view's list from the helper (SysEx 1E) instead of the
 // full one: a track not of the view's type is not on it, and the bank stays. The same-name rank for the UF1 keeps
 // going by the full list.
-var followRestart = function () {}, followStop = function () {}, driverActivations = 0
+var followRestart = function () {}, followStop = function () {}, followHold = function () {}, driverActivations = 0
 // The bank moved by the script itself (15.11.2026): the active view's bank zone actions triggered directly, as many as
 // needed at once, instead of bank notes from the bridge 100 ms apart (Cubase drops notes closer together, and more of
 // them right after a page switch). Measured: a reset + 5 next banks landed in 40-120 ms, the first time, every time.
@@ -861,6 +861,12 @@ var followQuietUntil = 0
 		viewLists = []
 	}
 	followStop = function (activeDevice) { startupUntil = -1; dueMs = 0; startupFreeze(activeDevice, false) }
+	// A project opens (16.11.2026): the UF8 is held from the start, so the page Cubase opens on, the view at start and
+	// the bank before the follow are not seen passing (INSTR, then ALL at #1, then the selected track's bank); it
+	// shows the end. Let go by the follow when the selected track is on a strip, else after 4 s (no track selected,
+	// or one of another view), unless a follow is on its way.
+	var holdUntil = 0
+	followHold = function (activeDevice) { holdUntil = nowMs() + 4000; startupFreeze(activeDevice, true) }
 	function startupFreeze(activeDevice, on) {
 		if (startupFrozen === on) return
 		startupFrozen = on
@@ -982,7 +988,9 @@ var followQuietUntil = 0
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
 			// By the script, all at once; the UF8 held until it is there (see bankTrigger).
-			if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
+			// (At start-up too, 16.11.2026: the bridge's presses there lost most of themselves and took three tries and
+			// 5 s, the bank seen moving; a try that does not land falls to the presses from the third on.)
+			if (followTries <= 2 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
 				out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps (triggered)')
 				if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
 				dueMs = now + 600
@@ -997,7 +1005,7 @@ var followQuietUntil = 0
 		// a jump right after loading lost most of its presses.
 		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
 		steps = Math.max(1, Math.min(steps, 64))
-		if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, delta < 0 ? 3 : 2, steps)) {
+		if (followTries <= 2 && bankTrigger(activeDevice, delta < 0 ? 3 : 2, steps)) {
 			out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right') + ' (triggered)')
 			if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
 			dueMs = now + 600
@@ -1026,6 +1034,13 @@ var followQuietUntil = 0
 		idleMeasure(now)
 		if (viewFrozenUntil && now > viewFrozenUntil) { out('[CubaseSixty] follow: view switch, gave up after 8 s'); viewUnfreeze(activeDevice) }
 		requestListsIfNeeded(activeDevice, now)
+		if (holdUntil && now > holdUntil) {
+			holdUntil = 0
+			if (dueMs === 0 && followTries === 0 && !viewFrozenUntil) startupFreeze(activeDevice, false)
+			// No track selected: nothing to find, so the start-up ends here. (16.11.2026: its checks went on for 30 s,
+			// and the first SEL press in that time was held back by them: the UF8 frozen for a second.)
+			if (selectedIndex < 0 && startupUntil > 0) { startupUntil = -1; out('[CubaseSixty] follow: start-up done (no track selected)') }
+		}
 		// Start-up: Cubase ignores most bank presses right after loading (seen: a jump sent at once moved one
 		// bank), so the first check waits 2.5 s.
 		if (startupUntil === 0) { startupUntil = now + 30000; nextStartupCheck = now + 2500 }
@@ -1125,6 +1140,7 @@ deviceDriver.mOnDeactivate = function (activeDevice) {
 deviceDriver.mOnActivate = function (activeDevice) {
 	startedAt = Date.now()   // (the view at start may come)
 	sendMidi(activeDevice, SYSEX_HEADER.concat([0x7C, 0x01, 0xF7]))
+	try { followHold(activeDevice) } catch (e) {}
 	if (!driverActivations++) return   // the first activation is Cubase's start: everything starts anyway
 	out('[CubaseSixty] active again (a project is open)')
 	listNamesSeen = 0
