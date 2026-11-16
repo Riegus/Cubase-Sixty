@@ -718,6 +718,34 @@ var stepListed = false   // (the channel list is logged once, when the selected 
 // Every track's channel in track order: the VST Mixer's children, except the inputs and outputs, sorted by
 // getMixerChannelIndex (the track order, even where the MixConsole shows group / FX channels elsewhere).
 // (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
+// (Test, 16.11.2026: the track numbers did not match the MixConsole's in a project with disabled, hidden tracks.) The
+// selected channel's place in the VST Mixer's tree against the number sent; the whole tree once per size.
+var probeCount = -1
+var probeSent = 0
+function numberProbe() {
+	if (!stepMix || !plugAm || !plugDa) return
+	var base = stepMix.getBaseObjectID(plugAm)
+	var n = stepMix.getNumberOfChildObjects(plugAm, base)
+	var cur = plugDa.getBaseObjectID(plugAm)
+	var rows = [], at = '', tracks = 0
+	for (var i = 0; i < n && i < 1024; ++i) {
+		var id = stepMix.getChildObjectID(plugAm, base, i)
+		var type = '', title = '', vis = '?', idx = '?'
+		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
+		try { title = stepMix.getObjectTitle(plugAm, id) } catch (e) {}
+		try { vis = stepMix.isMixerChannelVisible(plugAm, id) ? 'v' : 'h' } catch (e) {}
+		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
+		var io = /Input|Output|ControlRoom|Monitor/.test(type)
+		if (!io) ++tracks
+		if (id === cur) at = 'child ' + i + ', index ' + idx + ', ' + (io ? 'in/out' : 'track child ' + tracks) + ', ' + type
+		rows.push(i + ':' + idx + ':' + vis + ':' + type + ':"' + title + '"')
+	}
+	out('[CubaseSixty UF1] number probe: "' + selectedInfo.title + '" sent ' + probeSent + '; ' + (at || 'not in the tree') + ' (' + n + ' children)')
+	if (n !== probeCount) {
+		probeCount = n
+		for (var r = 0; r < rows.length; r += 6) out('[CubaseSixty UF1] number probe tree: ' + rows.slice(r, r + 6).join('  '))
+	}
+}
 function stepChannels() {
 	var list = []
 	var base = stepMix.getBaseObjectID(plugAm)
@@ -1241,6 +1269,7 @@ var bypassIdle = null    // a press waiting for the slots' states to settle (dev
 		var n = selectedIndex + 1
 		if (n === sentNumber) return
 		sentNumber = n
+		probeSent = n
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0E, (n >> 7) & 0x7F, n & 0x7F, 0xF7]))
 	}
 	try {
@@ -2023,6 +2052,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
+		try { numberProbe() } catch (e) { out('[CubaseSixty UF1] number probe: ' + e) }
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
 	}
 }
