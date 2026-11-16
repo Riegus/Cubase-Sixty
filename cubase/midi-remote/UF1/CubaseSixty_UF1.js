@@ -759,7 +759,18 @@ function treeProbe() {
 	var baseType = '', baseTitle = ''
 	try { baseType = stepMix.getObjectTypeName(plugAm, base) } catch (e) {}
 	try { baseTitle = stepMix.getObjectTitle(plugAm, base) } catch (e) {}
-	walk(base, 0, '')
+	// Second round: the mixer has as many children as there are channels, but they sit at their track index, so
+	// those past the count are not reached and the holes repeat others. Past the count, then: asked anyway.
+	var n0 = stepMix.getNumberOfChildObjects(plugAm, base)
+	for (var i = 0; i < n0 + 80; ++i) {
+		var c = -1, type = '', title = '', idx = '?'
+		try { c = stepMix.getChildObjectID(plugAm, base, i) } catch (e) { rows.push(i + ' (' + e + ')'); continue }
+		try { type = stepMix.getObjectTypeName(plugAm, c) } catch (e) { type = '(' + e + ')' }
+		try { title = stepMix.getObjectTitle(plugAm, c) } catch (e) {}
+		try { idx = stepMix.getMixerChannelIndex(plugAm, c) } catch (e) {}
+		++count
+		rows.push(i + (i >= n0 ? '+' : '') + ' id ' + c + ' ' + type + ' "' + title + '" idx ' + idx)
+	}
 	var key = rows.length + ':' + count
 	var cur = plugDa.getBaseObjectID(plugAm), chain = []
 	for (var id = cur, g = 0; g < 6 && id >= 0; ++g) {
@@ -767,16 +778,13 @@ function treeProbe() {
 		try { t = stepMix.getObjectTypeName(plugAm, id) } catch (e) { t = '?' }
 		try { ti = stepMix.getObjectTitle(plugAm, id) } catch (e) {}
 		chain.push(t + ' "' + ti + '"')
-		var up = -1
-		try { up = stepMix.getParentObjectID(plugAm, id) } catch (e) { chain.push('(no parent: ' + e + ')'); break }
-		if (up === id) break
-		id = up
+		chain.push('id ' + id); break
 	}
 	out('[CubaseSixty UF1] tree probe: selected "' + selectedInfo.title + '" counted ' + probeSent + ': ' + chain.join(' < '))
 	if (key === treeLogged) return
 	treeLogged = key
 	out('[CubaseSixty UF1] tree probe: base ' + baseType + ' "' + baseTitle + '", ' + rows.length + ' rows of ' + count + ' objects')
-	for (var r = 0; r < rows.length; r += 4) out('[CubaseSixty UF1] tree: ' + rows.slice(r, r + 4).join(' | '))
+	for (var r = 0; r < rows.length; r += 5) out('[CubaseSixty UF1] tree: ' + rows.slice(r, r + 5).join(' | '))
 }
 function sslNumbers(activeDevice) {
 	if (!stepMix || !plugAm || !plugDa) return
