@@ -982,7 +982,9 @@ var followQuietUntil = 0
 			// Reset to the first bank (back on Cubase's eight-grid) and send the bank-rights in one burst.
 			var banks = Math.min(Math.floor(selectedIndex / STRIPS), 64)
 			// By the script, all at once; the UF8 held until it is there (see bankTrigger).
-			if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
+			// (At start-up too, 16.11.2026: the bridge's presses there lost most of themselves and took three tries and
+			// 5 s, the bank seen moving; a try that does not land falls to the presses from the third on.)
+			if (followTries <= 2 && bankTrigger(activeDevice, 4, 1) && (banks === 0 || bankTrigger(activeDevice, 2, banks))) {
 				out('[CubaseSixty] follow: jump = reset + ' + banks + ' bank steps (triggered)')
 				if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
 				dueMs = now + 600
@@ -997,7 +999,7 @@ var followQuietUntil = 0
 		// a jump right after loading lost most of its presses.
 		var steps = delta < 0 ? Math.ceil(-delta / STRIPS) : Math.floor(delta / STRIPS)
 		steps = Math.max(1, Math.min(steps, 64))
-		if (startupUntil <= 0 && followTries <= 2 && bankTrigger(activeDevice, delta < 0 ? 3 : 2, steps)) {
+		if (followTries <= 2 && bankTrigger(activeDevice, delta < 0 ? 3 : 2, steps)) {
 			out('[CubaseSixty] follow: ' + steps + ' bank step(s) ' + (delta < 0 ? 'left' : 'right') + ' (triggered)')
 			if (!viewFrozenUntil) { viewFrozenUntil = now + 3000; startupFreeze(activeDevice, true) }
 			dueMs = now + 600
