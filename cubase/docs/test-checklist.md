@@ -76,6 +76,9 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
 - UF8 colour bars name the SSL plug-in on each track (CS 2 / 4K E / Link / BC 2; a plug-in added or removed shows
   within a second or two; empty strips plain); the selected track's strip has the number box dimmed, as the UF1, and
   it moves with the selection.
+- A project with disabled tracks (they have no channel but keep their number): the UF8's, UF1's and UC1's track
+  numbers are the MixConsole's, to the last channel, from the project's start without selecting; the UF1's EQ graph
+  is the selected track's plug-in's; the UF8's plug-in names are right.
 - UF8 track numbers (top left of each strip): the MixConsole's numbers, the same as the UF1 shows for the selected
   track, also with hidden tracks between; they follow banking and follow-selection; blank on empty strips and with no
   project; back after a bridge restart and a UF8 reconnect.

@@ -1026,6 +1026,19 @@ std::string sendCellLine(const SendCell& c)
 std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
 std::atomic<bool> g_cycleRunning{false};
 std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected track's MixConsole position, 0 = unknown
+// The selected track's number as the MixConsole shows it and as the SSL plug-ins on it announce it: the track index
+// (script SysEx 0F), 0 = not known. The script's own count (0E, the channel's place among the mixer channels) is lower
+// in a project with disabled tracks, which keep their index without a channel (16.11.2026: "Vio S 2" counted 13, is 22
+// in the MixConsole and to its plug-in; the EQ graph showed another track's plug-in). And the index for every counted
+// place (script SysEx 10 / 11), for the UF8's strips.
+std::atomic<int> g_sslTrack{0};
+std::mutex g_sslTableMx;
+std::vector<int> g_sslTable;
+// Past the list's end (the script's tree does not hold every channel; 16.11.2026: it ended at index 46, "Vocals All"
+// after it showed its counted 33 instead of 47): the pairs of the channels that have been selected (place -> index),
+// and from the nearest pair or the list's end, counted on.
+std::map<int, int> g_sslLearnt;
+int sslTrackSelected() { const int t = g_sslTrack; return t > 0 ? t : cs::uf1SslTrackOf(g_trackNo); }
 void screenText(uint16_t addr, const std::string& text);
 void restoreChannelView();
 void put(uint16_t addr, std::initializer_list<uint8_t> p)
@@ -1288,9 +1301,9 @@ void startIdleCycle()
                     if (sel >= 0 && sel != selShown) { selShown = sel; put(0x011a, {uint8_t(sel)}); }
                 }
                 if (screen == 0)
-                    uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
+                    uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), sslTrackSelected(), !g_playing.load(), reset);
                 else
-                    uf1meter::buildOther(screen, p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(),
+                    uf1meter::buildOther(screen, p, g_meterL.load(), g_meterR.load(), sslTrackSelected(), !g_playing.load(),
                                          reset, screenOpened);
             } else {
                 // The EQ graph, every third cycle (~120 ms): a turned EQ knob redraws about as fast as SSL 360's.
@@ -1456,7 +1469,7 @@ void paintEq(bool force)
         std::vector<float> wire;
         float wMin = 0.0f, wMax = 0.0f;
         if (sslcore::isRunning() &&
-            sslcore::getChannelStripEqCurve(g_trackNo, model.c_str(), nullptr, 0, g_plugOrd, wire, wMin, wMax)) {
+            sslcore::getChannelStripEqCurve(sslTrackSelected(), model.c_str(), nullptr, 0, g_plugOrd, wire, wMin, wMax)) {
             // Points the plug-in sent as NaN / inf are filled in from their neighbours (Rea-Sixty's
             // uf1SanitizeWireCurve_); all of them bad = no curve.
             const int n = int(wire.size());
@@ -1598,7 +1611,7 @@ void showStripNumber()
     if (g_noProject) { screenText(::uf1::scr::kChNumber, ""); return; }
     // The track number when the script knows it, else the UF8 strip; blank on MASTER.
     if (!g_open) return;
-    const int n = g_trackNo > 0 ? int(g_trackNo) : int(g_stripNo);
+    const int n = g_trackNo > 0 ? sslTrackSelected() : int(g_stripNo);   // (the track index: the MixConsole's number)
     screenText(::uf1::scr::kChNumber, (g_master || n == 0) ? std::string() : std::to_string(n));
 }
 
@@ -1912,6 +1925,33 @@ void onSysex(const std::vector<unsigned char>& m)
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
+    } else if (m[4] == 0x0F && m.size() >= 8) {
+        g_sslTrack = (int(m[5]) << 7) | int(m[6]);
+        if (m.size() >= 10) {
+            const int place = (int(m[7]) << 7) | int(m[8]);
+            std::lock_guard<std::mutex> lk(g_sslTableMx);
+            if (place > 0 && g_sslTrack > 0 && size_t(place) > g_sslTable.size()) g_sslLearnt[place] = g_sslTrack;
+        }
+        showStripNumber();
+        uf8RedrawNumbers();
+    } else if (m[4] == 0x10 && m.size() >= 8) {
+        const size_t first = (size_t(m[5]) << 7) | m[6];
+        std::lock_guard<std::mutex> lk(g_sslTableMx);
+        for (size_t at = 7, k = first; at + 2 < m.size(); at += 2, ++k) {
+            if (g_sslTable.size() <= k) g_sslTable.resize(k + 1, 0);
+            g_sslTable[k] = (int(m[at]) << 7) | int(m[at + 1]);
+        }
+    } else if (m[4] == 0x11 && m.size() >= 8) {
+        const size_t count = (size_t(m[5]) << 7) | m[6];
+        int differ = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_sslTableMx);
+            g_sslTable.resize(count, 0);
+            for (auto it = g_sslLearnt.begin(); it != g_sslLearnt.end();) it = size_t(it->first) <= count ? g_sslLearnt.erase(it) : std::next(it);
+            for (size_t k = 0; k < count; ++k) if (g_sslTable[k] != int(k) + 1) ++differ;
+        }
+        std::printf("SSL track numbers: %d channels, %d with another number than the MixConsole's\n", int(count), differ);
+        uf8RedrawNumbers();
     } else if (m[4] == 0x0D) {
         // Transport position text -> the 7-segment time field on the big display. Cubase pads every part of
         // the position to a fixed width with spaces ("  1. 1. 1.   0"), so spaces stay as blank cells: the
@@ -2442,4 +2482,15 @@ int fader0dbPos()
     return g_zeroPos;
 }
 
+int uf1SslTrackOf(int mixNumber)
+{
+    if (mixNumber <= 0) return mixNumber;
+    std::lock_guard<std::mutex> lk(g_sslTableMx);
+    if (size_t(mixNumber) <= g_sslTable.size()) return g_sslTable[size_t(mixNumber) - 1] > 0 ? g_sslTable[size_t(mixNumber) - 1] : mixNumber;
+    auto it = g_sslLearnt.upper_bound(mixNumber);
+    if (it != g_sslLearnt.begin()) { --it; return it->second + (mixNumber - it->first); }
+    if (g_sslTable.empty() || g_sslTable.back() <= 0) return mixNumber;
+    return g_sslTable.back() + (mixNumber - int(g_sslTable.size()));
+}
+int uf1MixNumber() { return g_trackNo; }
 } // namespace cs

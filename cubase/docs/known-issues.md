@@ -13,6 +13,18 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   direction, with and without SSL plug-ins in the project; then whether the bridge can make Cubase look again, or
   at least tell the user (the surfaces) what to do. See cubase-limitations.md (bridge outage).
 
+## All surfaces
+
+- **Fixed (16.11.2026): wrong track numbers in a project with disabled tracks.** A
+  disabled track has no mixer channel but keeps its track index; the MixConsole numbers by that index and the SSL
+  plug-ins announce it ("Vio S 2": 22). The UF1 and UF8 counted mixer channels (13), showed that, and asked SSL's
+  connection for the plug-in on track 13: the UF1's EQ graph was another track's. Now they show and use the track index
+  (the UF1 script sends it; see bridge-midi-protocol.md, Track numbers), as the UC1 always did.
+  The script's channel tree (the VST Mixer's children) did not hold every channel (it ended at index 46; the last group
+  and the FX channels were missing, cause unknown): past its end the bridge counts on, corrected by each selected
+  channel's own index. A disabled track after the tree's end would put the UF8's numbers off from there until a track
+  in that part is selected.
+
 ## UF8
 
 - **Not ours (15.11.2026): another controller's MIDI Remote scripts moved the selection when a project opened.** The

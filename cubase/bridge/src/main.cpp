@@ -1135,9 +1135,9 @@ void paintStripNumbers(bool force = false)
         if (view == 7) {   // ARMED: by each strip's place in the full list, from the script
             const int a = g_armedAll[s];
             if (g_projectOpen && a >= 0 && !g_stripEmpty[s] && size_t(a) < g_chanNumber.size() && g_chanNumber[a] > 0)
-                t = std::to_string(number = g_chanNumber[a]);
+                t = std::to_string(number = uf1SslTrackOf(g_chanNumber[a]));
         } else if (g_projectOpen && offset >= 0 && !g_stripEmpty[s] && i < numbers.size() && numbers[i] > 0)
-            t = std::to_string(number = numbers[i]);
+            t = std::to_string(number = uf1SslTrackOf(numbers[i]));   // (as the MixConsole numbers them: by track index)
         else if (g_projectOpen && offset < 0 && !g_numShown[s].empty() && !g_stripEmpty[s])
             continue;   // where the bank starts is not known for a moment: keep what is shown
         if (force || g_numShown[s] != t) {
@@ -1750,6 +1750,7 @@ void cs::autoModePressed(uint8_t n)
 }
 
 // The UF1's BANK keys bank the UF8 (as if its own bank key had been pressed).
+void cs::uf8RedrawNumbers() { paintStripNumbers(); }
 bool cs::uf8BankPress(bool right)
 {
     if (!g_uf8Running) return false;

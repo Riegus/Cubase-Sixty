@@ -13,6 +13,7 @@
 #   -Trace                Start the bridge with --trace.
 #   -NoScriptLog          Start the bridge with --no-script-log (the scripts' lines are not written to cubase\logs\scripts.log).
 #   -Force                If Cubase does not close within 60 seconds, kill it. Unsaved changes are LOST.
+#   -Hub                  Start Cubase without a project (it shows the Hub), whatever project is set.
 #   -NoStartCubase        Do everything except start Cubase.
 #   -BridgeOnly           Leave Cubase running: stop the bridge, (with -Build) rebuild it, start it again. With the
 #                         tray app running, the tray app (and the MIDI ports it holds) stays: the bridge is rebuilt
@@ -29,6 +30,7 @@ param(
     [switch]$Trace,
     [switch]$NoScriptLog,
     [switch]$Force,
+    [switch]$Hub,
     [switch]$NoStartCubase,
     [switch]$BridgeOnly,
     [switch]$Tray,
@@ -192,6 +194,7 @@ if (-not $CubaseExe) {
 if (-not $CubaseExe -or -not (Test-Path $CubaseExe)) { throw 'Cubase executable not found. Pass -CubaseExe "<path>\Cubase15.exe".' }
 
 Write-Host "Starting Cubase: $CubaseExe"
+if ($Hub) { Write-Host 'Without a project (-Hub).'; Start-Process -FilePath $CubaseExe; Write-Host 'Done.'; return }
 if ($Project -and -not (Test-Path $Project)) {
     # Moved or renamed: start Cubase anyway (the Hub) instead of stopping with everything else done.
     Write-Warning "Project not found: $Project (cubase\tools\project.txt or CUBASE_SIXTY_PROJECT): starting Cubase without it."
