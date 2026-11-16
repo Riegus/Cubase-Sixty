@@ -725,9 +725,8 @@ var stepListed = false   // (the channel list is logged once, when the selected 
 // plug-in). So the bridge gets the selected channel's index (SysEx 0F <hi> <lo>) and, for the UF8's strips, the index
 // of every MixConsole number (SysEx 10 <first hi> <first lo> <hi> <lo> ..., 40 a message; 11 <count hi> <count lo>
 // ends the list): the VST Mixer's channels except inputs and outputs, in index order. The list is only sent when the
-// (The tree does not hold every channel: in the test project it ended at index 46, the groups and FX channels after it
-// missing. The bridge counts on from the list's end, and from the selected channels' pairs: 0F carries the counted
-// place too, <index hi> <index lo> <place hi> <place lo>.)
+// (Should the list still end early, the bridge counts on from its end and from the selected channels' pairs: 0F
+// carries the counted place too, <index hi> <index lo> <place hi> <place lo>.)
 // selected channel's place in it is the number sent (else the one sent before stays; with none, the bridge takes the
 // numbers as they are).
 var sslIndexSent = -1
@@ -737,11 +736,11 @@ var probeSent = 0
 function sslNumbers(activeDevice) {
 	if (!stepMix || !plugAm || !plugDa) return
 	var base = stepMix.getBaseObjectID(plugAm)
-	var n = stepMix.getNumberOfChildObjects(plugAm, base)
+	var ids = mixerChildIds(stepMix, plugAm, base)
 	var cur = plugDa.getBaseObjectID(plugAm)
 	var seen = {}, list = [], curIdx = 0
-	for (var i = 0; i < n && i < 1024; ++i) {
-		var id = stepMix.getChildObjectID(plugAm, base, i)
+	for (var i = 0; i < ids.length; ++i) {
+		var id = ids[i]
 		var type = '', idx = -1
 		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
 		if (/Input|Output|ControlRoom|Monitor/.test(type)) continue
@@ -778,12 +777,28 @@ function sslNumbers(activeDevice) {
 	}
 	sendMidi(activeDevice, SYSEX_HEADER.concat([0x11, (list.length >> 7) & 0x7F, list.length & 0x7F, 0xF7]))
 }
+// The VST Mixer's children (16.11.2026). The mixer says how many channels there are, but hands them out by track
+// index: in a project with disabled tracks (an index without a channel) the holes repeat other channels, and the
+// channels whose index is past the count are only reached by asking on (traced: 46 children, the channels with index
+// 46-56 at 46-56, then id -1). So: asked on until 16 in a row come back empty, each id once.
+function mixerChildIds(acc, am, base) {
+	var n = 0, ids = [], seen = {}, empty = 0
+	try { n = acc.getNumberOfChildObjects(am, base) } catch (e) { return ids }
+	for (var i = 0; i < 4096 && (i < n || empty < 16); ++i) {
+		var id = -1
+		try { id = acc.getChildObjectID(am, base, i) } catch (e) {}
+		if (id < 0) { if (i >= n) ++empty; continue }
+		if (i >= n) empty = 0
+		if (!seen[id]) { seen[id] = true; ids.push(id) }
+	}
+	return ids
+}
 function stepChannels() {
 	var list = []
 	var base = stepMix.getBaseObjectID(plugAm)
-	var n = stepMix.getNumberOfChildObjects(plugAm, base)
-	for (var i = 0; i < n && i < 1024; ++i) {
-		var id = stepMix.getChildObjectID(plugAm, base, i)
+	var ids = mixerChildIds(stepMix, plugAm, base)
+	for (var i = 0; i < ids.length; ++i) {
+		var id = ids[i]
 		var type = ''
 		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
 		if (/Input|Output|ControlRoom|Monitor/.test(type)) continue
@@ -1698,6 +1713,11 @@ function meterList(da, where, found, ssl) {
 		}
 		if (depth >= 7 || /^(QuickControls|Panner|Modulators|Sends|Foldbacks|DirectRouting)$/.test(type)) return
 		var n = 0
+		if (depth === 0) {   // the mixer itself: every channel once (mixerChildIds)
+			var ids = mixerChildIds(da, plugAm, id)
+			for (var k = 0; k < ids.length; ++k) rec(ids[k], 1, channel)
+			return
+		}
 		try { n = da.getNumberOfChildObjects(plugAm, id) } catch (e) { return }
 		for (var i = 0; i < n && i < 512; ++i) rec(da.getChildObjectID(plugAm, id, i), depth + 1, channel)
 	}
