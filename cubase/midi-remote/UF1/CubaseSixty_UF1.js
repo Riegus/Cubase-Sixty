@@ -47,7 +47,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x01: 0, 0x02: 0, 0x03: 0, 0x08: 0, 0x09: 0, 0x0D: 0, 0x0E: 0, 0x15: 1, 0x17: 1, 0x50: 0, 0x51: 1, 0x52: 1,
+var RESEND = { 0x01: 0, 0x02: 0, 0x03: 0, 0x08: 0, 0x09: 0, 0x0D: 0, 0x0E: 0, 0x0F: 0, 0x10: 2, 0x11: 0, 0x15: 1, 0x17: 1, 0x50: 0, 0x51: 1, 0x52: 1,
 	0x55: 0, 0x56: 0, 0x58: 0, 0x5A: 0, 0x5B: 0, 0x60: 1, 0x61: 1, 0x62: 0, 0x7C: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
@@ -718,33 +718,56 @@ var stepListed = false   // (the channel list is logged once, when the selected 
 // Every track's channel in track order: the VST Mixer's children, except the inputs and outputs, sorted by
 // getMixerChannelIndex (the track order, even where the MixConsole shows group / FX channels elsewhere).
 // (Instrument tracks are "Synth", not "...Channel"; folders do not nest channels in this tree.)
-// (Test, 16.11.2026: the track numbers did not match the MixConsole's in a project with disabled, hidden tracks.) The
-// selected channel's place in the VST Mixer's tree against the number sent; the whole tree once per size.
-var probeCount = -1
+// The SSL plug-ins' track numbers (16.11.2026). An SSL plug-in announces the track it is on by the host's track index,
+// which is getMixerChannelIndex here; the MixConsole's number (what the surfaces show, SysEx 0E) is the channel's place
+// among the channels that exist. They differ in a project with disabled tracks (they keep their index but have no
+// channel: "Vio S 2" was 13 in the MixConsole and 22 to its plug-in, so the UF1 drew the EQ curve of another track's
+// plug-in). So the bridge gets the selected channel's index (SysEx 0F <hi> <lo>) and, for the UF8's strips, the index
+// of every MixConsole number (SysEx 10 <first hi> <first lo> <hi> <lo> ..., 40 a message; 11 <count hi> <count lo>
+// ends the list): the VST Mixer's channels except inputs and outputs, in index order. The list is only sent when the
+// selected channel's place in it is the number sent (else the one sent before stays; with none, the bridge takes the
+// numbers as they are).
+var sslIndexSent = -1
+var sslTableKey = null
 var probeSent = 0
-function numberProbe() {
+function sslNumbers(activeDevice) {
 	if (!stepMix || !plugAm || !plugDa) return
 	var base = stepMix.getBaseObjectID(plugAm)
 	var n = stepMix.getNumberOfChildObjects(plugAm, base)
 	var cur = plugDa.getBaseObjectID(plugAm)
-	var rows = [], at = '', tracks = 0
+	var seen = {}, list = [], curIdx = 0
 	for (var i = 0; i < n && i < 1024; ++i) {
 		var id = stepMix.getChildObjectID(plugAm, base, i)
-		var type = '', title = '', vis = '?', idx = '?'
+		var type = '', idx = -1
 		try { type = stepMix.getObjectTypeName(plugAm, id) } catch (e) {}
-		try { title = stepMix.getObjectTitle(plugAm, id) } catch (e) {}
-		try { vis = stepMix.isMixerChannelVisible(plugAm, id) ? 'v' : 'h' } catch (e) {}
+		if (/Input|Output|ControlRoom|Monitor/.test(type)) continue
 		try { idx = stepMix.getMixerChannelIndex(plugAm, id) } catch (e) {}
-		var io = /Input|Output|ControlRoom|Monitor/.test(type)
-		if (!io) ++tracks
-		if (id === cur) at = 'child ' + i + ', index ' + idx + ', ' + (io ? 'in/out' : 'track child ' + tracks) + ', ' + type
-		rows.push(i + ':' + idx + ':' + vis + ':' + type + ':"' + title + '"')
+		if (idx <= 0) continue
+		if (id === cur) curIdx = idx
+		if (!seen[idx]) { seen[idx] = true; list.push(idx) }
 	}
-	out('[CubaseSixty UF1] number probe: "' + selectedInfo.title + '" sent ' + probeSent + '; ' + (at || 'not in the tree') + ' (' + n + ' children)')
-	if (n !== probeCount) {
-		probeCount = n
-		for (var r = 0; r < rows.length; r += 6) out('[CubaseSixty UF1] number probe tree: ' + rows.slice(r, r + 6).join('  '))
+	list.sort(function (a, b) { return a - b })
+	if (curIdx !== sslIndexSent) {
+		sslIndexSent = curIdx
+		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0F, (curIdx >> 7) & 0x7F, curIdx & 0x7F, 0xF7]))
 	}
+	if (!curIdx || probeSent <= 0) return   // (not a channel: the list is left as it is)
+	var key = list.join(',')
+	if (key === sslTableKey) return
+	// (Not at its place: two tracks of one name and the number guessed, or the list still loading. The list sent
+	// stays; the next selection checks again.)
+	if (list[probeSent - 1] !== curIdx) { if (sslTableKey === null) list = []; else return }
+	sslTableKey = list.length ? key : null
+	var differ = 0
+	for (var d = 0; d < list.length; ++d) if (list[d] !== d + 1) ++differ
+	out('[CubaseSixty UF1] SSL track numbers: ' + (list.length ? list.length + ' channels, ' + differ + ' with another number than the MixConsole\'s' : 'no list ("' + selectedInfo.title + '" is ' + probeSent + ' in the MixConsole, index ' + curIdx + ', not at that place in the list)'))
+	for (var at = 0; at < list.length; at += 40) {
+		var msg = SYSEX_HEADER.concat([0x10, (at >> 7) & 0x7F, at & 0x7F])
+		for (var k = at; k < list.length && k < at + 40; ++k) msg.push((list[k] >> 7) & 0x7F, list[k] & 0x7F)
+		msg.push(0xF7)
+		sendMidi(activeDevice, msg)
+	}
+	sendMidi(activeDevice, SYSEX_HEADER.concat([0x11, (list.length >> 7) & 0x7F, list.length & 0x7F, 0xF7]))
 }
 function stepChannels() {
 	var list = []
@@ -2052,7 +2075,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
-		try { numberProbe() } catch (e) { out('[CubaseSixty UF1] number probe: ' + e) }
+		try { sslNumbers(activeDevice) } catch (e) { out('[CubaseSixty UF1] SSL track numbers: ' + e) }
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
 	}
 }

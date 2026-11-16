@@ -13,6 +13,15 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   direction, with and without SSL plug-ins in the project; then whether the bridge can make Cubase look again, or
   at least tell the user (the surfaces) what to do. See cubase-limitations.md (bridge outage).
 
+## All surfaces
+
+- **To be confirmed (16.11.2026, wip-track-numbers): the SSL plug-ins were looked up by the wrong track number in a
+  project with disabled tracks.** A disabled track has no mixer channel but keeps its track index, and the SSL plug-ins
+  announce that index: "Vio S 2" was 13 in the MixConsole and 022 in its plug-in. The UF1's EQ graph (and METER's
+  AUTO, the UF8's plug-in names) asked for the plug-in on track 13 and showed another track's; the UC1's 7-segment
+  showed 22. Now the surfaces show the MixConsole's number and ask SSL's connection with the track index (the UF1
+  script sends both; see bridge-midi-protocol.md, SSL track numbers).
+
 ## UF8
 
 - **Not ours (15.11.2026): another controller's MIDI Remote scripts moved the selection when a project opened.** The

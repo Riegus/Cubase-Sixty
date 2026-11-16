@@ -258,6 +258,10 @@ void paintSevenSeg()
 {
     int value;
     { std::lock_guard<std::mutex> lk(g_stateMx); value = g_sevenSeg; }
+    // The MixConsole's number, as the UF1 and the UF8 show (the UF1 script's; it runs with or without a UF1). The UC1
+    // script's own is the channel's track index, which is another number in a project with disabled tracks
+    // (16.11.2026: 22 for the MixConsole's 13); kept where the other is not known.
+    if (value > 0 && uf1MixNumber() > 0) value = uf1MixNumber();
     static const uint8_t kDigit[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
     const int v = std::clamp(value, -1, 999);
     const uint8_t bases[3] = {0x10, 0x08, 0x00};

@@ -1026,6 +1026,13 @@ std::string sendCellLine(const SendCell& c)
 std::atomic<uint8_t> g_meterL{0}, g_meterR{0};
 std::atomic<bool> g_cycleRunning{false};
 std::atomic<int> g_trackNo{0};   // from the script (SysEx 0E): the selected track's MixConsole position, 0 = unknown
+// The SSL plug-ins' number for the selected track (the host's track index they announce; script SysEx 0F), 0 = not
+// known: the MixConsole's number is not it in a project with disabled tracks (16.11.2026: "Vio S 2" 13 / 22, and the
+// EQ graph showed another track's plug-in). And that index for every MixConsole number (script SysEx 10 / 11).
+std::atomic<int> g_sslTrack{0};
+std::mutex g_sslTableMx;
+std::vector<int> g_sslTable;
+int sslTrackSelected() { const int t = g_sslTrack; return t > 0 ? t : int(g_trackNo); }
 void screenText(uint16_t addr, const std::string& text);
 void restoreChannelView();
 void put(uint16_t addr, std::initializer_list<uint8_t> p)
@@ -1288,9 +1295,9 @@ void startIdleCycle()
                     if (sel >= 0 && sel != selShown) { selShown = sel; put(0x011a, {uint8_t(sel)}); }
                 }
                 if (screen == 0)
-                    uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(), reset);
+                    uf1meter::buildOverview(p, g_meterL.load(), g_meterR.load(), sslTrackSelected(), !g_playing.load(), reset);
                 else
-                    uf1meter::buildOther(screen, p, g_meterL.load(), g_meterR.load(), g_trackNo.load(), !g_playing.load(),
+                    uf1meter::buildOther(screen, p, g_meterL.load(), g_meterR.load(), sslTrackSelected(), !g_playing.load(),
                                          reset, screenOpened);
             } else {
                 // The EQ graph, every third cycle (~120 ms): a turned EQ knob redraws about as fast as SSL 360's.
@@ -1456,7 +1463,7 @@ void paintEq(bool force)
         std::vector<float> wire;
         float wMin = 0.0f, wMax = 0.0f;
         if (sslcore::isRunning() &&
-            sslcore::getChannelStripEqCurve(g_trackNo, model.c_str(), nullptr, 0, g_plugOrd, wire, wMin, wMax)) {
+            sslcore::getChannelStripEqCurve(sslTrackSelected(), model.c_str(), nullptr, 0, g_plugOrd, wire, wMin, wMax)) {
             // Points the plug-in sent as NaN / inf are filled in from their neighbours (Rea-Sixty's
             // uf1SanitizeWireCurve_); all of them bad = no curve.
             const int n = int(wire.size());
@@ -1912,6 +1919,26 @@ void onSysex(const std::vector<unsigned char>& m)
     } else if (m[4] == 0x0E && m.size() >= 8) {
         g_trackNo = (int(m[5]) << 7) | int(m[6]);
         showStripNumber();
+        uc1RedrawSevenSeg();
+    } else if (m[4] == 0x0F && m.size() >= 8) {
+        g_sslTrack = (int(m[5]) << 7) | int(m[6]);
+    } else if (m[4] == 0x10 && m.size() >= 8) {
+        const size_t first = (size_t(m[5]) << 7) | m[6];
+        std::lock_guard<std::mutex> lk(g_sslTableMx);
+        for (size_t at = 7, k = first; at + 2 < m.size(); at += 2, ++k) {
+            if (g_sslTable.size() <= k) g_sslTable.resize(k + 1, 0);
+            g_sslTable[k] = (int(m[at]) << 7) | int(m[at + 1]);
+        }
+    } else if (m[4] == 0x11 && m.size() >= 8) {
+        const size_t count = (size_t(m[5]) << 7) | m[6];
+        int differ = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_sslTableMx);
+            g_sslTable.resize(count, 0);
+            for (size_t k = 0; k < count; ++k) if (g_sslTable[k] != int(k) + 1) ++differ;
+        }
+        std::printf("SSL track numbers: %d channels, %d with another number than the MixConsole's\n", int(count), differ);
+        uf8RedrawNumbers();
     } else if (m[4] == 0x0D) {
         // Transport position text -> the 7-segment time field on the big display. Cubase pads every part of
         // the position to a fixed width with spaces ("  1. 1. 1.   0"), so spaces stay as blank cells: the
@@ -2442,4 +2469,12 @@ int fader0dbPos()
     return g_zeroPos;
 }
 
+int uf1SslTrackOf(int mixNumber)
+{
+    if (mixNumber <= 0) return mixNumber;
+    std::lock_guard<std::mutex> lk(g_sslTableMx);
+    if (size_t(mixNumber) > g_sslTable.size() || g_sslTable[size_t(mixNumber) - 1] <= 0) return mixNumber;
+    return g_sslTable[size_t(mixNumber) - 1];
+}
+int uf1MixNumber() { return g_trackNo; }
 } // namespace cs

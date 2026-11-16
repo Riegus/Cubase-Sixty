@@ -1146,7 +1146,7 @@ void paintStripNumbers(bool force = false)
         }
         std::string cs;
         if (g_projectOpen && !g_stripEmpty[s]) {
-            const char* label = number > 0 ? stripPluginLabel(sslcore::stripPluginTypeOnTrack(number)) : nullptr;
+            const char* label = number > 0 ? stripPluginLabel(sslcore::stripPluginTypeOnTrack(uf1SslTrackOf(number))) : nullptr;
             cs = label ? label : std::string(12, ' ');
         }
         if (force || g_csShown[s] != cs) {
@@ -1750,6 +1750,7 @@ void cs::autoModePressed(uint8_t n)
 }
 
 // The UF1's BANK keys bank the UF8 (as if its own bank key had been pressed).
+void cs::uf8RedrawNumbers() { paintStripNumbers(); }
 bool cs::uf8BankPress(bool right)
 {
     if (!g_uf8Running) return false;
