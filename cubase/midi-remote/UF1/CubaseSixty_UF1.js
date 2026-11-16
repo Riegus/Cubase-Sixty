@@ -731,6 +731,7 @@ var stepListed = false   // (the channel list is logged once, when the selected 
 // selected channel's place in it is the number sent (else the one sent before stays; with none, the bridge takes the
 // numbers as they are).
 var sslIndexSent = -1
+var sslDueAt = 0
 var sslTableKey = null
 var probeSent = 0
 function sslNumbers(activeDevice) {
@@ -757,12 +758,14 @@ function sslNumbers(activeDevice) {
 		sslIndexSent = pairKey
 		sendMidi(activeDevice, SYSEX_HEADER.concat([0x0F, (curIdx >> 7) & 0x7F, curIdx & 0x7F, (probeSent >> 7) & 0x7F, probeSent & 0x7F, 0xF7]))
 	}
-	if (!curIdx || probeSent <= 0) return   // (not a channel: the list is left as it is)
 	var key = list.join(',')
 	if (key === sslTableKey) return
+	// No channel selected (a project just opened, a folder): a first list goes out unchecked, so the UF8's numbers are
+	// right from the start (16.11.2026: they were the counted ones until a track was selected); a later one waits.
+	if ((!curIdx || probeSent <= 0) && sslTableKey !== null) return
 	// (Not at its place: two tracks of one name and the number guessed, or the list still loading. The list sent
 	// stays; the next selection checks again.)
-	if (probeSent <= list.length && list[probeSent - 1] !== curIdx) { if (sslTableKey === null) list = []; else return }
+	if (curIdx && probeSent > 0 && probeSent <= list.length && list[probeSent - 1] !== curIdx) { if (sslTableKey === null) list = []; else return }
 	sslTableKey = list.length ? key : null
 	var differ = 0
 	for (var d = 0; d < list.length; ++d) if (list[d] !== d + 1) ++differ
@@ -2047,6 +2050,8 @@ var eqPollAt = 0
 page.mOnActivate = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
 	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
+	sslTableKey = null   // a project opened: its track numbers
+	sslDueAt = Date.now() + 1500
 	plug.obj = -2   // look again and send everything
 	sendDa.base = -2
 	sendDa.refreshAt = Date.now() + 200
@@ -2079,8 +2084,13 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		// them again restarted its 3 s and moved the bar (10.11.2026).
 		try { sendDaShow(activeDevice, sd, false) } catch (e) {}
 	}
+	if (sslDueAt && Date.now() >= sslDueAt) {
+		sslDueAt = 0
+		try { sslNumbers(activeDevice) } catch (e) { out('[CubaseSixty UF1] SSL track numbers: ' + e) }
+	}
 	if (plug.rescanAt && Date.now() >= plug.rescanAt) {
 		plug.rescanAt = 0
+		sslDueAt = Date.now() + 1500   // (and once more: the tree fills in after a project opens)
 		try { sslNumbers(activeDevice) } catch (e) { out('[CubaseSixty UF1] SSL track numbers: ' + e) }
 		try { plugRescan(activeDevice) } catch (e) { out('[CubaseSixty UF1] PLUGIN scan failed: ' + e) }
 	}
