@@ -702,6 +702,49 @@ selected.mOnColorChange = function (activeDevice, activeMapping, r, g, b, a, isA
 // then looking at the new track was slow: Cubase reports the new selection up to a second later.) See
 // cubase\docs\banking.md.
 var stepMix = null
+// (Probe, 19.11.2026: are the markers, and their names, reachable through Direct Access on the transport? The API has
+// nothing for markers. Its whole tree, every object with its type, names and parameters; once per project.)
+var markerDa = [], markerProbeAt = 0
+try { markerDa.push(['Transport', page.mHostAccess.makeDirectAccess(page.mHostAccess.mTransport)]) } catch (e) { out('[CubaseSixty UF1] probe: no Direct Access to the transport: ' + e) }
+try { markerDa.push(['Control Room', page.mHostAccess.makeDirectAccess(page.mHostAccess.mControlRoom)]) } catch (e) { out('[CubaseSixty UF1] probe: no Direct Access to the Control Room: ' + e) }
+try { markerDa.push(['Mouse', page.mHostAccess.makeDirectAccess(page.mHostAccess.mMouseCursor)]) } catch (e) {}
+function markerProbe() {
+	for (var d = 0; d < markerDa.length; ++d) {
+		var label = markerDa[d][0], da = markerDa[d][1], count = 0
+		var base = -1
+		try { base = da.getBaseObjectID(plugAm) } catch (e) { out('[CubaseSixty UF1] probe ' + label + ': no base: ' + e); continue }
+		out('[CubaseSixty UF1] probe ' + label + ': base #' + base)
+		var seen = {}
+		var walk = function (id, depth) {
+			if (id < 0 || seen[id] || count >= 300) return
+			seen[id] = true
+			++count
+			var type = '', title = '', uname = '', np = 0, kids = 0
+			try { type = da.getObjectTypeName(plugAm, id) } catch (e) {}
+			try { title = da.getObjectTitle(plugAm, id) } catch (e) {}
+			try { uname = da.getObjectUniqueName(plugAm, id) } catch (e) {}
+			try { np = da.getNumberOfParameters(plugAm, id) } catch (e) {}
+			try { kids = da.getNumberOfChildObjects(plugAm, id) } catch (e) {}
+			var pad = new Array(depth + 1).join('  ')
+			out('[CubaseSixty UF1] probe ' + label + ': ' + pad + '#' + id + ' [' + type + '] "' + title + '" (' + uname + '), ' + np + ' parameters, ' + kids + ' children')
+			for (var i = 0; i < np && i < 40; ++i) {
+				var tag = -1, pt = '', dv = ''
+				try { tag = da.getParameterTagByIndex(plugAm, id, i) } catch (e) {}
+				try { pt = da.getParameterTitle(plugAm, id, tag, 64) } catch (e) {}
+				try { dv = da.getParameterDisplayValue(plugAm, id, tag) } catch (e) {}
+				out('[CubaseSixty UF1] probe ' + label + ': ' + pad + '    ' + i + ' tag ' + tag + ' "' + pt + '" = "' + dv + '"')
+			}
+			if (depth >= 6) return
+			for (var k = 0; k < kids + 8 && k < 200; ++k) {   // (and a few past the count, as the mixer needed)
+				var c = -1
+				try { c = da.getChildObjectID(plugAm, id, k) } catch (e) {}
+				if (c >= 0) walk(c, depth + 1)
+			}
+		}
+		walk(base, 0)
+		out('[CubaseSixty UF1] probe ' + label + ': ' + count + ' objects')
+	}
+}
 try { stepMix = page.mHostAccess.makeDirectAccess(page.mHostAccess.mMixConsole) } catch (e) { out('[CubaseSixty UF1] no Direct Access to the MixConsole, track steps include hidden tracks: ' + e) }
 var stepLast = { id: -1, at: 0 }
 // The last channel the selection was on (or a step went to): from a track without a channel (a folder, the
@@ -2071,6 +2114,7 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	plugAm = activeMapping
 	plugSend(activeDevice, [0x54])   // ask the bridge for the V-pot page of the view it shows
 	sslTableKey = null   // a project opened: its track numbers
+	markerProbeAt = Date.now() + 4000
 	sslDueAt = Date.now() + 1500
 	plug.obj = -2   // look again and send everything
 	sendDa.base = -2
@@ -2103,6 +2147,10 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		// The cell and the bridge's position only: the value line and bar are the bridge's while turning, and sending
 		// them again restarted its 3 s and moved the bar (10.11.2026).
 		try { sendDaShow(activeDevice, sd, false) } catch (e) {}
+	}
+	if (markerProbeAt && Date.now() >= markerProbeAt) {
+		markerProbeAt = 0
+		try { markerProbe() } catch (e) { out('[CubaseSixty UF1] probe: ' + e) }
 	}
 	if (sslDueAt && Date.now() >= sslDueAt) {
 		sslDueAt = 0
