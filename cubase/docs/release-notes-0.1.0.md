@@ -11,7 +11,7 @@ does not work (see "Reporting a problem" below).
 ## What you need
 
 - Windows 10 or 11 (64 bit) and Cubase with MIDI Remote (developed and tested on Cubase 15 Pro; older versions are
-  untested).
+  untested). Nuendo is not supported yet.
 - An SSL UF8, UF1 or UC1, connected by USB.
 - The teVirtualMIDI driver, which comes with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) (free)
   and with SSL 360. You do not create any ports yourself. If it is missing, the installer offers to open loopMIDI's

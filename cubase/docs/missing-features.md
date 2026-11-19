@@ -5,6 +5,13 @@ job differently, see [On second thought](on-second-thought.md); bugs are in [Kno
 these may not be possible, or only partly, through Cubase's MIDI Remote API; that is checked when one is taken up.
 What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.md).
 
+## Not supported yet
+
+- **Nuendo** (19.11.2026). It has the same MIDI Remote system, but the installer puts the scripts in Cubase's folder
+  only, the bridge and the installer recognise Cubase's program only, and the Cubase setup reads Cubase's preferences
+  only. A small change (Nuendo's script folder, Nuendo.exe, the "Nuendo <n>_64" preferences), but untested without
+  Nuendo: to be done when someone with Nuendo can test it.
+
 ## Suggested next (value for the effort)
 
 1. UF1 PLUGIN: jump to the page of a control touched in the plug-in window.
