@@ -128,6 +128,34 @@ int findPort(RtMidi& api, const std::string& needle)
     }
 }
 
+// Opening a port the tray app has just made (16.11 / 19.11.2026: at login) can fail although Windows already lists
+// it ("MidiOutWinMM::openPort: error creating Windows MM MIDI output port"): the bridge ended, the tray app started it
+// again 5 s later and showed "The bridge stopped and was started again". So a failed open is tried again for up to
+// 10 s (the port looked up again each time: the list can change meanwhile), and only then given up.
+template <class Api>
+bool openPortRetrying(Api& rt, const std::string& name)
+{
+    using clock = std::chrono::steady_clock;
+    const clock::time_point deadline = clock::now() + std::chrono::seconds(10);
+    for (int tries = 1;; ++tries) {
+        const int p = findPort(rt, name);
+        if (p < 0) { std::fprintf(stderr, "MIDI port \"%s\" not found.\n", name.c_str()); return false; }
+        try {
+            rt.openPort(unsigned(p), name);
+            if (tries > 1) std::printf("MIDI port \"%s\" opened (try %d).\n", name.c_str(), tries);
+            return true;
+        } catch (const RtMidiError& e) {
+            if (clock::now() >= deadline) {
+                std::fprintf(stderr, "MIDI port \"%s\" could not be opened (%d tries in 10 s): %s\n", name.c_str(), tries,
+                             e.getMessage().c_str());
+                throw;
+            }
+            if (tries == 1) std::printf("MIDI port \"%s\" not ready yet; trying again.\n", name.c_str());
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+    }
+}
+
 } // namespace
 
 void midiPortsPreferLoopMidi(bool on) { g_preferLoop = on; }
@@ -164,9 +192,7 @@ bool MidiOutPort::open(const std::string& name)
                      name.c_str(), GetLastError());
     }
 #endif
-    const int p = findPort(impl_->rt, name);
-    if (p < 0) { std::fprintf(stderr, "MIDI port \"%s\" not found.\n", name.c_str()); return false; }
-    impl_->rt.openPort(unsigned(p), name);
+    if (!openPortRetrying(impl_->rt, name)) return false;
     impl_->rtOpen = true;
     return true;
 }
@@ -224,11 +250,9 @@ bool MidiInPort::open(const std::string& name, MidiMessageCallback cb)
                      name.c_str(), GetLastError());
     }
 #endif
-    const int p = findPort(impl_->rt, name);
-    if (p < 0) { std::fprintf(stderr, "MIDI port \"%s\" not found.\n", name.c_str()); return false; }
+    if (!openPortRetrying(impl_->rt, name)) return false;
     impl_->rt.ignoreTypes(false, true, true);   // keep SysEx
     impl_->rt.setCallback(&Impl::rtCallback, impl_.get());
-    impl_->rt.openPort(unsigned(p), name);
     return true;
 }
 
