@@ -42,7 +42,8 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   mixerChildIds) still work; follow selection, the track numbers and finding the selected track do not; the ARMED view
   misses armed tracks past the 128th recordable one. Kept small because Cubase re-checks every hidden list on each
   selection change (about 0.9 s of stall at 1,280 channels, banking.md). To raise: read in windows, as the track views
-  are (16-channel windows), and measure the selection stall.
+  are (16-channel windows), and measure the selection stall. Our sizes, not Cubase's: see missing-features.md, Not
+  supported yet, for the plan.
 - **Fixed (16.11.2026): the track numbers and plug-in names were blank after the same project was closed and opened
   again.** The bridge forgets the numbers when a project closes; the Helper sent them again only when a channel's name
   changed, which none does when the same project comes back. It now sends them at every activation (and 3 s later).

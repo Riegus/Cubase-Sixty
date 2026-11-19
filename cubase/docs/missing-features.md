@@ -7,6 +7,12 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 
 ## Not supported yet
 
+- **Projects past 256 channels** (19.11.2026: planned after the first release). The scripts' hidden lists hold 256
+  visible channels, 256 per track view and 128 recordable tracks: Cubase-Sixty's sizes, chosen because Cubase
+  re-checks every hidden list on each selection change (known-issues.md, UF8). Ideas, to measure first:
+  - Grow with the project: read the lists through small windows moved along the mixer (as the track views do), so a
+    larger project costs reading time once, not a pause on every selection.
+  - Or settings: the list sizes (e.g. 256 / 512 / 1024), with what each costs in selection speed shown beside them.
 - **No loopMIDI on Windows 11** (19.11.2026: planned, after the first release). Windows MIDI Services (general
   availability February 2026, Windows 11 only, rolled out in phases) has built-in loopback ports that a program can
   make itself (the App SDK's transient loopback endpoints); older programs such as Cubase see them as ordinary ports.
