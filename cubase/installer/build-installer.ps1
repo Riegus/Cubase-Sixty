@@ -27,9 +27,22 @@ $iscc = @(
 if (-not $iscc) { throw 'Inno Setup (7 or 6) was not found. If it is installed somewhere else, add its folder to PATH. Otherwise install it from https://jrsoftware.org/isdl.php and run this again.' }
 
 if (-not $NoBuild) {
+    # A dev build started from here (dev-restart.ps1) runs these very files, and Windows will not let them be replaced:
+    # it is asked to quit first, as its tray menu would (19.11.2026). An installed copy runs from elsewhere: left alone.
+    $devTray = Join-Path $release 'CubaseSixty.exe'
+    $running = Get-Process -Name 'CubaseSixty', 'cubase_sixty_bridge' -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase) }
+    if ($running) {
+        Write-Host "Quitting the dev build that runs from $release..."
+        if (Test-Path $devTray) { & $devTray --quit; Start-Sleep -Milliseconds 500 }
+        Get-Process -Name 'CubaseSixty', 'cubase_sixty_bridge' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -and $_.Path.StartsWith($release, [StringComparison]::OrdinalIgnoreCase) } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
     Write-Host "Building the bridge and the tray app (Release)..."
     & cmake --build (Join-Path $bridge 'build') --config Release
-    if ($LASTEXITCODE -ne 0) { throw 'Build failed. (Is the bridge or the tray app still running? Quit Cubase-Sixty from its tray icon first.)' }
+    if ($LASTEXITCODE -ne 0) { throw 'Build failed. (Is a bridge from this build folder still running? Quit Cubase-Sixty from its tray icon first.)' }
 }
 foreach ($f in 'CubaseSixty.exe', 'cubase_sixty_bridge.exe', 'libusb-1.0.dll') {
     if (-not (Test-Path (Join-Path $release $f))) { throw "Missing $release\$f" }
