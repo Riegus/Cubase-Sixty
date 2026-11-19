@@ -5,6 +5,27 @@ job differently, see [On second thought](on-second-thought.md); bugs are in [Kno
 these may not be possible, or only partly, through Cubase's MIDI Remote API; that is checked when one is taken up.
 What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.md).
 
+## Not supported yet
+
+- **No loopMIDI on Windows 11** (19.11.2026: planned, after the first release). Windows MIDI Services (general
+  availability February 2026, Windows 11 only, rolled out in phases) has built-in loopback ports that a program can
+  make itself (the App SDK's transient loopback endpoints); older programs such as Cubase see them as ordinary ports.
+  The tray app would make its ports there when the service is present and fall back to teVirtualMIDI when it is not
+  (Windows 10, a PC the rollout has not reached). To check first: whether the SDK runtime has to be installed
+  separately, and how Cubase 15 lists these ports. Geir's PC has it (the Windows MIDI Service, MidiSrv, running).
+- **Nuendo** (19.11.2026). It has the same MIDI Remote system, but the installer puts the scripts in Cubase's folder
+  only, the bridge and the installer recognise Cubase's program only, and the Cubase setup reads Cubase's preferences
+  only. A small change (Nuendo's script folder, Nuendo.exe, the "Nuendo <n>_64" preferences), but untested without
+  Nuendo: to be done when someone with Nuendo can test it.
+- **macOS** (19.11.2026: planned, after the first Windows release). Already there: the USB code (Rea-Sixty's, which
+  runs on the Mac; there no driver swap is needed, only SSL360Core closed), virtual MIDI ports from macOS itself (no
+  loopMIDI), the four scripts unchanged, and a bridge that is portable but for about 25 Windows-only spots (process
+  checks, paths, the stop signal, the MIDI ports). To write: a menu bar app in place of the tray app (status, menu,
+  login item, restarting the bridge; keeping the ports while the bridge restarts needs its own design on the Mac), the
+  Mac side of those spots (Cubase's preferences in ~/Library/Preferences/Cubase <n>/ for the setup), and a signed and
+  notarised installer (an Apple Developer account). Every step is built and tested on a Mac with Cubase and a
+  controller: Geir's 13" MacBook Pro M1 (2020) with Cubase 15 Pro.
+
 ## Suggested next (value for the effort)
 
 1. UF1 PLUGIN: jump to the page of a control touched in the plug-in window.

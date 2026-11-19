@@ -46,12 +46,19 @@ InfoBeforeFile=before-you-install.txt
 [Tasks]
 Name: "autostart"; Description: "Start Cubase-Sixty with Windows"; GroupDescription: "Start:"
 ; Ticked by the code below when a connected controller is not on the driver yet, or none is connected.
+; Cubase's own two settings (19.11.2026): CubaseSixty.exe --setup-cubase shows what it would change and asks first.
+Name: "cubasesetup"; Description: "Set up Cubase for Cubase-Sixty: take its ports out of ""All MIDI Inputs"" and add the Mackie Control device for SCRUB (shows the changes and asks first)"; GroupDescription: "Cubase:"
 Name: "usbdriver"; Description: "Install the USB driver for the SSL controllers (asks for administrator permission; SSL 360 will no longer see them)"; GroupDescription: "USB driver (have the controllers plugged in and switched on):"; Flags: unchecked
 
 [Files]
 Source: "{#BuildDir}\CubaseSixty.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\cubase_sixty_bridge.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildDir}\libusb-1.0.dll"; DestDir: "{app}"; Flags: ignoreversion
+; Microsoft's C++ runtime beside the program (app-local, as Microsoft allows): nothing to install separately
+; (19.11.2026). The build copies them there (CMakeLists.txt).
+Source: "{#BuildDir}\msvcp140.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildDir}\vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE-Rea-Sixty.txt"; Flags: ignoreversion
 Source: "..\docs\user-guide.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -80,6 +87,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; Elevated (one administrator prompt). The tray app is started after it, so the bridge finds the controllers on the driver.
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\driver\install-driver.ps1"""; \
   Verb: runas; Flags: shellexec waituntilterminated runhidden; StatusMsg: "Installing the USB driver for the controllers..."; Tasks: usbdriver
+; Cubase's settings: the program shows what it would change in Cubase's preferences and changes them only on Yes.
+Filename: "{app}\CubaseSixty.exe"; Parameters: "--setup-cubase"; Flags: waituntilterminated skipifsilent; StatusMsg: "Setting up Cubase..."; Tasks: cubasesetup
 Filename: "{app}\CubaseSixty.exe"; Description: "Start Cubase-Sixty now"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
@@ -97,12 +106,6 @@ function VirtualMidiInstalled(): Boolean;
 begin
   Result := FileExists(ExpandConstant('{sys}\teVirtualMIDI64.dll')) or FileExists(ExpandConstant('{sys}\teVirtualMIDI.dll'))
     or FileExists(ExpandConstant('{win}\System32\teVirtualMIDI64.dll'));
-end;
-
-function VcRuntimeInstalled(): Boolean;
-var installed: Cardinal;
-begin
-  Result := RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', installed) and (installed = 1);
 end;
 
 // The USB driver task is ticked when it looks needed: a controller Windows knows that is not on WinUSB, or no
@@ -188,6 +191,13 @@ begin
     Result := 'Cubase is running. Close Cubase, then run the installer again.';
     exit;
   end;
+  // The virtual MIDI driver cannot be installed from here (its maker licenses it separately): the official page is
+  // offered, and the install goes on meanwhile (19.11.2026).
+  if (not VirtualMidiInstalled()) and (not WizardSilent()) then
+    if MsgBox('Cubase-Sixty needs a virtual MIDI driver (teVirtualMIDI) for its MIDI ports, and it was not found on this PC.' + #13#10 + #13#10 +
+              'It comes with loopMIDI, which is free. Open loopMIDI''s download page now? Install loopMIDI from there (you do not ' +
+              'need to create any ports in it); this installation goes on meanwhile.', mbConfirmation, MB_YESNO) = IDYES then
+      ShellExec('open', 'https://www.tobias-erichsen.de/software/loopmidi.html', '', '', SW_SHOWNORMAL, ewNoWait, code);
   exe := ExpandConstant('{app}\CubaseSixty.exe');
   if FileExists(exe) then Exec(exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, code);
 end;
@@ -200,9 +210,6 @@ begin
   if not VirtualMidiInstalled() then
     text := text + 'The virtual MIDI driver was not found. Cubase-Sixty needs it for its MIDI ports. Install loopMIDI (free, by Tobias Erichsen), which brings the driver:' + #13#10 +
       'https://www.tobias-erichsen.de/software/loopmidi.html' + #13#10 + #13#10;
-  if not VcRuntimeInstalled() then
-    text := text + 'The Microsoft Visual C++ runtime was not found. If Cubase-Sixty does not start, install it:' + #13#10 +
-      'https://aka.ms/vs/17/release/vc_redist.x64.exe' + #13#10 + #13#10;
   if text <> '' then MsgBox(text + 'See the user guide for the remaining setup steps.', mbInformation, MB_OK);
 end;
 

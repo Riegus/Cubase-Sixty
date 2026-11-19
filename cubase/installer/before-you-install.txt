@@ -5,12 +5,19 @@ licence). It is not made, endorsed or supported by Solid State Logic or Steinber
 are trademarks of Solid State Logic; Cubase is a trademark of Steinberg Media Technologies.
 
 For your user account only (no administrator rights needed):
-  - The program in %LOCALAPPDATA%\Programs\Cubase-Sixty. Your settings, favourites and logs are kept there too.
+  - The program in %LOCALAPPDATA%\Programs\Cubase-Sixty, with Microsoft's C++ runtime files beside it. Your settings,
+    favourites and logs are kept there too.
   - Four MIDI Remote scripts in Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty.
   - If you tick "Start with Windows": an entry in your Run key (HKCU\...\CurrentVersion\Run).
   - While it runs, Cubase-Sixty makes its own virtual MIDI ports (through the teVirtualMIDI driver of loopMIDI or
     SSL 360), and closes SSL 360's background program SSL360Core.exe whenever it starts.
   The uninstaller removes all of this (it asks before deleting your settings and favourites).
+
+Only if you tick "Set up Cubase" AND say Yes when it shows you the changes:
+  - Cubase's preferences file (%APPDATA%\Steinberg\Cubase <version>_64\Defaults.xml): Cubase-Sixty's ports are taken
+    out of "All MIDI Inputs", and a Mackie Control device is added on Cubase-Sixty's MCU ports (for SCRUB). A copy
+    of the file as it was is kept beside it, "Defaults (before Cubase-Sixty).xml". A Mackie Control device you use
+    for another controller is left alone. The uninstaller does not undo this (rename the copy back to undo it).
 
 Only if you tick "Install the USB driver" (asks for administrator permission once):
   - The SSL controllers are moved from SSL's own USB driver to Windows' WinUSB driver. From then on SSL 360 does

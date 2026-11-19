@@ -46,6 +46,8 @@
 #include <thread>
 #include <vector>
 
+#include "CubaseSetup.h"
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -416,6 +418,13 @@ void readLogLine(const std::string& line)
     if (has("Cubase connected")) { g_status.cubase = "connected"; g_status.projectOpen = true; }
     if (has("Cubase: project open")) { g_status.cubase = "project open"; g_status.projectOpen = true; }
     if (has("Cubase: no project")) { g_status.cubase = "no project (the Hub)"; g_status.projectOpen = false; }
+    // Cubase's own settings are incomplete (the bridge checks at its start, unless the reminder is off): once per run.
+    static bool setupReminded = false;
+    if (has("Cubase setup: not complete") && !setupReminded) {
+        setupReminded = true;
+        notify(L"Cubase is not fully set up for Cubase-Sixty",
+               L"Click the tray icon: Settings > Setup shows what is missing and can set it up for you (it asks first).");
+    }
 }
 
 // Reads what has been added to bridge.log since the last look (it is started anew with each bridge).
@@ -673,6 +682,35 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     if (cmdLine && wcsstr(cmdLine, L"--restart")) {
         if (HWND running = FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr))
             PostMessageW(running, WM_COMMAND, kCmdRestart, 0);
+        return 0;
+    }
+    // --setup-cubase (the installer's "Set up Cubase" task, 19.11.2026): shows what it would change in Cubase's
+    // preferences and changes it only on Yes (with Cubase closed). Nothing to change: says nothing.
+    if (cmdLine && wcsstr(cmdLine, L"--setup-cubase")) {
+        namespace cst = cs::cubaseSetup;
+        const auto widen = [](const std::string& s) {
+            std::wstring w(MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), nullptr, 0), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), int(w.size()));
+            return w;
+        };
+        const auto folders = cst::inspect();
+        if (folders.empty()) {
+            MessageBoxW(nullptr, L"Cubase's preferences were not found, so its settings for Cubase-Sixty could not be checked.\n\n"
+                        L"Start Cubase once, quit it, then open Cubase-Sixty's Settings page (click the tray icon) > Setup.",
+                        L"Cubase-Sixty: set up Cubase", MB_OK | MB_ICONINFORMATION);
+            return 0;
+        }
+        const std::string planned = cst::plannedChanges(folders);
+        if (planned.empty()) return 0;
+        const std::wstring ask = L"Cubase-Sixty would make these changes in Cubase's preferences:\n\n" + widen(planned) +
+            L"\nA copy of each preferences file is kept beside it, as \"Defaults (before Cubase-Sixty).xml\".\n\n"
+            L"Make these changes now? (No: nothing is changed. You can do it later on the Settings page, Setup, or by hand "
+            L"as the user guide describes.)";
+        if (MessageBoxW(nullptr, ask.c_str(), L"Cubase-Sixty: set up Cubase", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) != IDYES) return 0;
+        while (cst::cubaseRunning())
+            if (MessageBoxW(nullptr, L"Cubase is running. Close it, then click Retry. (Cubase writes these settings itself when it quits.)",
+                            L"Cubase-Sixty: set up Cubase", MB_RETRYCANCEL | MB_ICONWARNING) != IDRETRY) return 0;
+        MessageBoxW(nullptr, widen(cst::apply()).c_str(), L"Cubase-Sixty: set up Cubase", MB_OK | MB_ICONINFORMATION);
         return 0;
     }
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\CubaseSixtyTray");

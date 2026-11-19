@@ -17,6 +17,13 @@ What it does (`CubaseSixty.iss`):
 - The MIDI Remote scripts go to `<Documents>\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty`
   (Documents as Windows has it, so a OneDrive-redirected folder works).
 - "Start Cubase-Sixty with Windows" (a task, on by default): the same Run entry the tray app's menu sets.
+- "Set up Cubase" (a task, on by default): runs `CubaseSixty.exe --setup-cubase` after installing, which shows the
+  changes it would make in Cubase's `Defaults.xml` (ports out of "All MIDI Inputs", the Mackie Control device) and
+  makes them only on Yes, keeping `Defaults (before Cubase-Sixty).xml` (src/CubaseSetup.cpp; the Settings page's Setup
+  does the same).
+- The virtual MIDI driver missing: offers to open loopMIDI's download page before installing.
+- Microsoft's C++ runtime (msvcp140, vcruntime140, vcruntime140_1) is installed beside the program; the build copies it
+  to build\Release (CMakeLists.txt).
 - Cubase has to be closed first (installing and uninstalling): the installer asks until it is, or stops on Cancel.
   Replacing the ports under a running Cubase left its scripts switched off (19.11.2026).
 - A running copy is asked to quit first (`CubaseSixty.exe --quit`: the bridge stops and blanks the surfaces), on an

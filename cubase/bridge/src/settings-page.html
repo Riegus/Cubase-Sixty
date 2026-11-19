@@ -46,6 +46,12 @@
   .pill.ok { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
   .pill.warn { color: var(--warn); border-color: var(--warn); }
   .pill.bad { color: var(--bad); border-color: var(--bad); }
+  .setup-row { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+  .setup-row:first-child { border-top: 0; padding-top: 0; }
+  .setup-row .pill { min-width: 64px; text-align: center; margin-top: 1px; }
+  .setup-row .help { margin: 2px 0 0; }
+  pre.setup-report { white-space: pre-wrap; font: inherit; margin: 10px 0 0; }
+  pre.setup-report:empty { display: none; }
   .favs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .slot { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
   .slot span { width: 18px; color: var(--muted); font-size: 13px; text-align: right; }
@@ -91,6 +97,7 @@
 "use strict";
 const TOKEN = "__TOKEN__";
 const sections = [
+  { id: "setup", title: "Setup", lead: "What Cubase-Sixty needs, and whether it is there. Red or amber lines say what to do." },
   { id: "devices", title: "Devices", lead: "The surfaces the bridge has found, Cubase, and how bright the surfaces are." },
   { id: "behaviour", title: "Behaviour", lead: "How the surfaces step through tracks and what they start on." },
   { id: "uf8views", title: "UF8 track views", lead: "Which tracks the UF8 banks over (Q3 opens the picker on the top soft keys): the view it starts on, and the views the picker offers." },
@@ -104,6 +111,7 @@ const sections = [
 ];
 let state = null;
 let current = (location.hash || "#devices").slice(1);
+const askedFor = !!location.hash;
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -129,6 +137,8 @@ async function load() {
     const r = await fetch("/api/state?token=" + TOKEN);
     if (!r.ok) throw new Error();
     state = await r.json();
+    if (!askedFor && !load.once && setupIncomplete()) current = "setup";
+    load.once = true;
     render();
     setFavicon(statusLevel(state.status));
   } catch {
@@ -194,9 +204,68 @@ function fillStatus(card) {
     card.append(el("strong", {}, name), el("div", {}, pill(v || "unknown")));
 }
 
+// Setup (19.11.2026): one line per thing Cubase-Sixty needs. Cubase's own two settings can be made from here: the
+// changes are shown first and made only on OK (Cubase must be closed; a copy of its preferences file is kept).
+function setupRow(level, title, text) {
+  const label = level === "ok" ? "OK" : level === "warn" ? "Check" : "Missing";
+  return el("div", { class: "setup-row" }, el("span", { class: "pill " + (level === "ok" ? "ok" : level) }, label),
+    el("div", {}, el("strong", {}, title), text ? el("div", { class: "help" }, text) : null));
+}
+function setupIncomplete() {
+  const c = state && state.cubaseSetup;
+  return !!(c && c.planned);
+}
+function setupBody(s) {
+  const st = state.status || {}, cs = state.cubaseSetup || { folders: [], planned: "" };
+  const card = el("div", { class: "card setup" });
+  card.append(setupRow("ok", "Virtual MIDI driver", "Found: Cubase-Sixty's MIDI ports are there."));
+  const found = [["UF8", st.uf8], ["UF1", st.uf1], ["UC1", st.uc1]].filter(([, v]) => v === "connected").map(([n]) => n);
+  card.append(found.length ? setupRow("ok", "SSL controllers", found.join(", ") + " connected.")
+    : setupRow("bad", "SSL controllers", "None found. With the controllers plugged in and switched on: tray menu, USB driver > Install the driver, then unplug and replug them. Is SSL 360 running? Quit it."));
+  if (!cs.folders.length)
+    card.append(setupRow("warn", "Cubase's settings", "Cubase's preferences were not found. Start Cubase once and quit it, then look here again."));
+  for (const f of cs.folders) {
+    const many = cs.folders.length > 1 ? f.name + ": " : "";
+    if (!f.readable) { card.append(setupRow("warn", many + "Cubase's settings", "Its preferences file could not be read.")); continue; }
+    card.append(f.excluded >= f.ports
+      ? setupRow("ok", many + "Ports out of \"All MIDI Inputs\"", "Cubase's MIDI tracks do not play the controllers' messages.")
+      : setupRow("bad", many + "Ports out of \"All MIDI Inputs\"", f.excluded + " of " + f.ports + " Cubase-Sixty ports taken out. Until all are, MIDI and instrument tracks play the controllers' messages as notes, and stepping through tracks is slower."));
+    const mk = {
+      ours: ["ok", "Set up on Cubase-Sixty's MCU ports."],
+      missing: ["bad", "Not set up. The UF1's SCRUB needs it (scrubbing audio with the jog wheel)."],
+      other: ["warn", "Used by another controller (\"" + f.mackieOther + "\"), so it is left as it is: SCRUB on the UF1 does not work."],
+      nostudio: ["warn", "Cubase has no device list yet: open Studio > Studio Setup in Cubase once, quit Cubase, then look here again."],
+    }[f.mackie] || ["warn", ""];
+    card.append(setupRow(mk[0], many + "Mackie Control device (for SCRUB)", mk[1]));
+  }
+  card.append(setupRow(/connected|project open/.test(st.cubase || "") ? "ok" : "warn", "Cubase", st.cubase === "waiting for Cubase"
+    ? "Not connected yet. Start Cubase; its MIDI Remote Manager should list the four CubaseSixty scripts." : (st.cubase || "")));
+  s.append(card);
+  if (cs.planned) {
+    const out = el("pre", { class: "setup-report" });
+    const go = el("button", { class: "primary", type: "button", onclick: async () => {
+      if (!confirm("Cubase-Sixty will make these changes in Cubase's preferences:\n\n" + cs.planned +
+          "\nA copy of each preferences file is kept beside it, as \"Defaults (before Cubase-Sixty).xml\". Cubase must be closed.\n\nMake these changes now?")) return;
+      try {
+        const r = await fetch("/api/cubase-setup", { method: "POST", body: new URLSearchParams({ token: TOKEN }) });
+        const j = await r.json().catch(() => ({ ok: false, error: "no answer" }));
+        if (!j.ok) throw new Error(j.error || "failed");
+        out.textContent = j.report;
+        toast("Cubase is set up");
+        await load();
+      } catch (e) { out.textContent = e.message; toast("Not done: " + e.message, true); }
+    } }, "Set up Cubase…");
+    s.append(el("p", { class: "help" }, "Cubase's own settings for Cubase-Sixty can be made for you: you see the changes first, and nothing changes unless you say OK. Cubase must be closed (it writes these settings itself when it quits). Or make them by hand, as the user guide's \"Setting up Cubase (once)\" describes."),
+      go, out);
+  }
+  for (const d of state.settings.filter(d => d.section === "Setup")) s.append(settingCard(d));
+}
+
 function sectionBody(id) {
   const s = el("div");
-  if (id === "devices") {
+  if (id === "setup") {
+    setupBody(s);
+  } else if (id === "devices") {
     const card = el("div", { class: "card dev", id: "status" });
     fillStatus(card);
     s.append(card, el("p", { class: "help" }, "Surfaces can be plugged in and out while everything runs; the bridge looks for a missing one every two seconds."));

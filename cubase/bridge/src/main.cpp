@@ -44,6 +44,7 @@
 #endif
 #include "Favourites.h"
 #include "Settings.h"
+#include "CubaseSetup.h"
 #include <fstream>
 #include "Uc1Bridge.h"
 #include "ScriptLog.h"
@@ -2037,6 +2038,13 @@ int main(int argc, char** argv)
         bool lamp = false;
         for (int i = 1; i < argc; ++i) if (std::string(argv[i]) == "--lamptest") lamp = true;
         if (lamp) std::thread([] { std::this_thread::sleep_for(std::chrono::seconds(6)); cs::uf1LampTest(); }).detach();
+    }
+
+    // Cubase's own settings for Cubase-Sixty (19.11.2026): incomplete ones are logged, and the tray app shows the line
+    // as a reminder (Settings > Setup can make them, after asking). Not when the user switched the reminder off.
+    if (cs::settings::get("cubase-setup-reminder", "on") == "on") {
+        const auto folders = cs::cubaseSetup::inspect();
+        if (!cs::cubaseSetup::plannedChanges(folders).empty()) std::printf("Cubase setup: not complete (Settings > Setup)\n");
     }
 
     // The Settings page (the tray app's Settings opens it).

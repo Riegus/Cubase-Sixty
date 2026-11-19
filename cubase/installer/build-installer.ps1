@@ -44,7 +44,7 @@ if (-not $NoBuild) {
     & cmake --build (Join-Path $bridge 'build') --config Release
     if ($LASTEXITCODE -ne 0) { throw 'Build failed. (Is a bridge from this build folder still running? Quit Cubase-Sixty from its tray icon first.)' }
 }
-foreach ($f in 'CubaseSixty.exe', 'cubase_sixty_bridge.exe', 'libusb-1.0.dll') {
+foreach ($f in 'CubaseSixty.exe', 'cubase_sixty_bridge.exe', 'libusb-1.0.dll', 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
     if (-not (Test-Path (Join-Path $release $f))) { throw "Missing $release\$f" }
 }
 

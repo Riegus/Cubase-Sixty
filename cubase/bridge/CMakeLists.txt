@@ -71,6 +71,7 @@ add_executable(cubase_sixty_bridge
     src/ScriptLog.cpp
     src/StopEvent.cpp
     src/SettingsServer.cpp
+    src/CubaseSetup.cpp
     src/Names.cpp
     src/Sleep.cpp
     src/Sleep.h
@@ -124,7 +125,8 @@ endif()
 
 # The tray app (Windows): runs the bridge in the background, restarts it if it stops, tray icon with status.
 if(WIN32)
-    add_executable(cubase_sixty_tray WIN32 src/tray/TrayApp.cpp src/tray/TrayApp.rc)
+    add_executable(cubase_sixty_tray WIN32 src/tray/TrayApp.cpp src/tray/TrayApp.rc src/CubaseSetup.cpp)
+    target_include_directories(cubase_sixty_tray PRIVATE src)
     set_target_properties(cubase_sixty_tray PROPERTIES OUTPUT_NAME "CubaseSixty")
     target_compile_definitions(cubase_sixty_tray PRIVATE UNICODE _UNICODE NOMINMAX)
     target_link_libraries(cubase_sixty_tray PRIVATE shell32 user32 gdi32 advapi32 ole32 winmm)
@@ -140,4 +142,24 @@ target_include_directories(test_mapping PRIVATE src ${EXT_SRC})
 if(WIN32)
     add_custom_command(TARGET cubase_sixty_bridge POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different "${LIBUSB_DLL}" $<TARGET_FILE_DIR:cubase_sixty_bridge>)
+endif()
+
+# Microsoft's C++ runtime beside the programs (19.11.2026): the installer ships them, so users install nothing
+# separately (app-local deployment, which Microsoft allows for these files). libusb-1.0.dll needs it too, so linking the
+# runtime in statically would not have been enough. The UCRT (api-ms-win-crt-*) is part of Windows 10 and 11.
+if(MSVC)
+    set(CMAKE_INSTALL_UCRT_LIBRARIES OFF)
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS_SKIP TRUE)
+    include(InstallRequiredSystemLibraries)
+    set(_cs_runtime_found 0)
+    foreach(_lib ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
+        get_filename_component(_name "${_lib}" NAME)
+        string(TOLOWER "${_name}" _name)
+        if(_name MATCHES "^(msvcp140|vcruntime140|vcruntime140_1)\\.dll$")
+            math(EXPR _cs_runtime_found "${_cs_runtime_found} + 1")
+            add_custom_command(TARGET cubase_sixty_bridge POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_lib}" $<TARGET_FILE_DIR:cubase_sixty_bridge>)
+        endif()
+    endforeach()
+    message(STATUS "C++ runtime files copied beside the programs: ${_cs_runtime_found} of 3")
 endif()

@@ -11,10 +11,12 @@ does not work (see "Reporting a problem" below).
 ## What you need
 
 - Windows 10 or 11 (64 bit) and Cubase with MIDI Remote (developed and tested on Cubase 15 Pro; older versions are
-  untested).
+  untested). Nuendo is not supported yet.
+- Windows only for now; a Mac version is planned.
 - An SSL UF8, UF1 or UC1, connected by USB.
 - The teVirtualMIDI driver, which comes with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html) (free)
-  and with SSL 360. You do not create any ports yourself.
+  and with SSL 360. You do not create any ports yourself. If it is missing, the installer offers to open loopMIDI's
+  download page. Nothing else needs installing (the C++ runtime comes with Cubase-Sixty).
 - SSL 360 not running. The SSL plug-ins themselves work as always.
 
 ## Installing
@@ -25,7 +27,10 @@ does not work (see "Reporting a problem" below).
 3. Leave **Install the USB driver for the SSL controllers** ticked if the installer ticks it, then unplug and replug
    the controllers when it has finished. This moves them from SSL's USB driver to Windows' WinUSB driver; SSL 360 no
    longer sees them until you give them back (tray menu, **USB driver > Remove it**).
-4. Start Cubase. Then follow **Setting up Cubase (once)** in the user guide: two settings in Studio Setup.
+4. Leave **Set up Cubase for Cubase-Sixty** ticked to have Cubase's two settings made for you: it shows exactly
+   what it would change in Cubase's preferences and asks first (a copy of the file is kept). Or make them later from
+   the Settings page (**Setup**), or by hand as the user guide describes.
+5. Start Cubase and open a project. The Settings page's **Setup** section shows whether anything is missing.
 
 The user guide is installed with it (tray menu, **User guide**), and it lists everything the installer changes on
 your PC.

@@ -44,7 +44,7 @@ State Logic; Cubase is a trademark of Steinberg Media Technologies.
 ## What you need
 
 - Windows 10 or 11 (64 bit) and Cubase with MIDI Remote and Direct Access (developed and tested on Cubase 15 Pro;
-  older versions are untested).
+  older versions are untested). Nuendo is not supported yet; a Mac version is planned.
 - An SSL UF8, UF1 or UC1, connected by USB.
 - **A virtual MIDI driver** (teVirtualMIDI). It comes with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
   (free) and with SSL 360. Cubase-Sixty makes its own MIDI ports with it; you do not create any ports in loopMIDI.
@@ -55,15 +55,20 @@ State Logic; Cubase is a trademark of Steinberg Media Technologies.
 ## Installing
 
 1. Plug the controllers in and switch them on.
-2. Close Cubase (the installer asks you to if it is running). Run `CubaseSixty-Setup-<version>.exe`. Windows may show "Windows protected your PC", because the installer is not
-   signed: choose **More info**, then **Run anyway**. It installs for your user account only.
-3. On the options page:
+2. Close Cubase (the installer asks you to if it is running). Run `CubaseSixty-Setup-<version>.exe`. Windows may
+   show "Windows protected your PC", because the installer is not signed: choose **More info**, then **Run anyway**.
+   It installs for your user account only.
+3. If the virtual MIDI driver is missing, the installer offers to open loopMIDI's download page: install loopMIDI
+   from there (you create no ports in it). The installation goes on meanwhile.
+4. On the options page:
     - **Start Cubase-Sixty with Windows**: leave it ticked unless you want to start it by hand.
+    - **Set up Cubase for Cubase-Sixty**: makes Cubase's two settings from [Setting up Cubase](#setting-up-cubase-once)
+      for you. Before it changes anything, it shows exactly what it would change in Cubase's preferences and asks;
+      say No and nothing changes.
     - **Install the USB driver for the SSL controllers**: ticked by itself when it is needed. It asks for
       administrator permission once. This moves the controllers from SSL's own USB driver to Windows' WinUSB driver,
       which Cubase-Sixty needs; from then on SSL 360 does not see them.
-4. If the driver was installed: **unplug and replug the controllers** when the installer has finished.
-5. If the installer says the virtual MIDI driver is missing, install loopMIDI and start Cubase-Sixty again.
+5. If the driver was installed: **unplug and replug the controllers** when the installer has finished.
 
 Cubase-Sixty now sits in the notification area (the tray) as a small mixing-surface icon, and the controllers show
 "Waiting for Cubase".
@@ -74,11 +79,18 @@ For your user account only, without administrator rights:
 
 - The program in `%LOCALAPPDATA%\Programs\Cubase-Sixty`, with your settings, favourites and logs beside it.
 - Four MIDI Remote scripts in `Documents\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty`.
+- Microsoft's C++ runtime files (`msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`) beside the program, so
+  nothing else has to be installed.
 - With *Start with Windows* ticked: an entry in your user's Run key (`HKCU\...\CurrentVersion\Run`).
+- With *Set up Cubase* ticked, and only if you say Yes when it shows the changes: Cubase's preferences file
+  (`%APPDATA%\Steinberg\Cubase <version>_64\Defaults.xml`) gets Cubase-Sixty's ports taken out of "All MIDI Inputs"
+  and a Mackie Control device on Cubase-Sixty's MCU ports. A copy of the file as it was is kept beside it, as
+  `Defaults (before Cubase-Sixty).xml`. A Mackie Control device you already use for another controller is left alone.
 - While it runs, Cubase-Sixty makes its own virtual MIDI ports (through loopMIDI's or SSL 360's teVirtualMIDI
   driver) and closes SSL 360's background program `SSL360Core.exe` whenever it starts.
 
-The uninstaller removes all of this, and asks before deleting your settings and favourites.
+The uninstaller removes all of this, and asks before deleting your settings and favourites. It leaves Cubase's
+preferences as they are (to undo those changes, see Setting up Cubase below).
 
 Only with *Install the USB driver* ticked (administrator permission, once):
 
@@ -97,7 +109,16 @@ driver is a sensible precaution.
 
 Start Cubase with Cubase-Sixty running. Cubase finds the scripts and the ports by itself: *Studio > MIDI Remote
 Manager* lists CubaseSixty - UF8, UF1, UC1 and Helper (the Helper has no hardware; it keeps lists for the others).
-Open a project and the controllers come alive. Then two things in *Studio > Studio Setup*:
+Open a project and the controllers come alive.
+
+Cubase needs two settings of its own. **The installer's "Set up Cubase" option makes them for you**, after showing
+the changes and asking. If you skipped it, or Cubase was not installed yet: **Settings > Setup** (click the tray
+icon) shows what is missing, and its **Set up Cubase…** button does the same, again after asking, with Cubase
+closed. The tray icon reminds you once at each start while something is missing (Settings > Setup can switch the
+reminder off). A copy of Cubase's preferences file as it was is kept as `Defaults (before Cubase-Sixty).xml` beside
+it: to undo, quit Cubase and rename it back to `Defaults.xml`.
+
+To make the two settings by hand instead, in *Studio > Studio Setup*:
 
 1. **MIDI Port Setup: untick "In 'All MIDI Inputs'" for every port whose name starts with `Cubase-Sixty`** (ten of
    them). Left ticked, every MIDI and instrument track receives the controllers' messages as played notes, and
@@ -566,6 +587,7 @@ UF8 / UF1 / UC1 buttons pick which surfaces' settings show (one or more; remembe
 
 | Section | What is there |
 |---------|---------------|
+| Setup | What Cubase-Sixty needs and whether it is there: the MIDI driver, the controllers, Cubase's two settings (with a button that makes them, after asking), Cubase's connection; the reminder. |
 | Devices | Which surfaces are connected and whether Cubase is; key / LED and display brightness; sleep when idle. |
 | Behaviour | How the channel encoders step through tracks (as the MixConsole shows them, as the Project window does, or every track); touching a UF8 fader selects its track; what a UF8 V-pot push and SEL on the selected track do; what the UF1's BYPASS key does with inserts that were bypassed already; the UF1's view at start; the UC1 secondary encoder's job at start; the UC1 knob step. |
 | UF8 track views | The view the UF8 starts on (ALL by default, any view, or the last one used) and which views the Q3 picker offers. |
@@ -602,8 +624,8 @@ compete for the SSL plug-ins' meters.
 | The controllers stay dark, the icon is yellow or green | The USB driver: tray menu **USB driver > Install**, with the controllers plugged in, then replug them. Is SSL 360 running? Quit it. |
 | "Waiting for Cubase" although a project is open | Restart Cubase with Cubase-Sixty running. In *Studio > MIDI Remote Manager* the four CubaseSixty devices should be listed and active. |
 | Red icon | Right-click > **Start bridge**. If it will not stay up: the virtual MIDI driver may be missing (install loopMIDI), or ports with the names `Cubase-Sixty ...` exist in loopMIDI (delete them there). |
-| An instrument plays when you touch a control | "In 'All MIDI Inputs'" is ticked for a Cubase-Sixty port (see setup). |
-| SCRUB only nudges | The Mackie Control device is missing (see setup). |
+| An instrument plays when you touch a control | "In 'All MIDI Inputs'" is ticked for a Cubase-Sixty port: Settings > Setup shows it and can fix it (see setup). |
+| SCRUB only nudges | The Mackie Control device is missing: Settings > Setup shows it and can add it (see setup). |
 | SCRUB moves the cursor but there is no sound | Cubase does not scrub audio played by an ARA extension such as SpectraLayers (Cubase's own Scrub tool is silent there too). Scrub over events without the extension, or render the extension into the event. |
 | The UC1's knobs do nothing on a track | The track has neither an SSL strip nor Cubase's strip reachable (an instrument return, for example), or loading modules is set to "never". |
 | A top soft key on the UF8 shows "-" | That track has no SSL channel strip. |

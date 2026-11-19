@@ -1,5 +1,6 @@
 #include "SettingsServer.h"
 
+#include "CubaseSetup.h"
 #include "Favourites.h"
 #include "ScriptLog.h"
 #include "Settings.h"
@@ -110,6 +111,7 @@ std::string state()
     }
     o += "],\"favourites\":{\"strips\":" + jsonList(favourites::list(0)) + ",\"busComps\":" + jsonList(favourites::list(1)) +
          ",\"knownStrips\":" + jsonList(favourites::known(0)) + ",\"knownBusComps\":" + jsonList(favourites::known(1)) + "}";
+    o += ",\"cubaseSetup\":" + cubaseSetup::stateJson();
     o += ",\"paths\":{\"logs\":" + json(g_logsDir) + ",\"settings\":" + json(settings::dir().string()) + "},\"version\":" + json(CS_VERSION) + "}";
     return o;
 }
@@ -225,6 +227,17 @@ void handle(Sock c)
         const bool ok = favourites::write(lines(formField(body, "strips")), lines(formField(body, "busComps")), &why);
         if (ok && g_favouritesSaved) g_favouritesSaved();
         reply(c, ok ? 200 : 400, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false,\"error\":" + json(why) + "}");
+        return;
+    }
+    // Cubase's own settings (Setup): the page has shown what will change and the user said yes (19.11.2026).
+    if (method == "POST" && path == "/api/cubase-setup") {
+        if (cubaseSetup::cubaseRunning()) {
+            reply(c, 409, "application/json", "{\"ok\":false,\"error\":\"Cubase is running. Close it first: it writes these settings itself when it quits.\"}");
+            return;
+        }
+        const std::string report = cubaseSetup::apply();
+        std::printf("Cubase setup (Settings page): %s", report.c_str());
+        reply(c, 200, "application/json", "{\"ok\":true,\"report\":" + json(report) + "}");
         return;
     }
     reply(c, 404, "application/json", "{\"ok\":false,\"error\":\"not found\"}");

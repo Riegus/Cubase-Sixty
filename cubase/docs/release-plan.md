@@ -94,6 +94,10 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   login is tried again (confirmed at a restart: "The bridge stopped and was started again" no longer shows). The
   installer built from `cubase` (app icon, Nav Mode 1-15) installed and tested: all three surfaces work. Left: the guide
   read against the hardware, the tray's Quit and the uninstaller tried, the GitHub release.
+- 19.11.2026: setup made easier (tested): Cubase's two settings made by the installer or Settings > Setup after
+  asking (a copy of Cubase's preferences kept), the C++ runtime beside the program, loopMIDI's page offered when the
+  driver is missing, a Setup check and a reminder. Nuendo not supported yet; a Mac version and Windows MIDI Services'
+  ports (no loopMIDI on Windows 11) planned after the release (missing-features.md).
 - 16.11.2026: the UF1's EQ graph retested (Geir). It showed another track's curve in a project with disabled tracks
   (wrong track numbers; fixed, see known-issues.md, All surfaces); right after the fix, METER too. `dev-restart.ps1 -Hub`
   starts Cubase without a project.
