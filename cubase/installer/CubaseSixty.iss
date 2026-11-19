@@ -99,6 +99,8 @@ Filename: "{app}\CubaseSixty.exe"; Parameters: "--quit"; Flags: runhidden; RunOn
 ; What the program wrote beside itself. (settings.txt and favourites.txt are the user's: kept unless they say so, see below.)
 Type: filesandordirs; Name: "{app}\logs"
 Type: files; Name: "{app}\level-curve.txt"
+Type: files; Name: "{app}\fader-0db.txt"
+Type: files; Name: "{app}\uf8-*-last-view.txt"
 
 [Code]
 // The virtual MIDI driver (teVirtualMIDI) makes the bridge's ports. It comes with loopMIDI, and with SSL 360.
