@@ -17,6 +17,8 @@ What it does (`CubaseSixty.iss`):
 - The MIDI Remote scripts go to `<Documents>\Steinberg\Cubase\MIDI Remote\Driver Scripts\Local\CubaseSixty`
   (Documents as Windows has it, so a OneDrive-redirected folder works).
 - "Start Cubase-Sixty with Windows" (a task, on by default): the same Run entry the tray app's menu sets.
+- Cubase has to be closed first (installing and uninstalling): the installer asks until it is, or stops on Cancel.
+  Replacing the ports under a running Cubase left its scripts switched off (19.11.2026).
 - A running copy is asked to quit first (`CubaseSixty.exe --quit`: the bridge stops and blanks the surfaces), on an
   update and on uninstall.
 - After installing it says so if the virtual MIDI driver (teVirtualMIDI, which comes with loopMIDI and with SSL 360)

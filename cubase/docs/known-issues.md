@@ -4,6 +4,10 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## Bridge
 
+- **Fixed (19.11.2026): installing with Cubase running left the surfaces dead.** The installer quits and restarts
+  the tray app, which replaces the MIDI ports; Cubase half reconnected, and switched its scripts off 4 s after a
+  project opened (the script console: "inactive (no project)" with the project open; nothing more reached the bridge).
+  A Cubase restart brought them back. The installer and the uninstaller now ask for Cubase to be closed first.
 - **Fixed (14.11.2026, wip/bridge-reconnect): the tray app holds the ports; a new bridge says hello, the scripts
   send their state again and the tray app gives it Cubase's own values. Back within a second, tested.**
   **Cubase does not reconnect reliably after a bridge restart** (14.11.2026). Bridge down about 6 s with Cubase and
