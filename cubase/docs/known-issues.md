@@ -36,6 +36,13 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF8
 
+- **Limits in large projects** (19.11.2026, by design; not tested that far). The scripts' hidden channel lists hold
+  the first 256 visible MixConsole channels (Helper, UF8, UF1: CHANNELS), 256 per filtered track view (VIEW_MAX) and
+  128 recordable tracks (REC_CHANNELS). Past them: banking (Cubase's own bank zone) and track stepping (Direct Access,
+  mixerChildIds) still work; follow selection, the track numbers and finding the selected track do not; the ARMED view
+  misses armed tracks past the 128th recordable one. Kept small because Cubase re-checks every hidden list on each
+  selection change (about 0.9 s of stall at 1,280 channels, banking.md). To raise: read in windows, as the track views
+  are (16-channel windows), and measure the selection stall.
 - **Fixed (16.11.2026): the track numbers and plug-in names were blank after the same project was closed and opened
   again.** The bridge forgets the numbers when a project closes; the Helper sent them again only when a channel's name
   changed, which none does when the same project comes back. It now sends them at every activation (and 3 s later).

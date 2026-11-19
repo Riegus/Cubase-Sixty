@@ -645,6 +645,9 @@ Cubase gives controllers less than REAPER does, so some things are missing or di
 - **Markers** are reached by number; their names are not shown.
 - On fast turns of a **send**, the MixConsole trails the controller for a moment and then lands on the same value.
 - A **preset** loaded from a surface sets the plug-in's controls, not the preset name in its window.
+- **Large projects:** the UF8 knows the first **256** visible MixConsole channels (and 256 per track view). Banking
+  and stepping through tracks work past that, but following the selection and the track numbers stop there. The
+  ARMED view sees armed tracks among the first **128** recordable ones.
 - The soft keys' **A/B** and **HQ MODE**, layers, user soft-key banks and a second UF8 are not there. On the UF8,
   **LAYER 1–3** do nothing.
 
