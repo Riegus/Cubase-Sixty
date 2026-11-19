@@ -7,6 +7,12 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 
 ## Not supported yet
 
+- **No loopMIDI on Windows 11** (19.11.2026: planned, after the first release). Windows MIDI Services (general
+  availability February 2026, Windows 11 only, rolled out in phases) has built-in loopback ports that a program can
+  make itself (the App SDK's transient loopback endpoints); older programs such as Cubase see them as ordinary ports.
+  The tray app would make its ports there when the service is present and fall back to teVirtualMIDI when it is not
+  (Windows 10, a PC the rollout has not reached). To check first: whether the SDK runtime has to be installed
+  separately, and how Cubase 15 lists these ports. Geir's PC has it (the Windows MIDI Service, MidiSrv, running).
 - **Nuendo** (19.11.2026). It has the same MIDI Remote system, but the installer puts the scripts in Cubase's folder
   only, the bridge and the installer recognise Cubase's program only, and the Cubase setup reads Cubase's preferences
   only. A small change (Nuendo's script folder, Nuendo.exe, the "Nuendo <n>_64" preferences), but untested without
