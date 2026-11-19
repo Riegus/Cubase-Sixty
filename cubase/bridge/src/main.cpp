@@ -120,7 +120,12 @@ std::atomic<int> g_skDomain{0};
 std::atomic<bool> g_nav{false};
 std::atomic<bool> g_noProject{false};   // Cubase shows the Hub: the bridge's own keys stay dark
 std::atomic<std::chrono::steady_clock::time_point> g_uf8ConnectedAt{};   // the foot switches are ignored just after it
-std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle markers (Q1)
+std::atomic<int> g_navView{0}, g_navLast{-1};   // 0 = markers (Q2), 1 = cycle markers (Q1); last = view * 16 + marker - 1
+// Nav Mode's pages (19.11.2026): V-POT = markers 1-8, the 1 key = 9-15 (Cubase's transport goes to 15; its commands
+// only to 9, so 10-15 go by the transport's own buttons in the script, SysEx 38). Cycle markers: 1-8, and 9 on page 2.
+std::atomic<int> g_navPage{0};
+int navMarker(int slot) { return g_navPage * 8 + slot + 1; }
+bool navAvailable(int view, int n) { return view ? n <= 9 : n <= 15; }
 // Track views (docs/track-views.md): which channel types the UF8 banks over. The script has one mapping page per
 // view, switched by channel 2 notes 100 + view; it reports the active one (SysEx 14). Q3 opens the picker: the top
 // soft keys are the views (the current one lit), a press switches and closes it, Q3 again closes it unchanged.
@@ -699,18 +704,25 @@ void handleFrame(const uf8frames::Frame& fr)
             }).detach();
             break;
         }
+        if (d[3] >= 0x68 && d[3] <= 0x6D && g_nav) {   // Nav Mode: V-POT = markers 1-8, 1 = markers 9-15
+            if (pressed && d[3] <= 0x69) { g_navPage = d[3] - 0x68; paintSoftKeys(); }
+            break;
+        }
         if (d[3] >= 0x68 && d[3] <= 0x6D) {   // V-POT, 1-5: the soft-key page
             if (pressed) { g_viewPick = false; g_skBank = d[3] - 0x68; paintSoftKeys(); }
             break;
         }
-        if (d[3] >= 0x18 && d[3] <= 0x1F && g_nav) {   // Nav Mode: jump to marker / recall cycle marker 1-8
+        if (d[3] >= 0x18 && d[3] <= 0x1F && g_nav) {   // Nav Mode: jump to marker 1-15 / recall cycle marker 1-9
             if (!pressed) break;
-            const int slot = d[3] - 0x18;
-            note2(uint8_t((g_navView ? 18 : 10) + slot));
+            const int view = g_navView, n = navMarker(d[3] - 0x18);
+            if (!navAvailable(view, n)) break;
+            if (n <= 8) note2(uint8_t((view ? 17 : 9) + n));
+            else if (n == 9) note2(view ? 28 : 27);
+            else sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x38, uint8_t(n), 0xF7});
             // A cycle marker only sets the locators: then the cursor to the left one (its start), 40 ms later
             // (back-to-back notes can be lost).
-            if (g_navView) std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note2(26); }).detach();
-            g_navLast = g_navView * 8 + slot;
+            if (view) std::thread([] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note2(26); }).detach();
+            g_navLast = view * 16 + n - 1;
             paintSoftKeys();
             break;
         }
@@ -1021,14 +1033,20 @@ void paintSoftKeys()
         return;
     }
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick3, g_uf8View != 0));
-    if (g_nav) {   // Nav Mode: the eight keys are markers / cycle markers 1-8, the last one pressed lit
-        const int view = g_navView;
+    if (g_nav) {   // Nav Mode: the eight keys are markers / cycle markers of the page, the last one pressed lit
+        const int view = g_navView, page = g_navPage;
         for (int s = 0; s < kStrips; ++s) {
-            sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), g_navLast == view * 8 + s ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
-            g_dev.send(uf8::buildPluginSlotName(uint8_t(s), (std::string(view ? "Cycle " : "Marker ") + char('1' + s)).c_str()));
+            const int n = navMarker(s);
+            const bool there = navAvailable(view, n);
+            sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), !there ? uf8::TopSoftKeyState::Off
+                : g_navLast == view * 16 + n - 1 ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Dim, uf8::ledColourWhite()));
+            g_dev.send(uf8::buildPluginSlotName(uint8_t(s), there ? (std::string(view ? "Cycle " : "Marker ") + std::to_string(n)).c_str() : ""));
         }
         sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick1, view == 1));
         sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Quick2, view == 0));
+        static const uf8::Uf8GlobalLed kPageLeds[6] = { uf8::Uf8GlobalLed::VPotBank, uf8::Uf8GlobalLed::Soft1, uf8::Uf8GlobalLed::Soft2,
+                                                        uf8::Uf8GlobalLed::Soft3, uf8::Uf8GlobalLed::Soft4, uf8::Uf8GlobalLed::Soft5 };
+        for (int b = 0; b < 6; ++b) sendLedFrames(uf8::buildUf8GlobalLed(kPageLeds[b], b == page));
         return;
     }
     const int bank = g_skBank, focus = g_focus, dom = g_skDomain;

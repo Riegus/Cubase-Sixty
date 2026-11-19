@@ -710,6 +710,35 @@ for (var nm = 1; nm <= 8; ++nm) {
 }
 // After a cycle marker is recalled (which only sets the locators), the cursor goes to its start.
 encoderCommands.push({ note: 26, category: 'Transport', command: 'To Left Locator' })
+// Nav Mode's second page (19.11.2026): marker 9 and cycle marker 9 by command too (Cubase has commands up to 9);
+// markers 10-15 by the transport's own buttons (Direct Access, below: Cubase has no commands for them).
+encoderCommands.push({ note: 27, category: 'Transport', command: 'To Marker 9' })
+encoderCommands.push({ note: 28, category: 'Transport', command: 'Recall Cycle Marker 9' })
+// The transport's marker buttons, "markerButton1" to "markerButton15" (tags 1200-1214; found by a probe of its Direct
+// Access, 19.11.2026): a jump to marker 10-15 asked for by the bridge (SysEx 38 <marker>) is pressed at the next
+// idle and let go at the one after.
+var markerJump = { wanted: 0, release: null }
+eachPage(function (page, bankZone, view) {
+	try { view.transportDa = page.mHostAccess.makeDirectAccess(page.mHostAccess.mTransport) } catch (e) { if (view === views[0]) out('[CubaseSixty] no Direct Access to the transport: markers 10-15 do nothing: ' + e) }
+})
+function markerJumpIdle(activeMapping) {
+	var da = curView && curView.transportDa
+	if (!da) { markerJump.wanted = 0; markerJump.release = null; return }
+	if (markerJump.release) {
+		var r = markerJump.release
+		markerJump.release = null
+		try { da.setParameterProcessValue(activeMapping, r.id, r.tag, 0) } catch (e) {}
+	}
+	if (!markerJump.wanted) return
+	var n = markerJump.wanted
+	markerJump.wanted = 0
+	try {
+		var id = da.getBaseObjectID(activeMapping), tag = 1200 + n - 1
+		da.setParameterProcessValue(activeMapping, id, tag, 1)
+		markerJump.release = { id: id, tag: tag }
+		out('[CubaseSixty] Nav Mode: marker ' + n + ' (the transport\'s "' + da.getParameterTitle(activeMapping, id, tag, 32) + '")')
+	} catch (e) { out('[CubaseSixty] Nav Mode: marker ' + n + ': ' + e) }
+}
 // Command keys: the button is made once, the command bound on every page.
 var commandKeys = []
 eachPage(function (page, bankZone, view) {
@@ -1164,6 +1193,10 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (m[4] === 0x7F && m[5] === 0x01) { out('[CubaseSixty] a new bridge: ' + resendAll(activeDevice) + ' messages sent again'); return }
 	if (m[4] >= 0x21 && m[4] <= 0x2D) {   // (2A was added without this range: the levels never arrived, 12.11.2026)
 		try { skMessage(activeDevice, m) } catch (e) { out('[CubaseSixty] soft key: ' + e) }
+		return
+	}
+	if (m[4] === 0x38 && m.length >= 7) {   // Nav Mode: jump to marker 10-15 (the transport's own buttons)
+		if (m[5] >= 1 && m[5] <= 15) markerJump.wanted = m[5]
 		return
 	}
 	if (m[4] === 0x34 && m.length >= 7) {   // the view at start (settings): its page activated at the next idle
@@ -1765,6 +1798,7 @@ function sendViewPoll(activeDevice) {
 var startViewWanted = -1, startedAt = Date.now()
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
+	try { markerJumpIdle(activeMapping) } catch (e) { out('[CubaseSixty] Nav Mode: ' + e) }
 	if (startViewWanted >= 0) {
 		var sv = views[startViewWanted]
 		startViewWanted = -1
