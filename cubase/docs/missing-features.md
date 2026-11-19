@@ -18,7 +18,7 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
   login item, restarting the bridge; keeping the ports while the bridge restarts needs its own design on the Mac), the
   Mac side of those spots (Cubase's preferences in ~/Library/Preferences/Cubase <n>/ for the setup), and a signed and
   notarised installer (an Apple Developer account). Every step is built and tested on a Mac with Cubase and a
-  controller.
+  controller: Geir's 13" MacBook Pro M1 (2020) with Cubase 15 Pro.
 
 ## Suggested next (value for the effort)
 
