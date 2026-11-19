@@ -292,9 +292,10 @@ letting go keeps the one shown.
 
 - **Tap NAV**: the CHANNEL encoder steps through markers (NAV lit). Tap again for tracks.
 - **Hold NAV for about 0.7 seconds**: **Nav Mode**. The eight top soft keys now jump straight to **markers 1–8**; the last
-  one pressed stays lit. With **Q1** they recall **cycle markers 1–8** instead (the cursor goes to the start of the
-  cycle); **Q2** is back to markers. Hold NAV again to leave. Cubase does not tell controllers the markers' names,
-  so the keys go by number.
+  one pressed stays lit. **The 1 key** turns the page to **markers 9–15**, **V-POT** back to 1–8 (the page's key is
+  lit). With **Q1** they recall **cycle markers** instead (1–8, and 9 on the second page; the cursor goes to the start
+  of the cycle); **Q2** is back to markers. Hold NAV again to leave. Cubase does not tell controllers the markers'
+  names, so the keys go by number (the ID in Cubase's Marker window).
 
 ### Automation
 

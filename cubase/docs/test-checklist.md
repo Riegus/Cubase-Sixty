@@ -35,7 +35,7 @@ Quick: banking, SEL, a fader, a V-pot.
 - A project opens: the UF8 goes from "No Project" straight to the selected track's bank (no other view or bank seen
   passing), SEL lit; with no track selected, the first bank after about 4 s, and a SEL press right after is quick.
 - Faders: volume, touch; FLIP; send views (the route keys); SSL Strip Mode (PLUGIN).
-- V-pots: pan; push (centres the pan; Settings > Behaviour > UF8 V-pot push = editor: the channel editor); the top soft keys (SSL soft keys, Q1 / Q2, pages); Nav Mode (NAV held 0.7 s), NAV tap.
+- V-pots: pan; push (centres the pan; Settings > Behaviour > UF8 V-pot push = editor: the channel editor); the top soft keys (SSL soft keys, Q1 / Q2, pages); Nav Mode (NAV held 0.7 s; V-POT / 1 = markers 1-8 / 9-15, each jumping to its marker, cycle markers 1-9 with Q1), NAV tap.
 - SOLO / CUT / SEL with LEDs; REC / AUTO selection modes. SEL on the selected track (NORM): its first SSL channel
   strip's window opens / closes (no SSL strip: the channel editor; setting = editor: always the editor); the first press on another track only selects.
 - PAN (V-pots back on pan from a soft-key parameter, the V-pot send view, FLIP; lit on pan); FINE (held and
