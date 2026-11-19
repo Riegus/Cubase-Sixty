@@ -44,7 +44,7 @@ State Logic; Cubase is a trademark of Steinberg Media Technologies.
 ## What you need
 
 - Windows 10 or 11 (64 bit) and Cubase with MIDI Remote and Direct Access (developed and tested on Cubase 15 Pro;
-  older versions are untested). Nuendo is not supported yet.
+  older versions are untested). Nuendo is not supported yet; a Mac version is planned.
 - An SSL UF8, UF1 or UC1, connected by USB.
 - **A virtual MIDI driver** (teVirtualMIDI). It comes with [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html)
   (free) and with SSL 360. Cubase-Sixty makes its own MIDI ports with it; you do not create any ports in loopMIDI.

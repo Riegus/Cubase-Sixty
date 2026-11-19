@@ -11,6 +11,14 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
   only, the bridge and the installer recognise Cubase's program only, and the Cubase setup reads Cubase's preferences
   only. A small change (Nuendo's script folder, Nuendo.exe, the "Nuendo <n>_64" preferences), but untested without
   Nuendo: to be done when someone with Nuendo can test it.
+- **macOS** (19.11.2026: planned, after the first Windows release). Already there: the USB code (Rea-Sixty's, which
+  runs on the Mac; there no driver swap is needed, only SSL360Core closed), virtual MIDI ports from macOS itself (no
+  loopMIDI), the four scripts unchanged, and a bridge that is portable but for about 25 Windows-only spots (process
+  checks, paths, the stop signal, the MIDI ports). To write: a menu bar app in place of the tray app (status, menu,
+  login item, restarting the bridge; keeping the ports while the bridge restarts needs its own design on the Mac), the
+  Mac side of those spots (Cubase's preferences in ~/Library/Preferences/Cubase <n>/ for the setup), and a signed and
+  notarised installer (an Apple Developer account). Every step is built and tested on a Mac with Cubase and a
+  controller.
 
 ## Suggested next (value for the effort)
 
