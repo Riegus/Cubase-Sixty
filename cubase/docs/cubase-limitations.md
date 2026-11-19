@@ -22,6 +22,10 @@ window follows and it reports the new value back). Other plug-ins in the Control
   numbered commands: To Marker 1–9, Recall Cycle Marker 1–9, Locate Previous / Next Marker. So Nav Mode works by
   marker ID (an ID the project does not use does nothing), and "Recall Cycle Marker" only sets the locators (the
   cursor needs To Left Locator after it).
+- **Marker names: not reachable through Direct Access either** (probed 19.11.2026). The transport's Direct Access
+  object is one object with 101 parameters and no children: times, modes, the locate commands ("gotoNextMarker",
+  "markerButton1" to "markerButton15", which might reach markers 10-15, untried) and nothing with a marker's name
+  ("PreChorus 1" was not anywhere in the log). The VST Mixer's tree has no markers either.
 - **The first marker.** No command goes to it. The UF1's First Marker goes to the project start, then Locate Next
   Marker, which passes over a marker exactly at the cursor; and Locate Previous Marker with no marker before goes to
   the project start, so a step back cannot tell the two apart (14.11.2026). A marker right at the project start is
