@@ -136,11 +136,56 @@ begin
   if (CurPageID = wpSelectTasks) and UsbDriverNeeded() then WizardSelectTasks('usbdriver');
 end;
 
+// Cubase running (19.11.2026): installing replaces Cubase-Sixty's MIDI ports under it, and Cubase only half
+// reconnects: its scripts were switched off a few seconds after a project opened, the surfaces dead until Cubase was
+// restarted. So Cubase has to be closed first. Cubase's program is Cubase.exe or Cubase<digits>.exe (as the bridge
+// looks for it); not known (no WMI): taken as not running.
+function CubaseRunning(): Boolean;
+var locator, service, list, item: Variant; i, j: Integer; n, rest: String; digits: Boolean;
+begin
+  Result := False;
+  try
+    locator := CreateOleObject('WbemScripting.SWbemLocator');
+    service := locator.ConnectServer('.', 'root\CIMV2');
+    list := service.ExecQuery('SELECT Name FROM Win32_Process WHERE Name LIKE ''Cubase%.exe''');
+    for i := 0 to list.Count - 1 do begin
+      item := list.ItemIndex(i);
+      n := Lowercase(item.Name);
+      rest := Copy(n, 7, Length(n) - 10);   // between "cubase" and ".exe"
+      digits := True;
+      for j := 1 to Length(rest) do
+        if (rest[j] < '0') or (rest[j] > '9') then digits := False;
+      if digits then Result := True;
+    end;
+  except
+  end;
+end;
+
+// Asks until Cubase is closed; False = the user gave up (Cancel), or a silent install with Cubase running.
+function CubaseClosed(what: String; silent: Boolean): Boolean;
+begin
+  Result := True;
+  while CubaseRunning() do begin
+    if silent then begin Result := False; exit; end;
+    if MsgBox('Cubase is running. Please close it before ' + what + ' Cubase-Sixty.' + #13#10 + #13#10 +
+              'Cubase-Sixty''s MIDI ports are replaced while ' + what + ', and a running Cubase does not connect to the ' +
+              'new ones properly (the controllers stop responding until Cubase is restarted).' + #13#10 + #13#10 +
+              'Close Cubase, then click Retry.', mbError, MB_RETRYCANCEL) = IDCANCEL then begin
+      Result := False;
+      exit;
+    end;
+  end;
+end;
+
 // A running copy is asked to quit (it stops the bridge, which blanks the surfaces) before files are replaced.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var code: Integer; exe: String;
 begin
   Result := '';
+  if not CubaseClosed('installing', WizardSilent()) then begin
+    Result := 'Cubase is running. Close Cubase, then run the installer again.';
+    exit;
+  end;
   exe := ExpandConstant('{app}\CubaseSixty.exe');
   if FileExists(exe) then Exec(exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, code);
 end;
@@ -157,6 +202,12 @@ begin
     text := text + 'The Microsoft Visual C++ runtime was not found. If Cubase-Sixty does not start, install it:' + #13#10 +
       'https://aka.ms/vs/17/release/vc_redist.x64.exe' + #13#10 + #13#10;
   if text <> '' then MsgBox(text + 'See the user guide for the remaining setup steps.', mbInformation, MB_OK);
+end;
+
+// Uninstalling with Cubase running takes its ports and scripts away under it: closed first, as for installing.
+function InitializeUninstall(): Boolean;
+begin
+  Result := CubaseClosed('uninstalling', UninstallSilent());
 end;
 
 // Uninstall: the user's settings and favourites are kept unless they say otherwise; the scripts are removed.

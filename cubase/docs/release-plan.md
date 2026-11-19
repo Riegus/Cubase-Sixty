@@ -90,6 +90,8 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   on a track without one).
 - 16.11.2026: the FOCUS test log lines are debug-only (the script's with DEBUG, the bridge's with --trace). Left: the
   guide read against the hardware, the uninstaller and the tray's Quit tried, the GitHub release.
+- 19.11.2026: the installer and uninstaller ask for Cubase to be closed first (tested); a MIDI port not ready at
+  login is tried again (Geir checks at a restart that "The bridge stopped and was started again" no longer shows).
 - 16.11.2026: the UF1's EQ graph retested (Geir). It showed another track's curve in a project with disabled tracks
   (wrong track numbers; fixed, see known-issues.md, All surfaces); right after the fix, METER too. `dev-restart.ps1 -Hub`
   starts Cubase without a project.

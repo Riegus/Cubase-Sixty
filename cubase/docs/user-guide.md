@@ -55,7 +55,7 @@ State Logic; Cubase is a trademark of Steinberg Media Technologies.
 ## Installing
 
 1. Plug the controllers in and switch them on.
-2. Run `CubaseSixty-Setup-<version>.exe`. Windows may show "Windows protected your PC", because the installer is not
+2. Close Cubase (the installer asks you to if it is running). Run `CubaseSixty-Setup-<version>.exe`. Windows may show "Windows protected your PC", because the installer is not
    signed: choose **More info**, then **Run anyway**. It installs for your user account only.
 3. On the options page:
     - **Start Cubase-Sixty with Windows**: leave it ticked unless you want to start it by hand.
@@ -631,7 +631,8 @@ The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubas
 
 ## Uninstalling
 
-Windows *Settings > Apps > Installed apps > Cubase-Sixty > Uninstall*. It stops Cubase-Sixty, removes the program
+Close Cubase first (the uninstaller asks you to if it is running). Then Windows *Settings > Apps > Installed apps >
+Cubase-Sixty > Uninstall*. It stops Cubase-Sixty, removes the program
 and the scripts, and asks whether to remove your settings and favourites too.
 
 The USB driver and its certificate stay (Rea-Sixty may be using them). To give the controllers back to SSL 360 and
