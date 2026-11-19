@@ -1,6 +1,11 @@
 // Version information: Windows shows FileDescription as the app's name (notifications, Task Manager).
 #include <winver.h>
 
+// The app icon (19.11.2026): the tray icon's design (TrayApp.cpp, makeIcon) in its "live" green, 16-256 px, made by
+// cubase\tools\make-app-icon.py. The first icon in the file is the one Windows shows for the program (Explorer, the
+// Start menu, Apps & features, notifications).
+1 ICON "CubaseSixty.ico"
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 0,1,0,0
  PRODUCTVERSION 0,1,0,0

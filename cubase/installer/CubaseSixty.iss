@@ -36,6 +36,8 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayName=Cubase-Sixty
 UninstallDisplayIcon={app}\CubaseSixty.exe
+; The installer's own icon: the app's (19.11.2026).
+SetupIconFile=..\bridge\src\tray\CubaseSixty.ico
 ; Cubase-Sixty's own licence is shown; Rea-Sixty's (whose code the bridge uses) is installed beside it, as MIT asks.
 LicenseFile=..\LICENSE
 ; What the installer changes, and that Cubase-Sixty is not SSL's or Steinberg's: shown after the licence.
