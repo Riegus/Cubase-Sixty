@@ -97,6 +97,8 @@ cubase/favourites.txt
 
 cubase/settings.txt
 cubase/level-curve.txt
+cubase/fader-0db.txt
+cubase/uf8-*-last-view.txt
 
 # Cubase-Sixty: local dev switch (dev-restart.ps1 uses the loopMIDI ports)
 cubase/tools/use-loopmidi.txt
