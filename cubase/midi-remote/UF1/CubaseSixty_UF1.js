@@ -706,8 +706,6 @@ var stepMix = null
 // nothing for markers. Its whole tree, every object with its type, names and parameters; once per project.)
 var markerDa = [], markerProbeAt = 0
 try { markerDa.push(['Transport', page.mHostAccess.makeDirectAccess(page.mHostAccess.mTransport)]) } catch (e) { out('[CubaseSixty UF1] probe: no Direct Access to the transport: ' + e) }
-try { markerDa.push(['Control Room', page.mHostAccess.makeDirectAccess(page.mHostAccess.mControlRoom)]) } catch (e) { out('[CubaseSixty UF1] probe: no Direct Access to the Control Room: ' + e) }
-try { markerDa.push(['Mouse', page.mHostAccess.makeDirectAccess(page.mHostAccess.mMouseCursor)]) } catch (e) {}
 function markerProbe() {
 	for (var d = 0; d < markerDa.length; ++d) {
 		var label = markerDa[d][0], da = markerDa[d][1], count = 0
@@ -727,7 +725,7 @@ function markerProbe() {
 			try { kids = da.getNumberOfChildObjects(plugAm, id) } catch (e) {}
 			var pad = new Array(depth + 1).join('  ')
 			out('[CubaseSixty UF1] probe ' + label + ': ' + pad + '#' + id + ' [' + type + '] "' + title + '" (' + uname + '), ' + np + ' parameters, ' + kids + ' children')
-			for (var i = 0; i < np && i < 40; ++i) {
+			for (var i = 0; i < np && i < 200; ++i) {
 				var tag = -1, pt = '', dv = ''
 				try { tag = da.getParameterTagByIndex(plugAm, id, i) } catch (e) {}
 				try { pt = da.getParameterTitle(plugAm, id, tag, 64) } catch (e) {}
