@@ -8,8 +8,7 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   the tray app, which replaces the MIDI ports; Cubase half reconnected, and switched its scripts off 4 s after a
   project opened (the script console: "inactive (no project)" with the project open; nothing more reached the bridge).
   A Cubase restart brought them back. The installer and the uninstaller now ask for Cubase to be closed first.
-- **Fixed, to be confirmed at the next login (19.11.2026): "The bridge stopped and was started again" right after
-  logging in.**
+- **Fixed (19.11.2026, confirmed at a restart): "The bridge stopped and was started again" right after logging in.**
   The tray app makes the MIDI ports at login and starts the bridge, which found a port but could not open it yet
   ("MidiOutWinMM::openPort: error creating Windows MM MIDI output port") and ended; the tray app started it again
   5 s later and it ran. Now the bridge tries a failed open again for up to 10 s before giving up.
