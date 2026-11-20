@@ -25,6 +25,7 @@ const char* const kWays[] = {"to Cubase", "from Cubase"};
 const std::string kMcuIn = "Cubase-Sixty MCU to Cubase";
 const std::string kMcuOut = "Cubase-Sixty MCU from Cubase";
 const std::string kBackupName = "Defaults (before Cubase-Sixty).xml";
+const std::string kSslPort = "SSL V-MIDI Port 1";   // SSL 360's first DAW port, both ways
 
 std::string readFile(const fs::path& p)
 {
@@ -149,6 +150,7 @@ void inspectText(const std::string& s, const std::string& device, Folder& f)
     std::string in, out;
     if (const Range m = group(s, "Mackie Control"); m.found()) { in = objValue(s, m, "InputPort"); out = objValue(s, m, "OutputPort"); }
     if (isListed && in == kMcuIn && out == kMcuOut) f.mackie = Mackie::Ours;
+    else if (isListed && in == kSslPort) f.mackie = Mackie::Ssl;
     else if (isListed && !in.empty() && in != kMcuIn) { f.mackie = Mackie::Other; f.mackieOther = in; }
     else f.mackie = Mackie::Missing;
 }
@@ -188,7 +190,7 @@ void addExcluded(std::string& s, const std::string& device)
     addExcluded(s, device);
 }
 
-void setMackie(std::string& s, const std::string& device)
+void setMackie(std::string& s, const std::string& device, const std::string& inPort = kMcuIn, const std::string& outPort = kMcuOut)
 {
     const std::string eol = eolOf(s);
     long long id = maxId(s) + 16;
@@ -203,8 +205,8 @@ void setMackie(std::string& s, const std::string& device)
             "                     <string name=\"Name\" value=\"Mackie Control\"/>" + eol + "                  </item>" + eol);
     }
     // Its ports.
-    const std::pair<const char*, std::string> values[] = {{"InputDevice", device}, {"InputPort", kMcuIn},
-                                                          {"OutputDevice", device}, {"OutputPort", kMcuOut}};
+    const std::pair<const char*, std::string> values[] = {{"InputDevice", device}, {"InputPort", inPort},
+                                                          {"OutputDevice", device}, {"OutputPort", outPort}};
     auto objText = [&](const char* name, const std::string& v) {
         return "            <obj class=\"CmString\" name=\"" + std::string(name) + "\" ID=\"" + std::to_string(id += 16) + "\">" + eol +
                "               <string name=\"s\" value=\"" + v + "\"/>" + eol + "            </obj>" + eol;
@@ -307,6 +309,8 @@ std::string plannedChanges(const std::vector<Folder>& folders)
                      " Cubase-Sixty port(s) (so MIDI tracks do not play the controllers' messages)\n";
         if (f.mackie == Mackie::Missing)
             lines += "  - a Mackie Control device in Studio Setup on the ports \"" + kMcuIn + "\" / \"" + kMcuOut + "\" (for SCRUB on the UF1)\n";
+        if (f.mackie == Mackie::Ssl)
+            lines += "  - the Mackie Control device switched from SSL 360's port (\"" + kSslPort + "\") to \"" + kMcuIn + "\" / \"" + kMcuOut + "\" (for SCRUB on the UF1)\n";
         if (f.mackie == Mackie::Other && lines.size())
             lines += "  (its Mackie Control device is used by another controller, \"" + f.mackieOther + "\": left as it is, so SCRUB will not work)\n";
         if (f.mackie == Mackie::NoStudio && lines.size())
@@ -322,7 +326,7 @@ std::string apply()
     std::string report;
     for (Folder f : inspect()) {
         if (!f.readable) { report += f.name + ": the preferences file could not be read; left as it is.\n"; continue; }
-        const bool doPorts = f.excluded < f.ports, doMackie = f.mackie == Mackie::Missing;
+        const bool doPorts = f.excluded < f.ports, doMackie = f.mackie == Mackie::Missing || f.mackie == Mackie::Ssl;
         if (!doPorts && !doMackie) { report += f.name + ": already set up.\n"; continue; }
         std::string s = readFile(f.file);
         const std::string device = midiDevice(f.file.parent_path());
@@ -348,13 +352,53 @@ std::string apply()
     return report;
 }
 
+std::string plannedSsl(const std::vector<Folder>& folders)
+{
+    std::string o;
+    for (const auto& f : folders) {
+        if (!f.readable || f.mackie == Mackie::Ssl) continue;
+        if (f.mackie == Mackie::Other)
+            o += f.name + ":\n  (its Mackie Control device is another controller's, \"" + f.mackieOther + "\": left as it is)\n";
+        else if (f.mackie == Mackie::NoStudio)
+            o += f.name + ":\n  (no Studio Setup device list: set the Mackie Control device up in Cubase as SSL's guide describes)\n";
+        else
+            o += f.name + ":\n  - the Mackie Control device in Studio Setup on \"" + kSslPort + "\" (in and out), as SSL 360 needs it" +
+                 (f.mackie == Mackie::Ours ? " (now on Cubase-Sixty's MCU ports)" : "") + "\n";
+    }
+    return o;
+}
+
+std::string applySsl()
+{
+    if (cubaseRunning()) return "Cubase is running. Close it first: Cubase writes these settings itself when it quits.";
+    std::string report;
+    for (Folder f : inspect()) {
+        if (!f.readable || f.mackie == Mackie::Other || f.mackie == Mackie::NoStudio) continue;
+        if (f.mackie == Mackie::Ssl) { report += f.name + ": the Mackie Control device is on SSL 360's port already.\n"; continue; }
+        std::string s = readFile(f.file);
+        const std::string device = midiDevice(f.file.parent_path());
+        const fs::path backup = f.file.parent_path() / kBackupName;
+        std::error_code ec;
+        if (!fs::exists(backup, ec)) fs::copy_file(f.file, backup, ec);
+        if (ec) { report += f.name + ": no copy of the preferences file could be made; left as it is.\n"; continue; }
+        setMackie(s, device, kSslPort, kSslPort);
+        Folder check = f;
+        inspectText(s, device, check);
+        if (!check.readable || check.mackie != Mackie::Ssl) { report += f.name + ": the change could not be made safely; left as it is.\n"; continue; }
+        if (!writeFile(f.file, s)) { report += f.name + ": the preferences file could not be written; left as it is.\n"; continue; }
+        report += f.name + ": the Mackie Control device is on " + kSslPort + ".\n";
+    }
+    return report;
+}
+
 std::string stateJson()
 {
     const auto folders = inspect();
     std::string o = "{\"cubaseRunning\":" + std::string(cubaseRunning() ? "true" : "false") + ",\"folders\":[";
     for (size_t i = 0; i < folders.size(); ++i) {
         const auto& f = folders[i];
-        const char* mk = f.mackie == Mackie::Ours ? "ours" : f.mackie == Mackie::Other ? "other" : f.mackie == Mackie::NoStudio ? "nostudio" : "missing";
+        const char* mk = f.mackie == Mackie::Ours ? "ours" : f.mackie == Mackie::Ssl ? "ssl" : f.mackie == Mackie::Other ? "other"
+                       : f.mackie == Mackie::NoStudio ? "nostudio" : "missing";
         o += (i ? "," : "") + std::string("{\"name\":") + jsonText(f.name) + ",\"readable\":" + (f.readable ? "true" : "false") +
              ",\"excluded\":" + std::to_string(f.excluded) + ",\"ports\":" + std::to_string(f.ports) + ",\"mackie\":\"" + mk +
              "\",\"mackieOther\":" + jsonText(f.mackieOther) + ",\"complete\":" + (f.complete() ? "true" : "false") + "}";

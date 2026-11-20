@@ -171,7 +171,8 @@ State Logic; Cubase is a trademark of Steinberg Media Technologies.</p>
   which Cubase-Sixty needs; from then on SSL 360 does not see them.</li>
 </ul>
 </li>
-<li>If the driver was installed: <strong>unplug and replug the controllers</strong> when the installer has finished.</li>
+<li>If the driver was installed and the controllers do not come alive within a few seconds, <strong>unplug and replug
+   them</strong>.</li>
 </ol>
 <p>Cubase-Sixty now sits in the notification area (the tray) as a small mixing-surface icon, and the controllers show
 "Waiting for Cubase".</p>
@@ -200,8 +201,8 @@ preferences as they are (to undo those changes, see Setting up Cubase below).</p
   computer's trusted root and trusted publisher certificates. Its private key stays in the computer's certificate
   store.</li>
 </ul>
-<p>The uninstaller leaves the driver in place (Rea-Sixty may use it). To undo it, use the tray menu <strong>USB driver &gt;
-Remove it</strong> before uninstalling: that removes the driver and the certificate (see
+<p>The uninstaller leaves the driver in place (Rea-Sixty may use it). To undo it, use the tray menu <strong>SSL controllers &gt;
+Give them back to SSL 360</strong> before uninstalling: that removes the driver and the certificate (see
 <a href="#going-back-to-ssl-360">Going back to SSL 360</a>). A recent Windows restore point or backup before installing the
 driver is a sensible precaution.</p>
 </div><div class="card"><h2 id="setting-up-cubase-once">Setting up Cubase (once)</h2>
@@ -250,7 +251,7 @@ it: to undo, quit Cubase and rename it back to <code>Defaults.xml</code>.</p>
 </table></div>
 <ul>
 <li><strong>Click the icon</strong> for the Settings page (in your browser); <strong>right-click</strong> for the menu: Settings, User guide,
-  Restart bridge, Open logs folder, Start with Windows, USB driver, Quit.</li>
+  Restart bridge, Open logs folder, Start with Windows, SSL controllers, Quit.</li>
 <li>Start order does not matter, and controllers can be plugged in and unplugged at any time.</li>
 <li>What the surfaces say when no project is open: <strong>"No Project"</strong> while Cubase shows the Hub, <strong>"Waiting for
   Cubase"</strong> while Cubase is not running (or has not connected yet), <strong>"Bridge off"</strong> (UF1: "Off") when Cubase-Sixty
@@ -931,19 +932,29 @@ UF8 / UF1 / UC1 buttons pick which surfaces' settings show (one or more; remembe
 </table></div>
 <p>"Project window" track stepping only works while Cubase's Project window has the focus: click in it first.</p>
 </div><div class="card"><h2 id="going-back-to-ssl-360">Going back to SSL 360</h2>
-<p>SSL 360 uses SSL's own USB driver for the controllers; Cubase-Sixty (like Rea-Sixty) needs Windows' WinUSB driver.
-A controller can only be on one of them, so the two programs cannot share the controllers, and quitting Cubase-Sixty
-is not enough.</p>
-<ul>
-<li>To give the controllers back: tray menu <strong>USB driver &gt; Remove it (give the controllers back to SSL 360)</strong>, then
-  unplug and replug them. If SSL 360 still does not see them, run SSL 360's installer again.</li>
-<li>To take them again: tray menu <strong>USB driver &gt; Install the driver for the SSL controllers</strong>, with the controllers
-  plugged in; then unplug and replug them.</li>
-</ul>
-<p>Each asks for administrator permission once. Rea-Sixty uses the same driver: with it installed, both Rea-Sixty and
-Cubase-Sixty see the controllers (one at a time: quit the one before starting the other).</p>
-<p>While Cubase-Sixty runs it closes SSL 360's background program (SSL360Core.exe) whenever it appears, because the two
-compete for the SSL plug-ins' meters.</p>
+<p>SSL 360 and Cubase-Sixty cannot share the controllers. Each needs its own USB driver (SSL's, or Windows' WinUSB driver
+that Cubase-Sixty and Rea-Sixty use), SSL 360 talks to Cubase through Cubase's Mackie Control device on its own port
+("SSL V-MIDI Port 1"), and while Cubase-Sixty runs it closes SSL 360's background program (SSL360Core.exe), because
+the two compete for the SSL plug-ins' meters. So quitting Cubase-Sixty alone is not enough.</p>
+<p><strong>To give the controllers back:</strong> tray menu <strong>SSL controllers &gt; Give them back to SSL 360</strong>. It lists what it will do
+and asks first:</p>
+<ol>
+<li>removes Cubase-Sixty's USB driver (Windows asks for administrator permission);</li>
+<li>sets Cubase's Mackie Control device to SSL V-MIDI Port 1, as SSL 360 needs it (Cubase must be closed; a copy of its
+   preferences file is kept; a Mackie Control device of another controller is left alone);</li>
+<li>switches Start with Windows off, and quits.</li>
+</ol>
+<p>At the end it starts SSL 360 when you click OK (if the controllers do not reach it, unplug and replug them). Set the UF8's
+layer to Cubase there, as SSL's UF8 user guide describes for Cubase (run SSL 360's installer again if it does not see
+the controllers). Cubase-Sixty's settings, favourites and
+scripts stay.</p>
+<p><strong>To take them again:</strong> start Cubase-Sixty from the Start menu, and choose tray menu <strong>SSL controllers &gt; Use them with
+Cubase-Sixty again</strong>, with the controllers plugged in. It closes SSL 360, installs the USB driver (administrator
+permission), switches Start with Windows on, and then offers Cubase's settings for Cubase-Sixty (you see the changes
+first). If the controllers do not come alive, unplug and replug them.</p>
+<p>The same menu has <strong>Install / Remove the USB driver only</strong>, for when you want only that. Rea-Sixty uses the same
+driver: with it installed, both Rea-Sixty and Cubase-Sixty see the controllers (one at a time: quit the one before
+starting the other).</p>
 </div><div class="card"><h2 id="when-something-is-wrong">When something is wrong</h2>
 <div class="tbl"><table>
 <thead>
@@ -955,11 +966,19 @@ compete for the SSL plug-ins' meters.</p>
 <tbody>
 <tr>
 <td>The controllers stay dark, the icon is yellow or green</td>
-<td>The USB driver: tray menu <strong>USB driver &gt; Install</strong>, with the controllers plugged in, then replug them. Is SSL 360 running? Quit it.</td>
+<td>The USB driver: tray menu <strong>SSL controllers &gt; Use them with Cubase-Sixty again</strong> (or Install the USB driver only), with the controllers plugged in, then replug them. Is SSL 360 running? Quit it.</td>
+</tr>
+<tr>
+<td>SSL 360 sees the controllers but Cubase does nothing</td>
+<td>See <a href="#going-back-to-ssl-360">Going back to SSL 360</a>: Cubase's Mackie Control device must be on SSL V-MIDI Port 1, and Cubase-Sixty must not be running.</td>
 </tr>
 <tr>
 <td>"Waiting for Cubase" although a project is open</td>
 <td>Restart Cubase with Cubase-Sixty running. In <em>Studio &gt; MIDI Remote Manager</em> the four CubaseSixty devices should be listed and active.</td>
+</tr>
+<tr>
+<td>"Cubase-Sixty cannot run: it could not make its MIDI ports"</td>
+<td>The message says why (another copy running, ports of the same names in loopMIDI, or the virtual MIDI driver missing or broken); it is also in tray.log (Open logs folder).</td>
 </tr>
 <tr>
 <td>Red icon</td>
@@ -1024,7 +1043,7 @@ folder (tray menu <strong>Open logs folder</strong>) with what you did and what 
 Cubase-Sixty &gt; Uninstall</em>. It stops Cubase-Sixty, removes the program
 and the scripts, and asks whether to remove your settings and favourites too.</p>
 <p>The USB driver and its certificate stay (Rea-Sixty may be using them). To give the controllers back to SSL 360 and
-remove the certificate, use the tray menu <strong>USB driver &gt; Remove it</strong> <strong>before</strong> uninstalling, or run SSL 360's
+remove the certificate, use the tray menu <strong>SSL controllers &gt; Give them back to SSL 360</strong> <strong>before</strong> uninstalling, or run SSL 360's
 installer afterwards (that does not remove the certificate).</p></div>
 </main>
 </div>

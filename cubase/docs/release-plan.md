@@ -98,6 +98,11 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   asking (a copy of Cubase's preferences kept), the C++ runtime beside the program, loopMIDI's page offered when the
   driver is missing, a Setup check and a reminder. Nuendo not supported yet; a Mac version and Windows MIDI Services'
   ports (no loopMIDI on Windows 11) planned after the release (missing-features.md).
+- 20.11.2026: going back to SSL 360 and returning in one step each (tray: SSL controllers), tested both ways: the
+  USB driver, Cubase's Mackie Control device (SSL V-MIDI Port 1 / Cubase-Sixty's MCU ports, after asking), Start with
+  Windows, SSL 360 started / closed. The tray app says once why it cannot make its ports, ends a leftover bridge,
+  logs and time-limits its quitting (tray.log); the installer closes Cubase-Sixty itself (Windows' own closing step
+  off). Send destinations named on the UF8 and the UF1.
 - 16.11.2026: the UF1's EQ graph retested (Geir). It showed another track's curve in a project with disabled tracks
   (wrong track numbers; fixed, see known-issues.md, All surfaces); right after the fix, METER too. `dev-restart.ps1 -Hub`
   starts Cubase without a project.

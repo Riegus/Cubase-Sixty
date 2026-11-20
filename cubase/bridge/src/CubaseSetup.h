@@ -19,7 +19,8 @@
 
 namespace cs::cubaseSetup {
 
-enum class Mackie { Missing, Ours, Other, NoStudio };
+// Ssl: on SSL 360's port (SSL V-MIDI Port 1), which these functions switch either way (the same controllers).
+enum class Mackie { Missing, Ours, Ssl, Other, NoStudio };
 
 struct Folder {
     std::string name;               // "Cubase 15_64"
@@ -40,6 +41,11 @@ bool cubaseRunning();
 std::string plannedChanges(const std::vector<Folder>& folders);
 // Makes the changes (Cubase must be closed); returns what was done, one line per folder.
 std::string apply();
+// Giving the controllers back to SSL 360 (20.11.2026): the Mackie Control device on SSL V-MIDI Port 1, as SSL 360's
+// Cubase setup has it. What would change ("" = nothing), and the change (Cubase must be closed). Another controller's
+// Mackie Control device is left alone; "All MIDI Inputs" is left as it is.
+std::string plannedSsl(const std::vector<Folder>& folders);
+std::string applySsl();
 // The state as JSON, for the Settings page: {"cubaseRunning":..,"folders":[{"name","excluded","ports","mackie",
 // "mackieOther","complete"}],"planned":"..."}.
 std::string stateJson();
