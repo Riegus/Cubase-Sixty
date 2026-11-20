@@ -62,7 +62,7 @@ var midiOutput = deviceDriver.mPorts.makeMidiOutput()
 // events, temporary lines and log lines are not in the list and are never repeated. (Cubase's own values, the fader
 // positions and LEDs, the tray app gives the new bridge.)
 // ---------------------------------------------------------------------------------------------------------------
-var RESEND = { 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x32: 1, 0x33: 0, 0x26: 1, 0x27: 1, 0x7C: 0 }
+var RESEND = { 0x3A: 2, 0x01: 1, 0x02: 1, 0x06: 1, 0x07: 1, 0x0C: 1, 0x0D: 1, 0x0E: 1, 0x12: 0, 0x14: 0, 0x20: 1, 0x32: 1, 0x33: 0, 0x26: 1, 0x27: 1, 0x7C: 0 }
 var resendLast = {}, resendSeq = 0
 function sendMidi(activeDevice, bytes) {
 	if (bytes.length >= 6 && bytes[0] === 0xF0 && RESEND[bytes[4]] !== undefined) {
@@ -306,6 +306,9 @@ eachPage(function (page, bankZone, view) {
 			page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(view.faderSend[sn])
 			;(function (index, n) {
 				sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
+					// Where the send goes, to the bridge (SysEx 3A <strip> <send> <name>): the fader send view names it in
+					// each strip's value line (20.11.2026: CUT there is the send's on switch, easy to take for mute).
+					if ((title || '') !== sendTitles[index][n]) sendMidi(activeDevice, SYSEX_HEADER.concat([0x3A, index, n], toAscii7(title || ''), [0xF7]))
 					sendTitles[index][n] = title || ''
 					if (route.fader === 'send' && route.send === n) skRescanAt = Date.now() + 150   // a send added / removed: the fader's target
 				}

@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdlib>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -350,6 +351,37 @@ void driveFader(int s, uint16_t v14, bool db = false)
     for (auto& f : frames) g_dev.send(std::move(f));
 }
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
+// The fader send view names the send in each strip's value line, the pan value kept on the right (20.11.2026: CUT is
+// the send's on switch there, and a lit CUT was taken for a mute). Where each strip's sends go: script SysEx 3A.
+std::mutex g_sendDestMx;
+std::array<std::array<std::string, 8>, 8> g_sendDest;   // [strip][send]
+std::array<std::string, 8> g_panText;                   // Cubase's pan text per strip (the value line's right part)
+std::string valueLineFor(int s)
+{
+    std::string right, left;
+    { std::lock_guard<std::mutex> lk(g_sendDestMx); right = g_panText[size_t(s)]; }
+    const int send = g_routeSend;
+    if (send >= 0 && !g_routeSelSends) {
+        std::string dest;
+        { std::lock_guard<std::mutex> lk(g_sendDestMx); dest = g_sendDest[size_t(s)][size_t(send)]; }
+        // Cubase's title carries the slot number ("1- Roo Rvb"): taken off. A space in the name is shown as a dot: the
+        // UF8 takes the first space after about the tenth character for the start of the value and draws the rest in
+        // the value's colour ("Roo" white, "Rvb" yellow; 20.11.2026).
+        size_t at = 0;
+        while (at < dest.size() && std::isdigit(static_cast<unsigned char>(dest[at]))) ++at;
+        if (at > 0 && at < dest.size() && dest[at] == '-') {
+            ++at;
+            while (at < dest.size() && dest[at] == ' ') ++at;
+            dest.erase(0, at);
+        }
+        for (char& c : dest) if (c == ' ') c = '.';
+        left = "S" + std::to_string(send + 1) + " " + (dest.empty() ? std::string("-") : dest);
+    } else left = "Pan";
+    if (right.size() > 15) right.resize(15);
+    const size_t room = 19 - right.size() - (right.empty() ? 0 : 1);
+    if (left.size() > room) left.resize(room);
+    return left + std::string(19 - left.size() - right.size(), ' ') + right;
+}
 long long nowMs8() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 // The fader send view's dB field while the hand moves a fader: drawn at once from the send level curve (as the V-pot
 // send view's value line), and the script's text (0C, which trails) held back until 0.5 s after the hand; the
@@ -467,6 +499,15 @@ void applyRoute()
     for (int i = 0; i < 8; ++i) sendLedFrames(uf8::buildUf8GlobalLed(sp[i], i == send));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Flip, flip || sel));
     paintPanFine();
+    // The value lines: the send's name in a fader send view, "Pan" outside it (the V-pot send view draws its own).
+    if (!sel)
+        for (int s = 0; s < kStrips; ++s) {
+            bool has;
+            { std::lock_guard<std::mutex> lk(g_sendDestMx); has = !g_panText[size_t(s)].empty(); }
+            if (!has || g_stripEmpty[s]) continue;
+            g_panLine[s] = valueLineFor(s);
+            if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(s), g_panLine[s]));
+        }
     if (g_trace8) std::printf("UF8 route: faders %s, V-pots %s\n", send >= 0 ? ("send " + std::to_string(send + 1)).c_str() : flip ? "pan" : "volume",
                               sel ? "selected track's sends" : flip ? "volume" : "pan");
 }
@@ -1235,6 +1276,7 @@ void uf8NoProject()
         onMidiIn(name);
         onMidiIn(colour);
         g_panLine[s].clear();
+        { std::lock_guard<std::mutex> lk(g_sendDestMx); g_panText[size_t(s)].clear(); }
         g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
     }
     for (int n : notes) { std::vector<unsigned char> off{0x80, uint8_t(n), 0}; onMidiIn(off); }
@@ -1316,6 +1358,7 @@ void armedBlank(int s)
     std::vector<unsigned char> ml{0xB0, uint8_t(kCcMeter + s), 0}, mr{0xB0, uint8_t(kCcMeter + kStrips + s), 0};
     for (auto* v : {&name, &colour, &db, &ml, &mr}) onMidiIn(*v);
     g_panLine[s].clear();
+    { std::lock_guard<std::mutex> lk(g_sendDestMx); g_panText[size_t(s)].clear(); }
     g_dev.send(uf8::buildValueLine(uint8_t(s), ""));
     for (int cls = 0; cls < 4; ++cls) setLed(s, cls, false);
     for (auto& w : g_ledWant[s]) w = false;
@@ -1566,12 +1609,17 @@ void onMidiIn(std::vector<unsigned char>& msg)
         } else if (m.size() >= 7 && m[4] == 0x07 && m[5] < kStrips) {
             // Pan text -> value line: "Pan" left, Cubase's value right, 19 characters.
             std::string v(m.begin() + 6, m.end() - 1);
-            if (v.size() > 15) v.resize(15);
-            std::string line = "Pan";
-            line.append(19 - line.size() - v.size(), ' ');
-            line += v;
+            { std::lock_guard<std::mutex> lk(g_sendDestMx); g_panText[m[5]] = v; }
+            const std::string line = valueLineFor(m[5]);
             g_panLine[m[5]] = line;
             if (g_focus < 0) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), line));
+        } else if (m.size() >= 8 && m[4] == 0x3A && m[5] < kStrips && m[6] < 8) {
+            // Where a strip's send goes (its name in the fader send view's value line).
+            { std::lock_guard<std::mutex> lk(g_sendDestMx); g_sendDest[m[5]][m[6]].assign(m.begin() + 7, m.end() - 1); }
+            if (g_routeSend == m[6] && !g_routeSelSends) {
+                g_panLine[m[5]] = valueLineFor(m[5]);
+                if (g_focus < 0 && !g_stripEmpty[m[5]]) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), g_panLine[m[5]]));
+            }
         } else if (m.size() >= 7 && m[4] == 0x2C && m[5] < kStrips) {
             // SEL on the selected track: no SSL channel strip there, so the channel editor (the V-pot push's note,
             // press and release 40 ms apart: notes back to back can merge).
