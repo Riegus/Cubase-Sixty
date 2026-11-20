@@ -29,6 +29,7 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include <shlobj.h>
 #include <objbase.h>
 #include <mmsystem.h>
@@ -155,6 +156,30 @@ void closePorts()
     g_fromPorts.clear();
     { std::lock_guard<std::mutex> lk(g_keptMx); g_kept.clear(); }
     g_portsOurs = false;
+}
+
+// A bridge from this folder still running when the tray app starts (20.11.2026: one left over held the port names, so
+// the new ports could not be made and every new bridge stopped at once): ended first, as nothing else starts it.
+void endLeftoverBridges()
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof pe;
+    for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+        if (_wcsicmp(pe.szExeFile, L"cubase_sixty_bridge.exe") != 0) continue;
+        HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID);
+        if (!h) continue;
+        wchar_t path[MAX_PATH * 2];
+        DWORD n = MAX_PATH * 2;
+        std::error_code ec;
+        if (QueryFullProcessImageNameW(h, 0, path, &n) && fs::equivalent(fs::path(path), g_bridgeExe, ec)) {
+            TerminateProcess(h, 0);
+            WaitForSingleObject(h, 3000);
+        }
+        CloseHandle(h);
+    }
+    CloseHandle(snap);
 }
 
 // Why the ports could not be made ("" = they were): shown once, instead of restarting a bridge that cannot run without
@@ -871,6 +896,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     // Arguments are passed on to the bridge (e.g. --loopmidi, --trace).
     if (cmdLine && *cmdLine) g_bridgeArgs = std::wstring(L" ") + cmdLine;
     g_loopMidi = g_bridgeArgs.find(L"--loopmidi") != std::wstring::npos;
+    endLeftoverBridges();
     // The ports, before the bridge (they outlive it); the bridge then opens them as ordinary ports.
     if (!g_loopMidi && makePorts()) {
         g_bridgeArgs += L" --loopmidi";
