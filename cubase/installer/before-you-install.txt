@@ -25,8 +25,8 @@ Only if you tick "Install the USB driver" (asks for administrator permission onc
   - The driver package is signed on your PC with a certificate made there ("Rea-Sixty Driver Signer"), which is
     added to the computer's trusted root and trusted publisher certificates. Its private key stays in the
     computer's certificate store.
-  The uninstaller does NOT remove the driver (Rea-Sixty may be using it). To undo it: tray menu > USB driver >
-  Remove it, before uninstalling. That removes the driver and the certificate; then unplug and replug the
+  The uninstaller does NOT remove the driver (Rea-Sixty may be using it). To undo it: tray menu > SSL controllers >
+  Give them back to SSL 360, before uninstalling. That removes the driver and the certificate; then unplug and replug the
   controllers (if SSL 360 still does not see them, run SSL 360's installer again).
 
 Before installing the driver, it is sensible to have a recent Windows restore point or backup.

@@ -26,7 +26,8 @@ does not work (see "Reporting a problem" below).
    **More info**, then **Run anyway**. It installs for your user account only.
 3. Leave **Install the USB driver for the SSL controllers** ticked if the installer ticks it, then unplug and replug
    the controllers when it has finished. This moves them from SSL's USB driver to Windows' WinUSB driver; SSL 360 no
-   longer sees them until you give them back (tray menu, **USB driver > Remove it**).
+   longer sees them until you give them back (tray menu, **SSL controllers > Give them back to SSL 360**, which also
+   points Cubase's Mackie Control device back at SSL 360's port, after asking).
 4. Leave **Set up Cubase for Cubase-Sixty** ticked to have Cubase's two settings made for you: it shows exactly
    what it would change in Cubase's preferences and asks first (a copy of the file is kept). Or make them later from
    the Settings page (**Setup**), or by hand as the user guide describes.

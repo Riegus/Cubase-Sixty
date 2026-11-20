@@ -221,7 +221,7 @@ function setupBody(s) {
   card.append(setupRow("ok", "Virtual MIDI driver", "Found: Cubase-Sixty's MIDI ports are there."));
   const found = [["UF8", st.uf8], ["UF1", st.uf1], ["UC1", st.uc1]].filter(([, v]) => v === "connected").map(([n]) => n);
   card.append(found.length ? setupRow("ok", "SSL controllers", found.join(", ") + " connected.")
-    : setupRow("bad", "SSL controllers", "None found. With the controllers plugged in and switched on: tray menu, USB driver > Install the driver, then unplug and replug them. Is SSL 360 running? Quit it."));
+    : setupRow("bad", "SSL controllers", "None found. With the controllers plugged in and switched on: tray menu, SSL controllers > Use them with Cubase-Sixty again, then unplug and replug them. Is SSL 360 running? Quit it."));
   if (!cs.folders.length)
     card.append(setupRow("warn", "Cubase's settings", "Cubase's preferences were not found. Start Cubase once and quit it, then look here again."));
   for (const f of cs.folders) {
@@ -233,6 +233,7 @@ function setupBody(s) {
     const mk = {
       ours: ["ok", "Set up on Cubase-Sixty's MCU ports."],
       missing: ["bad", "Not set up. The UF1's SCRUB needs it (scrubbing audio with the jog wheel)."],
+      ssl: ["bad", "On SSL 360's port (SSL V-MIDI Port 1). Set up Cubase switches it to Cubase-Sixty's, for the UF1's SCRUB."],
       other: ["warn", "Used by another controller (\"" + f.mackieOther + "\"), so it is left as it is: SCRUB on the UF1 does not work."],
       nostudio: ["warn", "Cubase has no device list yet: open Studio > Studio Setup in Cubase once, quit Cubase, then look here again."],
     }[f.mackie] || ["warn", ""];

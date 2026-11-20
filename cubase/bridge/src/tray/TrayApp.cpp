@@ -55,7 +55,8 @@ namespace {
 constexpr UINT kTrayMsg = WM_APP + 1;
 constexpr UINT_PTR kTimerId = 1;
 constexpr UINT kTimerMs = 500;
-enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdDriverInstall, kCmdDriverRemove, kCmdGuide };
+enum : UINT { kCmdRestart = 100, kCmdLogs, kCmdAutostart, kCmdQuit, kCmdSettings, kCmdDriverInstall, kCmdDriverRemove, kCmdGuide,
+              kCmdToSsl, kCmdToSixty };
 const UINT kMsgDriverDone = WM_APP + 2;   // wParam: 0 install / 1 remove; lParam: the script's exit code, -1 cancelled, -2 not started
 const wchar_t* kRunKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 const wchar_t* kRunValue = L"Cubase-Sixty";
@@ -448,6 +449,56 @@ void readLog()
     if (old != g_status.uf8 + g_status.uf1 + g_status.uc1 + g_status.cubase) updateIcon();
 }
 
+// ---------------------------------------------------------------------------------------------- Cubase's settings
+
+std::wstring widenUtf8(const std::string& s)
+{
+    std::wstring w(MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), nullptr, 0), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), int(w.size()));
+    return w;
+}
+// Waits for Cubase to be closed (Cubase writes its preferences when it quits). False: the user gave up.
+bool cubaseClosedForSetup(const wchar_t* title)
+{
+    while (cs::cubaseSetup::cubaseRunning())
+        if (MessageBoxW(nullptr, L"Cubase is running. Close it, then click Retry. (Cubase writes these settings itself when it quits.)",
+                        title, MB_RETRYCANCEL | MB_ICONWARNING | MB_SETFOREGROUND) != IDRETRY) return false;
+    return true;
+}
+// Cubase's settings for Cubase-Sixty (the installer's --setup-cubase; taking the controllers back): what would change,
+// made only on Yes. sayIfNothing: tell the user when there is nothing to do.
+void setupCubaseInteractive(bool sayIfNothing)
+{
+    namespace cst = cs::cubaseSetup;
+    const wchar_t* title = L"Cubase-Sixty: set up Cubase";
+    const auto folders = cst::inspect();
+    if (folders.empty()) {
+        MessageBoxW(nullptr, L"Cubase's preferences were not found, so its settings for Cubase-Sixty could not be checked.\n\n"
+                    L"Start Cubase once, quit it, then open Cubase-Sixty's Settings page (click the tray icon) > Setup.",
+                    title, MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+        return;
+    }
+    const std::string planned = cst::plannedChanges(folders);
+    if (planned.empty()) {
+        if (sayIfNothing) MessageBoxW(nullptr, L"Cubase is set up for Cubase-Sixty already.", title, MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+        return;
+    }
+    const std::wstring ask = L"Cubase-Sixty would make these changes in Cubase's preferences:\n\n" + widenUtf8(planned) +
+        L"\nA copy of each preferences file is kept beside it, as \"Defaults (before Cubase-Sixty).xml\".\n\n"
+        L"Make these changes now? (No: nothing is changed. You can do it later on the Settings page, Setup, or by hand "
+        L"as the user guide describes.)";
+    if (MessageBoxW(nullptr, ask.c_str(), title, MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1 | MB_SETFOREGROUND) != IDYES) return;
+    if (!cubaseClosedForSetup(title)) return;
+    MessageBoxW(nullptr, widenUtf8(cst::apply()).c_str(), title, MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+}
+
+// Giving the controllers back to SSL 360 and taking them again (20.11.2026): the USB driver alone was not enough (SSL
+// 360 drives Cubase through the Mackie Control device on SSL V-MIDI Port 1, which pointed to Cubase-Sixty's port, and
+// Cubase-Sixty closes SSL360Core while it runs). Set while the driver script for it runs.
+enum class Handover { None, ToSsl, ToSixty };
+Handover g_handover = Handover::None;
+std::string g_handoverReport;   // what was done in Cubase's preferences
+
 // ---------------------------------------------------------------------------------------------- USB driver
 
 // The WinUSB driver binding for the UF8 / UC1 / UF1 (driver\install-driver.ps1 and uninstall-driver.ps1 beside the
@@ -548,9 +599,12 @@ void showMenu()
     AppendMenuW(m, MF_STRING | (autostartOn() ? MF_CHECKED : 0), kCmdAutostart, L"Start with Windows");
     if (driverScriptsThere()) {
         HMENU d = CreatePopupMenu();
-        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdDriverInstall, L"Install the driver for the SSL controllers...");
-        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdDriverRemove, L"Remove it (give the controllers back to SSL 360)...");
-        AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(d), L"USB driver");
+        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdToSsl, L"Give them back to SSL 360...");
+        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdToSixty, L"Use them with Cubase-Sixty again...");
+        AppendMenuW(d, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdDriverInstall, L"Install the USB driver only...");
+        AppendMenuW(d, MF_STRING | (g_driverJob ? MF_GRAYED : 0), kCmdDriverRemove, L"Remove the USB driver only...");
+        AppendMenuW(m, MF_POPUP, reinterpret_cast<UINT_PTR>(d), L"SSL controllers");
     }
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, kCmdQuit, L"Quit (stops the bridge)");
@@ -584,6 +638,30 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         g_paused = false;
         const bool remove = wp == 1;
         const long long code = static_cast<long long>(lp);
+        const Handover handover = g_handover;
+        g_handover = Handover::None;
+        if (handover == Handover::ToSsl) {
+            // Back to SSL 360: on success Cubase-Sixty quits (Start with Windows is off already); else it carries on.
+            std::wstring text;
+            if (code == 0)
+                text = L"The controllers are SSL 360's again.\n\n" + widenUtf8(g_handoverReport) +
+                       L"\nNow: unplug and replug the controllers, start SSL 360 (reinstall it if it does not see them), and set "
+                       L"the UF8's layer to Cubase there (SSL's UF8 user guide, Cubase/Nuendo). Cubase-Sixty quits now.\n\n"
+                       L"To come back: start Cubase-Sixty from the Start menu, then SSL controllers > Use them with Cubase-Sixty again.";
+            else {
+                setAutostart(true);
+                text = std::wstring(code == -1 ? L"Cancelled at the Windows permission prompt: the USB driver is still Cubase-Sixty's."
+                                               : L"Removing the USB driver failed (the reason is in %TEMP%\\rea_sixty_winusb_uninstall.log).") +
+                       L"\n\nCubase-Sixty carries on." + (g_handoverReport.empty() ? std::wstring()
+                       : L" In Cubase's preferences: " + widenUtf8(g_handoverReport) + L"(Settings > Setup sets it back for Cubase-Sixty.)");
+            }
+            MessageBoxW(nullptr, text.c_str(), L"Cubase-Sixty: give the controllers back to SSL 360", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
+            if (code == 0) { PostMessageW(h, WM_COMMAND, kCmdQuit, 0); return 0; }
+            g_gaveUp = false;
+            g_restarts.clear();
+            startBridge();
+            return 0;
+        }
         g_gaveUp = false;
         g_restarts.clear();
         startBridge();
@@ -595,6 +673,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         else if (code == -2) text = L"The script could not be started.";
         else text = (remove ? L"Removing the driver failed. " : L"Installing the driver failed. ") + std::wstring(L"The reason is in %TEMP%\\") + logName + L".";
         MessageBoxW(nullptr, text.c_str(), L"Cubase-Sixty: USB driver", MB_OK | (code == 0 ? MB_ICONINFORMATION : MB_ICONWARNING) | MB_SETFOREGROUND);
+        if (handover == Handover::ToSixty && code == 0) setupCubaseInteractive(true);   // then Cubase's settings, after asking
         return 0;
     }
     case WM_TIMER:
@@ -637,13 +716,56 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                   L"Cubase-Sixty (and Rea-Sixty, which uses the same driver) will no longer see the controllers.\n"
                   L"Windows asks for administrator permission. Afterwards, unplug and replug the controllers.\n\nGo on?"
                 : L"This installs the WinUSB driver for the SSL UF8, UC1 and UF1, so that Cubase-Sixty can use them.\n\n"
-                  L"Have the controllers plugged in and switched on now. SSL 360 will no longer see them (the USB driver sub menu "
+                  L"Have the controllers plugged in and switched on now. SSL 360 will no longer see them (the SSL controllers sub menu "
                   L"gives them back).\nWindows asks for administrator permission. Afterwards, unplug and replug the controllers.\n\nGo on?";
             if (MessageBoxW(nullptr, text, L"Cubase-Sixty: USB driver", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) break;
             g_paused = true;   // the bridge lets go of the devices meanwhile, and is not started again until the script is done
             stopBridge();
             updateIcon();
             runDriverScript(remove);
+            break;
+        }
+        case kCmdToSsl: {
+            namespace cst = cs::cubaseSetup;
+            const wchar_t* title = L"Cubase-Sixty: give the controllers back to SSL 360";
+            const std::string planned = cst::plannedSsl(cst::inspect());
+            const std::wstring ask =
+                L"This gives the SSL controllers back to SSL 360:\n\n"
+                L"1. Cubase-Sixty's USB driver is removed (Windows asks for administrator permission).\n"
+                L"2. Cubase's Mackie Control device is set to SSL 360's port, as SSL 360 needs it:\n" +
+                (planned.empty() ? std::wstring(L"  (it is already, or there is nothing to change)\n") : widenUtf8(planned)) +
+                L"   Cubase must be closed; a copy of its preferences file is kept.\n"
+                L"3. Start with Windows is switched off.\n"
+                L"4. Cubase-Sixty quits.\n\n"
+                L"Its settings, favourites and Cubase scripts stay, so you can come back at any time. Go on?";
+            if (MessageBoxW(nullptr, ask.c_str(), title, MB_OKCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND) != IDOK) break;
+            g_handoverReport.clear();
+            if (!planned.empty()) {
+                if (!cubaseClosedForSetup(title)) break;
+                g_handoverReport = cst::applySsl();
+            }
+            setAutostart(false);
+            g_handover = Handover::ToSsl;
+            g_paused = true;
+            stopBridge();
+            updateIcon();
+            runDriverScript(true);
+            break;
+        }
+        case kCmdToSixty: {
+            const wchar_t* ask =
+                L"This takes the SSL controllers for Cubase-Sixty again:\n\n"
+                L"1. Quit SSL 360 first. Have the controllers plugged in and switched on.\n"
+                L"2. Cubase-Sixty's USB driver is installed (Windows asks for administrator permission); SSL 360 no longer sees them.\n"
+                L"3. Cubase's settings for Cubase-Sixty: you see the changes first and say yes or no.\n"
+                L"4. Start with Windows is switched on.\n\nGo on?";
+            if (MessageBoxW(nullptr, ask, L"Cubase-Sixty: use the controllers again", MB_OKCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND) != IDOK) break;
+            setAutostart(true);
+            g_handover = Handover::ToSixty;
+            g_paused = true;
+            stopBridge();
+            updateIcon();
+            runDriverScript(false);
             break;
         }
         case kCmdQuit:
@@ -686,33 +808,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     }
     // --setup-cubase (the installer's "Set up Cubase" task, 19.11.2026): shows what it would change in Cubase's
     // preferences and changes it only on Yes (with Cubase closed). Nothing to change: says nothing.
-    if (cmdLine && wcsstr(cmdLine, L"--setup-cubase")) {
-        namespace cst = cs::cubaseSetup;
-        const auto widen = [](const std::string& s) {
-            std::wstring w(MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), nullptr, 0), L'\0');
-            MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), int(w.size()));
-            return w;
-        };
-        const auto folders = cst::inspect();
-        if (folders.empty()) {
-            MessageBoxW(nullptr, L"Cubase's preferences were not found, so its settings for Cubase-Sixty could not be checked.\n\n"
-                        L"Start Cubase once, quit it, then open Cubase-Sixty's Settings page (click the tray icon) > Setup.",
-                        L"Cubase-Sixty: set up Cubase", MB_OK | MB_ICONINFORMATION);
-            return 0;
-        }
-        const std::string planned = cst::plannedChanges(folders);
-        if (planned.empty()) return 0;
-        const std::wstring ask = L"Cubase-Sixty would make these changes in Cubase's preferences:\n\n" + widen(planned) +
-            L"\nA copy of each preferences file is kept beside it, as \"Defaults (before Cubase-Sixty).xml\".\n\n"
-            L"Make these changes now? (No: nothing is changed. You can do it later on the Settings page, Setup, or by hand "
-            L"as the user guide describes.)";
-        if (MessageBoxW(nullptr, ask.c_str(), L"Cubase-Sixty: set up Cubase", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1) != IDYES) return 0;
-        while (cst::cubaseRunning())
-            if (MessageBoxW(nullptr, L"Cubase is running. Close it, then click Retry. (Cubase writes these settings itself when it quits.)",
-                            L"Cubase-Sixty: set up Cubase", MB_RETRYCANCEL | MB_ICONWARNING) != IDRETRY) return 0;
-        MessageBoxW(nullptr, widen(cst::apply()).c_str(), L"Cubase-Sixty: set up Cubase", MB_OK | MB_ICONINFORMATION);
-        return 0;
-    }
+    if (cmdLine && wcsstr(cmdLine, L"--setup-cubase")) { setupCubaseInteractive(false); return 0; }
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\CubaseSixtyTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   // already running
 
