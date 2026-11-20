@@ -105,6 +105,7 @@ Type: filesandordirs; Name: "{app}\logs"
 Type: files; Name: "{app}\level-curve.txt"
 Type: files; Name: "{app}\fader-0db.txt"
 Type: files; Name: "{app}\uf8-*-last-view.txt"
+Type: files; Name: "{app}\*.old"
 
 [Code]
 // The virtual MIDI driver (teVirtualMIDI) makes the bridge's ports. It comes with loopMIDI, and with SSL 360.
@@ -224,6 +225,54 @@ begin
   end;
 end;
 
+// True when a program file cannot be opened for writing: a copy of the program still has it loaded.
+function FileInUse(path: String): Boolean;
+var f: TFileStream;
+begin
+  Result := False;
+  try
+    f := TFileStream.Create(path, $42);   // (fmOpenReadWrite or fmShareDenyNone)
+    f.Free;
+  except
+    Result := True;
+  end;
+end;
+
+// A copy stuck while exiting keeps its program files loaded (20.11.2026: one thread left inside Windows, which nothing
+// could end before a restart, not even taskkill). Such files cannot be replaced or deleted, but they can be renamed:
+// they are moved aside ("<name>.old"), the new ones are installed, and the tray app removes the old ones once they are
+// free. Set-aside files from an earlier time are removed here first.
+procedure MoveInUseAside(dir: String);
+var rec: TFindRec; path, aside, ext: String; n: Integer;
+begin
+  dir := AddBackslash(dir);
+  if FindFirst(dir + '*.old', rec) then
+    try
+      repeat DeleteFile(dir + rec.Name); until not FindNext(rec);
+    finally
+      FindClose(rec);
+    end;
+  if FindFirst(dir + '*.*', rec) then
+    try
+      repeat
+        path := dir + rec.Name;
+        ext := Lowercase(ExtractFileExt(path));
+        if ((rec.Attributes and $10) = 0) and ((ext = '.exe') or (ext = '.dll')) and FileInUse(path) then begin
+          aside := path + '.old';
+          n := 1;
+          while FileExists(aside) do begin
+            aside := path + '.' + IntToStr(n) + '.old';
+            n := n + 1;
+          end;
+          if RenameFile(path, aside) then Log('In use, moved aside: ' + path + ' -> ' + aside)
+          else Log('In use, could not be moved aside: ' + path);
+        end;
+      until not FindNext(rec);
+    finally
+      FindClose(rec);
+    end;
+end;
+
 // A running copy is asked to quit (it stops the bridge, which blanks the surfaces) before files are replaced.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var code: Integer; exe: String;
@@ -243,6 +292,7 @@ begin
   exe := ExpandConstant('{app}\CubaseSixty.exe');
   if FileExists(exe) then Exec(exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, code);
   EndProgramsIn(ExpandConstant('{app}'));   // (whatever still runs from the program folder)
+  MoveInUseAside(ExpandConstant('{app}'));   // (what a copy stuck while exiting still holds)
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

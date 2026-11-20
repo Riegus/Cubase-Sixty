@@ -504,7 +504,9 @@ void trayLog(const std::wstring& line)
     if (!f) return;
     SYSTEMTIME t;
     GetLocalTime(&t);
-    fwprintf(f, L"%04d-%02d-%02d %02d:%02d:%02d %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, line.c_str());
+    // The process id on each line (20.11.2026: a copy stuck while exiting held the program files; which quit was it?).
+    fwprintf(f, L"%04d-%02d-%02d %02d:%02d:%02d [%lu] %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond,
+             GetCurrentProcessId(), line.c_str());
     fclose(f);
 }
 
@@ -907,10 +909,29 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcW(h, msg, wp, lp);
 }
 
+// Files the installer moved aside because a copy stuck while exiting still held them ("<name>.old"; 20.11.2026):
+// removed once nothing holds them any more.
+void removeSetAside()
+{
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(g_exeDir, ec)) {
+        if (e.path().extension() != L".old") continue;
+        std::error_code rm;
+        fs::remove(e.path(), rm);
+        const std::wstring name = e.path().filename().wstring();
+        trayLog(rm ? L"could not remove " + name + L" (error " + std::to_wstring(rm.value()) + L"); tried again at the next start"
+                   : L"removed " + name);
+    }
+}
+
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
 {
+    wchar_t self[MAX_PATH];
+    GetModuleFileNameW(nullptr, self, MAX_PATH);
+    g_exeDir = fs::path(self).parent_path();
+    g_logsDir = logsDirFor(g_exeDir);
     // --quit (the installer, before replacing or removing files): asks the running copy to quit, as its menu's Quit
     // does (the bridge stops and blanks the surfaces), and waits until it has (10 s at most).
     if (cmdLine && wcsstr(cmdLine, L"--quit")) {
@@ -918,8 +939,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
             DWORD pid = 0;
             GetWindowThreadProcessId(running, &pid);
             HANDLE proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
+            trayLog(L"--quit: asking " + std::to_wstring(pid) + L" to quit");
             PostMessageW(running, WM_COMMAND, kCmdQuit, 0);
-            if (proc) { WaitForSingleObject(proc, 10000); CloseHandle(proc); }
+            if (proc) {
+                const DWORD r = WaitForSingleObject(proc, 10000);
+                CloseHandle(proc);
+                trayLog(r == WAIT_OBJECT_0 ? L"--quit: " + std::to_wstring(pid) + L" has ended"
+                                           : L"--quit: " + std::to_wstring(pid) + L" still running after 10 s");
+            }
+        } else {
+            trayLog(L"--quit: no running copy found");
         }
         return 0;
     }
@@ -936,11 +965,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\CubaseSixtyTray");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;   // already running
 
-    wchar_t self[MAX_PATH];
-    GetModuleFileNameW(nullptr, self, MAX_PATH);
-    g_exeDir = fs::path(self).parent_path();
     g_bridgeExe = g_exeDir / L"cubase_sixty_bridge.exe";
-    g_logsDir = logsDirFor(g_exeDir);
+    trayLog(L"started");
+    removeSetAside();
     // Arguments are passed on to the bridge (e.g. --loopmidi, --trace).
     if (cmdLine && *cmdLine) g_bridgeArgs = std::wstring(L" ") + cmdLine;
     g_loopMidi = g_bridgeArgs.find(L"--loopmidi") != std::wstring::npos;
