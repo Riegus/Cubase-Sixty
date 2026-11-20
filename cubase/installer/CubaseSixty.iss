@@ -184,6 +184,42 @@ begin
   end;
 end;
 
+// What still runs from folder dir (20.11.2026: after --quit, Windows still found files in use): its process ids.
+function StringChange2(s, from, into: String): String;
+begin
+  Result := s;
+  StringChangeEx(Result, from, into, True);
+end;
+
+function ProgramsIn(dir: String): Variant;
+var locator, service: Variant;
+begin
+  locator := CreateOleObject('WbemScripting.SWbemLocator');
+  service := locator.ConnectServer('.', 'root\CIMV2');
+  Result := service.ExecQuery('SELECT ProcessId FROM Win32_Process WHERE ExecutablePath LIKE ''' +
+                              StringChange2(AddBackslash(dir), '\', '\\') + '%''');
+end;
+
+// Waits up to 10 s for them to go by themselves, then ends them.
+procedure EndProgramsIn(dir: String);
+var i, code: Integer; list, item: Variant;
+begin
+  try
+    for i := 1 to 20 do begin
+      list := ProgramsIn(dir);
+      if list.Count = 0 then exit;
+      Sleep(500);
+    end;
+    list := ProgramsIn(dir);
+    for i := 0 to list.Count - 1 do begin
+      item := list.ItemIndex(i);
+      Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /PID ' + IntToStr(item.ProcessId), '', SW_HIDE, ewWaitUntilTerminated, code);
+    end;
+    Sleep(500);
+  except
+  end;
+end;
+
 // A running copy is asked to quit (it stops the bridge, which blanks the surfaces) before files are replaced.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var code: Integer; exe: String;
@@ -202,6 +238,7 @@ begin
       ShellExec('open', 'https://www.tobias-erichsen.de/software/loopmidi.html', '', '', SW_SHOWNORMAL, ewNoWait, code);
   exe := ExpandConstant('{app}\CubaseSixty.exe');
   if FileExists(exe) then Exec(exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, code);
+  EndProgramsIn(ExpandConstant('{app}'));   // (whatever still runs from the program folder)
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

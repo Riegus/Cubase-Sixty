@@ -775,7 +775,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             }
             MessageBoxW(nullptr, text.c_str(), L"Cubase-Sixty: give the controllers back to SSL 360", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
             if (code == 0) {
-                if (sslThere) ShellExecuteW(nullptr, L"open", pf, nullptr, nullptr, SW_SHOWNORMAL);
+                if (sslThere) ShellExecuteW(nullptr, L"open", pf, nullptr, fs::path(pf).parent_path().c_str(), SW_SHOWNORMAL);   // (in its own folder: not ours, which the installer replaces)
                 PostMessageW(h, WM_COMMAND, kCmdQuit, 0);
                 return 0;
             }
