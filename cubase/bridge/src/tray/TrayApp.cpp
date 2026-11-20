@@ -719,10 +719,17 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (handover == Handover::ToSsl) {
             // Back to SSL 360: on success Cubase-Sixty quits (Start with Windows is off already); else it carries on.
             std::wstring text;
+            // SSL 360's window program (20.11.2026: the controllers came back to SSL 360 only once it was started).
+            wchar_t pf[MAX_PATH] = L"";
+            ExpandEnvironmentStringsW(L"%ProgramFiles%\\Solid State Logic\\SSL 360\\SSL360Gui.exe", pf, MAX_PATH);
+            std::error_code ec;
+            const bool sslThere = fs::exists(fs::path(pf), ec);
             if (code == 0)
                 text = L"The controllers are SSL 360's again.\n\n" + widenUtf8(g_handoverReport) +
-                       L"\nNow: unplug and replug the controllers, start SSL 360 (reinstall it if it does not see them), and set "
-                       L"the UF8's layer to Cubase there (SSL's UF8 user guide, Cubase/Nuendo). Cubase-Sixty quits now.\n\n"
+                       L"\nNow unplug and replug the controllers, then click OK: " +
+                       (sslThere ? L"Cubase-Sixty starts SSL 360 and quits. " : L"Cubase-Sixty quits; start SSL 360 (it was not found where it is usually installed). ") +
+                       L"In SSL 360, set the UF8's layer to Cubase (SSL's UF8 user guide, Cubase/Nuendo); if SSL 360 does not see the "
+                       L"controllers, run its installer again.\n\n"
                        L"To come back: start Cubase-Sixty from the Start menu, then SSL controllers > Use them with Cubase-Sixty again.";
             else {
                 setAutostart(true);
@@ -732,7 +739,11 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                        : L" In Cubase's preferences: " + widenUtf8(g_handoverReport) + L"(Settings > Setup sets it back for Cubase-Sixty.)");
             }
             MessageBoxW(nullptr, text.c_str(), L"Cubase-Sixty: give the controllers back to SSL 360", MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
-            if (code == 0) { PostMessageW(h, WM_COMMAND, kCmdQuit, 0); return 0; }
+            if (code == 0) {
+                if (sslThere) ShellExecuteW(nullptr, L"open", pf, nullptr, nullptr, SW_SHOWNORMAL);
+                PostMessageW(h, WM_COMMAND, kCmdQuit, 0);
+                return 0;
+            }
             g_gaveUp = false;
             g_restarts.clear();
             startBridge();

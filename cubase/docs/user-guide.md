@@ -617,8 +617,9 @@ and asks first:
    preferences file is kept; a Mackie Control device of another controller is left alone);
 3. switches Start with Windows off, and quits.
 
-Then unplug and replug the controllers, start SSL 360 (run its installer again if it does not see them) and set the
-UF8's layer to Cubase there, as SSL's UF8 user guide describes for Cubase. Cubase-Sixty's settings, favourites and
+At the end it asks you to unplug and replug the controllers, then starts SSL 360 when you click OK. Set the UF8's
+layer to Cubase there, as SSL's UF8 user guide describes for Cubase (run SSL 360's installer again if it does not see
+the controllers). Cubase-Sixty's settings, favourites and
 scripts stay.
 
 **To take them again:** quit SSL 360, start Cubase-Sixty from the Start menu, and choose tray menu **SSL controllers >
