@@ -370,8 +370,8 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 view the UF1 starts in is a setting.
 
 **DAW** — the everyday view. The V-pots are the selected track's **sends 1–4**: turn for the level, push to switch
-the send on / off. The **5–8** key puts them on sends 5–8. The small display shows the send and its level while you
-turn.
+the send on / off. The **5–8** key puts them on sends 5–8. The small display shows the send, where it goes and its level while you
+turn ("S1 Roo Rvb -6.02dB"; "S1 -" for an empty send).
 
 **The soft keys in DAW and SENDS** (the four keys under the display) jump to the **first, previous, next and last
 marker**, labelled. (A marker exactly at the project start is passed over by First Marker, which then lands on the
