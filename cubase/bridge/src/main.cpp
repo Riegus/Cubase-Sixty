@@ -374,6 +374,8 @@ std::string valueLineFor(int s)
             while (at < dest.size() && dest[at] == ' ') ++at;
             dest.erase(0, at);
         }
+        // An empty slot is named by its number alone ("1", "2"): no send.
+        else if (at > 0 && dest.find_first_not_of(' ', at) == std::string::npos) dest.clear();
         for (char& c : dest) if (c == ' ') c = '.';
         left = "S" + std::to_string(send + 1) + " " + (dest.empty() ? std::string("-") : dest);
     } else left = "Pan";
