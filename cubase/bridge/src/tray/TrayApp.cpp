@@ -892,6 +892,7 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             break;
         }
         case kCmdQuit:
+            trayLog(L"quit asked");
             g_quitting = true;
             stopBridge();
             Shell_NotifyIconW(NIM_DELETE, &g_nid);
@@ -985,9 +986,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+    // Quitting, step by step in tray.log (20.11.2026: a copy whose window was gone kept running and held the program
+    // folder, so the installer could not replace its files). Whatever hangs is cut short after 8 s.
+    trayLog(L"quitting: stopping the bridge");
+    std::thread([] {
+        Sleep(8000);
+        trayLog(L"quitting took longer than 8 s: ended");
+        ExitProcess(0);
+    }).detach();
     stopBridge();
+    trayLog(L"quitting: closing the MIDI ports");
     closePorts();   // (Cubase loses them now: the tray app is quitting)
     for (HICON i : g_icons) DestroyIcon(i);
     if (single) CloseHandle(single);
-    return 0;
+    trayLog(L"quit");
+    ExitProcess(0);   // (not waiting for any thread left)
 }
