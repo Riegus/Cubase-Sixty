@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdlib>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <csignal>
@@ -363,6 +364,17 @@ std::string valueLineFor(int s)
     if (send >= 0 && !g_routeSelSends) {
         std::string dest;
         { std::lock_guard<std::mutex> lk(g_sendDestMx); dest = g_sendDest[size_t(s)][size_t(send)]; }
+        // Cubase's title carries the slot number ("1- Roo Rvb"): taken off. A space in the name is shown as a dot: the
+        // UF8 takes the first space after about the tenth character for the start of the value and draws the rest in
+        // the value's colour ("Roo" white, "Rvb" yellow; 20.11.2026).
+        size_t at = 0;
+        while (at < dest.size() && std::isdigit(static_cast<unsigned char>(dest[at]))) ++at;
+        if (at > 0 && at < dest.size() && dest[at] == '-') {
+            ++at;
+            while (at < dest.size() && dest[at] == ' ') ++at;
+            dest.erase(0, at);
+        }
+        for (char& c : dest) if (c == ' ') c = '.';
         left = "S" + std::to_string(send + 1) + " " + (dest.empty() ? std::string("-") : dest);
     } else left = "Pan";
     if (right.size() > 15) right.resize(15);
