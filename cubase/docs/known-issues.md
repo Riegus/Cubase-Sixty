@@ -4,6 +4,17 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## Bridge
 
+- **Open (20.11.2026): with Windows MIDI Services (MidiSrv) running, a quitting tray app never ends.** It logs
+  "quit" (its own work done, ports closed) and stays with one thread inside Windows that nothing ends before a
+  restart: not taskkill, not a MidiSrv restart. With MidiSrv stopped it ends at once (tested: "has ended"), so it is
+  the new MIDI stack with the virtual MIDI driver (Microsoft lists teVirtualMIDI ports among those it has trouble
+  with, and recommends its own loopback ports instead). Every quit did it, also after a PC restart. A stuck copy
+  holds nothing else (the next copy makes its ports and works), but it keeps its program files loaded, so the
+  installer stopped at "DeleteFile failed; code 5". Worked around: the installer moves files still in use aside
+  (`<name>.old`, allowed for a loaded file) and installs the new ones; the tray app deletes the `.old` files once they
+  are free (after the PC's next restart). Tested: two installs in a row. tray.log has the process id on each line
+  and what `--quit` saw. The fix: Windows MIDI Services' own loopback ports where the service runs
+  (missing-features.md).
 - **Fixed (19.11.2026): installing with Cubase running left the surfaces dead.** The installer quits and restarts
   the tray app, which replaces the MIDI ports; Cubase half reconnected, and switched its scripts off 4 s after a
   project opened (the script console: "inactive (no project)" with the project open; nothing more reached the bridge).
