@@ -68,7 +68,8 @@ State Logic; Cubase is a trademark of Steinberg Media Technologies.
     - **Install the USB driver for the SSL controllers**: ticked by itself when it is needed. It asks for
       administrator permission once. This moves the controllers from SSL's own USB driver to Windows' WinUSB driver,
       which Cubase-Sixty needs; from then on SSL 360 does not see them.
-5. If the driver was installed: **unplug and replug the controllers** when the installer has finished.
+5. If the driver was installed and the controllers do not come alive within a few seconds, **unplug and replug
+   them**.
 
 Cubase-Sixty now sits in the notification area (the tray) as a small mixing-surface icon, and the controllers show
 "Waiting for Cubase".
@@ -617,7 +618,7 @@ and asks first:
    preferences file is kept; a Mackie Control device of another controller is left alone);
 3. switches Start with Windows off, and quits.
 
-At the end it asks you to unplug and replug the controllers, then starts SSL 360 when you click OK. Set the UF8's
+At the end it starts SSL 360 when you click OK (if the controllers do not reach it, unplug and replug them). Set the UF8's
 layer to Cubase there, as SSL's UF8 user guide describes for Cubase (run SSL 360's installer again if it does not see
 the controllers). Cubase-Sixty's settings, favourites and
 scripts stay.
@@ -625,7 +626,7 @@ scripts stay.
 **To take them again:** start Cubase-Sixty from the Start menu, and choose tray menu **SSL controllers > Use them with
 Cubase-Sixty again**, with the controllers plugged in. It closes SSL 360, installs the USB driver (administrator
 permission), switches Start with Windows on, and then offers Cubase's settings for Cubase-Sixty (you see the changes
-first). Unplug and replug the controllers.
+first). If the controllers do not come alive, unplug and replug them.
 
 The same menu has **Install / Remove the USB driver only**, for when you want only that. Rea-Sixty uses the same
 driver: with it installed, both Rea-Sixty and Cubase-Sixty see the controllers (one at a time: quit the one before

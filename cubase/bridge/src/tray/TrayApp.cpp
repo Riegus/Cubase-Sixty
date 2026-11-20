@@ -761,8 +761,8 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             const bool sslThere = fs::exists(fs::path(pf), ec);
             if (code == 0)
                 text = L"The controllers are SSL 360's again.\n\n" + widenUtf8(g_handoverReport) +
-                       L"\nNow unplug and replug the controllers, then click OK: " +
-                       (sslThere ? L"Cubase-Sixty starts SSL 360 and quits. " : L"Cubase-Sixty quits; start SSL 360 (it was not found where it is usually installed). ") +
+                       L"\nClick OK: " +
+                       (sslThere ? L"Cubase-Sixty starts SSL 360 and quits (if the controllers do not reach it, unplug and replug them). " : L"Cubase-Sixty quits; start SSL 360 (it was not found where it is usually installed). ") +
                        L"In SSL 360, set the UF8's layer to Cubase (SSL's UF8 user guide, Cubase/Nuendo); if SSL 360 does not see the "
                        L"controllers, run its installer again.\n\n"
                        L"To come back: start Cubase-Sixty from the Start menu, then SSL controllers > Use them with Cubase-Sixty again.";
@@ -789,8 +789,8 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         startBridge();
         const std::wstring logName = remove ? L"rea_sixty_winusb_uninstall.log" : L"rea_sixty_winusb_install.log";
         std::wstring text;
-        if (code == 0) text = remove ? L"The driver is removed. Unplug and replug the controllers; reinstall SSL 360 if it does not see them."
-                                     : L"The driver is installed. Unplug and replug the controllers now.";
+        if (code == 0) text = remove ? L"The driver is removed. If SSL 360 does not see the controllers, unplug and replug them, or reinstall SSL 360."
+                                     : L"The driver is installed. If the controllers do not come alive within a few seconds, unplug and replug them.";
         else if (code == -1) text = L"Cancelled at the Windows permission prompt. Nothing was changed.";
         else if (code == -2) text = L"The script could not be started.";
         else text = (remove ? L"Removing the driver failed. " : L"Installing the driver failed. ") + std::wstring(L"The reason is in %TEMP%\\") + logName + L".";
@@ -836,10 +836,10 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             const wchar_t* text = remove
                 ? L"This removes the WinUSB driver for the SSL UF8, UC1 and UF1, so that SSL 360 can use them again.\n\n"
                   L"Cubase-Sixty (and Rea-Sixty, which uses the same driver) will no longer see the controllers.\n"
-                  L"Windows asks for administrator permission. Afterwards, unplug and replug the controllers.\n\nGo on?"
+                  L"Windows asks for administrator permission.\n\nGo on?"
                 : L"This installs the WinUSB driver for the SSL UF8, UC1 and UF1, so that Cubase-Sixty can use them.\n\n"
                   L"Have the controllers plugged in and switched on now. SSL 360 will no longer see them (the SSL controllers sub menu "
-                  L"gives them back).\nWindows asks for administrator permission. Afterwards, unplug and replug the controllers.\n\nGo on?";
+                  L"gives them back).\nWindows asks for administrator permission.\n\nGo on?";
             if (MessageBoxW(nullptr, text, L"Cubase-Sixty: USB driver", MB_OKCANCEL | MB_ICONINFORMATION | MB_SETFOREGROUND) != IDOK) break;
             g_paused = true;   // the bridge lets go of the devices meanwhile, and is not started again until the script is done
             stopBridge();

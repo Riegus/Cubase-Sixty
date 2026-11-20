@@ -221,7 +221,7 @@ function setupBody(s) {
   card.append(setupRow("ok", "Virtual MIDI driver", "Found: Cubase-Sixty's MIDI ports are there."));
   const found = [["UF8", st.uf8], ["UF1", st.uf1], ["UC1", st.uc1]].filter(([, v]) => v === "connected").map(([n]) => n);
   card.append(found.length ? setupRow("ok", "SSL controllers", found.join(", ") + " connected.")
-    : setupRow("bad", "SSL controllers", "None found. With the controllers plugged in and switched on: tray menu, SSL controllers > Use them with Cubase-Sixty again, then unplug and replug them. Is SSL 360 running? Quit it."));
+    : setupRow("bad", "SSL controllers", "None found. With the controllers plugged in and switched on: tray menu, SSL controllers > Use them with Cubase-Sixty again, (unplug and replug them if they do not come alive). Is SSL 360 running? Quit it."));
   if (!cs.folders.length)
     card.append(setupRow("warn", "Cubase's settings", "Cubase's preferences were not found. Start Cubase once and quit it, then look here again."));
   for (const f of cs.folders) {
