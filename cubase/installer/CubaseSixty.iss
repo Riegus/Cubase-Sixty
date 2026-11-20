@@ -27,6 +27,10 @@ DefaultGroupName=Cubase-Sixty
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
+; Cubase-Sixty is closed by PrepareToInstall (--quit, then whatever still runs from {app} ended): Windows' own check
+; (the Restart Manager page listing "Cubase-Sixty" twice) came first and only confused (20.11.2026).
+CloseApplications=no
+RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutDir}
