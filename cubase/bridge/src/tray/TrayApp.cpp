@@ -182,6 +182,41 @@ void endLeftoverBridges()
     CloseHandle(snap);
 }
 
+// SSL 360 closed before Cubase-Sixty takes the controllers (20.11.2026): its window (SSL360Gui.exe) asked to close,
+// then ended after 3 s if still there; its background program (SSL360Core.exe) ended. Returns whether any was running.
+BOOL CALLBACK closeWindowsOf(HWND w, LPARAM pid)
+{
+    DWORD p = 0;
+    GetWindowThreadProcessId(w, &p);
+    if (p == DWORD(pid) && IsWindowVisible(w)) PostMessageW(w, WM_CLOSE, 0, 0);
+    return TRUE;
+}
+bool closeSsl360()
+{
+    bool any = false;
+    for (const wchar_t* exe : {L"SSL360Gui.exe", L"SSL360Core.exe"}) {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE) continue;
+        PROCESSENTRY32W pe{};
+        pe.dwSize = sizeof pe;
+        for (BOOL ok = Process32FirstW(snap, &pe); ok; ok = Process32NextW(snap, &pe)) {
+            if (_wcsicmp(pe.szExeFile, exe) != 0) continue;
+            any = true;
+            HANDLE h = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, pe.th32ProcessID);
+            if (!h) continue;
+            if (_wcsicmp(exe, L"SSL360Gui.exe") == 0) {
+                EnumWindows(closeWindowsOf, LPARAM(pe.th32ProcessID));
+                if (WaitForSingleObject(h, 3000) == WAIT_OBJECT_0) { CloseHandle(h); continue; }
+            }
+            TerminateProcess(h, 0);
+            WaitForSingleObject(h, 3000);
+            CloseHandle(h);
+        }
+        CloseHandle(snap);
+    }
+    return any;
+}
+
 // Why the ports could not be made ("" = they were): shown once, instead of restarting a bridge that cannot run without
 // them (20.11.2026: it restarted again and again, with "The bridge stopped and was started again" each time).
 std::wstring g_portsProblem;
@@ -842,11 +877,12 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         case kCmdToSixty: {
             const wchar_t* ask =
                 L"This takes the SSL controllers for Cubase-Sixty again:\n\n"
-                L"1. Quit SSL 360 first. Have the controllers plugged in and switched on.\n"
+                L"1. SSL 360 is closed, if it runs. Have the controllers plugged in and switched on.\n"
                 L"2. Cubase-Sixty's USB driver is installed (Windows asks for administrator permission); SSL 360 no longer sees them.\n"
                 L"3. Cubase's settings for Cubase-Sixty: you see the changes first and say yes or no.\n"
                 L"4. Start with Windows is switched on.\n\nGo on?";
             if (MessageBoxW(nullptr, ask, L"Cubase-Sixty: use the controllers again", MB_OKCANCEL | MB_ICONQUESTION | MB_SETFOREGROUND) != IDOK) break;
+            if (closeSsl360()) Sleep(1000);   // (it lets go of the controllers)
             setAutostart(true);
             g_handover = Handover::ToSixty;
             g_paused = true;

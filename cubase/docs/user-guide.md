@@ -622,8 +622,8 @@ layer to Cubase there, as SSL's UF8 user guide describes for Cubase (run SSL 360
 the controllers). Cubase-Sixty's settings, favourites and
 scripts stay.
 
-**To take them again:** quit SSL 360, start Cubase-Sixty from the Start menu, and choose tray menu **SSL controllers >
-Use them with Cubase-Sixty again**, with the controllers plugged in. It installs the USB driver (administrator
+**To take them again:** start Cubase-Sixty from the Start menu, and choose tray menu **SSL controllers > Use them with
+Cubase-Sixty again**, with the controllers plugged in. It closes SSL 360, installs the USB driver (administrator
 permission), switches Start with Windows on, and then offers Cubase's settings for Cubase-Sixty (you see the changes
 first). Unplug and replug the controllers.
 
