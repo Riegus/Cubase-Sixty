@@ -19,6 +19,20 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
   The tray app would make its ports there when the service is present and fall back to teVirtualMIDI when it is not
   (Windows 10, a PC the rollout has not reached). To check first: whether the SDK runtime has to be installed
   separately, and how Cubase 15 lists these ports. Geir's PC has it (the Windows MIDI Service, MidiSrv, running).
+  20.11.2026: moved up. With MidiSrv running, every quit of the tray app hangs inside Windows (known-issues.md,
+  Bridge); these ports would end that. Found so far:
+  - Making ports from a program needs the **runtime and tools**, a separate download from Microsoft (winget
+    `Microsoft.MIDI.SDK`, or github.com/microsoft/MIDI releases); Windows itself has only the service. Not on Geir's
+    PC yet (GitHub was down when tried). The installer would offer it where loopMIDI's page is offered now.
+  - Ports made by a program last until removed or the service restarts (not tied to the program); ports made in the
+    MIDI Settings app last across restarts. Either way the tray app's quit no longer touches a driver.
+  - They come in pairs: what goes out on A comes in on B and back, nothing echoes to the sender. So one pair per
+    surface (five) instead of two ports (ten): new port names, which the scripts' detection, the Cubase setup and the
+    Mackie Control device have to know (the old names kept where loopMIDI is used).
+  - The tray app's replay of Cubase's last values to a restarted bridge stays: it listens on the ports as a second
+    program (multi-client).
+  Next: install the runtime, make one pair in MIDI Settings (A "CS Test (bridge)", B "CS Test"), and see the names
+  in `midi endpoint list` and in Cubase's MIDI Port Setup. The design follows from those names.
 - **Nuendo** (19.11.2026). It has the same MIDI Remote system, but the installer puts the scripts in Cubase's folder
   only, the bridge and the installer recognise Cubase's program only, and the Cubase setup reads Cubase's preferences
   only. A small change (Nuendo's script folder, Nuendo.exe, the "Nuendo <n>_64" preferences), but untested without
