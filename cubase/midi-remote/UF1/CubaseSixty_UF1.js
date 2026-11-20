@@ -245,10 +245,17 @@ deviceDriver.mOnIdle = function (activeDevice) {
 }
 var sendNames = ['', '', '', '', '', '', '', '']
 var sendCells = []
-// Cubase names a send "1- Reverb Vocal": drop the number, and fit the name into the cell's 9-character label
-// zone the way Rea-Sixty does: first drop vowels that do not start a word (from the end), then cut.
+// Cubase names a send "1- Reverb Vocal", and an empty slot by its number alone ("1"; 20.11.2026: the cells and the
+// UF8 showed "1"): the destination, or '' for no send.
+function sendDest(name) {
+	var n = String(name || '')
+	if (/^\s*\d+\s*$/.test(n)) return ''
+	return n.replace(/^\s*\d+\s*-\s*/, '')
+}
+// Fit the name into the cell's 9-character label zone the way Rea-Sixty does: first drop vowels that do not start a
+// word (from the end), then cut.
 function cellName(name) {
-	var n = String(name || '').replace(/^\s*\d+\s*-\s*/, '')
+	var n = sendDest(name)
 	var max = 9
 	if (n.length <= max) return n
 	var chars = n.split('')
@@ -326,7 +333,12 @@ function attachSendFeedback(surfaceValue, number) {
 			var room = Math.max(3, 12 - v.length - 1)
 			text = (title ? String(title).substr(0, room) + ' ' : 'QC' + (number + sendOffset) + ' ') + v
 		} else {
-			text = 'S' + (number + sendOffset) + ' ' + value + (units ? units : (/^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
+			// "S1 Roo Rvb -6.02dB": the send and where it goes (20.11.2026, as the UF8's send view), cut to the value
+			// line's 11 label characters; "S1 -" without a send there.
+			var label = 'S' + (number + sendOffset)
+			var dest = sendDest(sendNames[number - 1 + sendOffset])
+			label += ' ' + (dest ? dest.substr(0, Math.max(1, 11 - label.length - 1)) : '-')
+			text = label + ' ' + value + (units ? units : (/^-?[0-9.]+$/.test(String(value)) ? 'dB' : ''))
 		}
 		if (text === lastText) return
 		lastText = text
