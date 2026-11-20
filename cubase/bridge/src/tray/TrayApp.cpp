@@ -157,18 +157,48 @@ void closePorts()
     g_portsOurs = false;
 }
 
+// Why the ports could not be made ("" = they were): shown once, instead of restarting a bridge that cannot run without
+// them (20.11.2026: it restarted again and again, with "The bridge stopped and was started again" each time).
+std::wstring g_portsProblem;
+void trayLog(const std::wstring& line);
 bool makePorts()
 {
     HMODULE lib = LoadLibraryW(L"teVirtualMIDI64.dll");
-    if (!lib) return false;
+    if (!lib) {
+        g_portsProblem = L"The virtual MIDI driver (teVirtualMIDI) was not found on this PC (Windows error " + std::to_wstring(GetLastError()) +
+                         L"). It comes with loopMIDI (free) and with SSL 360: install loopMIDI, then start Cubase-Sixty again.";
+        trayLog(g_portsProblem);
+        return false;
+    }
     g_vmCreate = reinterpret_cast<FnCreate>(GetProcAddress(lib, "virtualMIDICreatePortEx2"));
     g_vmClose  = reinterpret_cast<FnClose>(GetProcAddress(lib, "virtualMIDIClosePort"));
     g_vmSend   = reinterpret_cast<FnSend>(GetProcAddress(lib, "virtualMIDISendData"));
-    if (!g_vmCreate || !g_vmClose || !g_vmSend) return false;
+    if (!g_vmCreate || !g_vmClose || !g_vmSend) {
+        g_portsProblem = L"The virtual MIDI driver (teVirtualMIDI) on this PC is too old. Install the current loopMIDI, then start Cubase-Sixty again.";
+        trayLog(g_portsProblem);
+        return false;
+    }
     constexpr DWORD kParseRx = 1, kBoth = 12, kMaxSysex = 65535;
     for (const wchar_t* name : kPortNames) {
         VmPort* p = g_vmCreate(name, &loopBack, 0, kMaxSysex, kBoth | kParseRx);
-        if (!p) { closePorts(); return false; }   // all or none
+        if (!p) {   // all or none
+            const DWORD e = GetLastError();
+            const std::wstring port = L"\"" + std::wstring(name) + L"\"";
+            if (e == ERROR_ALREADY_EXISTS)
+                g_portsProblem = L"A MIDI port named " + port + L" exists already: another copy of Cubase-Sixty is running, or loopMIDI has "
+                                 L"ports with Cubase-Sixty's names. Quit the other copy (or delete those ports in loopMIDI), then start Cubase-Sixty again.";
+            else if (e == ERROR_PATH_NOT_FOUND || e == ERROR_FILE_NOT_FOUND || e == ERROR_MOD_NOT_FOUND)
+                g_portsProblem = L"The virtual MIDI driver (teVirtualMIDI) is not installed or not running (Windows error " + std::to_wstring(e) +
+                                 L"), for example after SSL 360 or loopMIDI was removed or reinstalled. Install loopMIDI, restart the PC, then start Cubase-Sixty again.";
+            else if (e == ERROR_REVISION_MISMATCH)
+                g_portsProblem = L"The virtual MIDI driver (teVirtualMIDI) is older than its program files (Windows error 1306). Install the current loopMIDI and restart the PC.";
+            else
+                g_portsProblem = L"The virtual MIDI driver refused to make the port " + port + L" (Windows error " + std::to_wstring(e) +
+                                 L"). Installing the current loopMIDI and restarting the PC usually helps.";
+            trayLog(g_portsProblem);
+            closePorts();
+            return false;
+        }
         g_ports.push_back(p);
         if (wcsstr(name, L"from Cubase")) g_fromPorts.push_back(p);
     }
@@ -384,6 +414,14 @@ void checkBridge()
     g_bridgeRunning = false;
     updateIcon();
     if (g_quitting || g_paused) return;
+    // No ports (the tray app could not make them, and the bridge could not either): restarting cannot help. Said once.
+    if (!g_portsOurs && !g_portsProblem.empty()) {
+        g_gaveUp = true;
+        updateIcon();
+        MessageBoxW(nullptr, (L"Cubase-Sixty cannot run: it could not make its MIDI ports.\n\n" + g_portsProblem).c_str(),
+                    L"Cubase-Sixty", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
+        return;
+    }
     const auto now = std::chrono::steady_clock::now();
     while (!g_restarts.empty() && now - g_restarts.front() > std::chrono::minutes(1)) g_restarts.pop_front();
     if (g_restarts.size() >= 5) {
@@ -395,6 +433,19 @@ void checkBridge()
     }
     g_restarts.push_back(now);
     restartBridge(true);
+}
+
+// The tray app's own few lines: logs\tray.log (why the ports could not be made).
+void trayLog(const std::wstring& line)
+{
+    std::error_code ec;
+    fs::create_directories(g_logsDir, ec);
+    FILE* f = _wfopen((g_logsDir / L"tray.log").c_str(), L"a, ccs=UTF-8");
+    if (!f) return;
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    fwprintf(f, L"%04d-%02d-%02d %02d:%02d:%02d %s\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, line.c_str());
+    fclose(f);
 }
 
 // ---------------------------------------------------------------------------------------------- bridge.log

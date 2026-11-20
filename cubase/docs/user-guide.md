@@ -637,6 +637,7 @@ starting the other).
 | The controllers stay dark, the icon is yellow or green | The USB driver: tray menu **SSL controllers > Use them with Cubase-Sixty again** (or Install the USB driver only), with the controllers plugged in, then replug them. Is SSL 360 running? Quit it. |
 | SSL 360 sees the controllers but Cubase does nothing | See [Going back to SSL 360](#going-back-to-ssl-360): Cubase's Mackie Control device must be on SSL V-MIDI Port 1, and Cubase-Sixty must not be running. |
 | "Waiting for Cubase" although a project is open | Restart Cubase with Cubase-Sixty running. In *Studio > MIDI Remote Manager* the four CubaseSixty devices should be listed and active. |
+| "Cubase-Sixty cannot run: it could not make its MIDI ports" | The message says why (another copy running, ports of the same names in loopMIDI, or the virtual MIDI driver missing or broken); it is also in tray.log (Open logs folder). |
 | Red icon | Right-click > **Start bridge**. If it will not stay up: the virtual MIDI driver may be missing (install loopMIDI), or ports with the names `Cubase-Sixty ...` exist in loopMIDI (delete them there). |
 | An instrument plays when you touch a control | "In 'All MIDI Inputs'" is ticked for a Cubase-Sixty port: Settings > Setup shows it and can fix it (see setup). |
 | SCRUB only nudges | The Mackie Control device is missing: Settings > Setup shows it and can add it (see setup). |
