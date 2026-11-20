@@ -60,7 +60,7 @@ Quick: each view once, a V-pot in each, the CHANNEL encoder.
 
 - Top: track name, number and colour; the small display's value line (pan at rest).
 - Fader with touch; SOLO / CUT / SEL; pan knob (value line "Pan ...").
-- **DAW view**: V-pots = sends 1-4 (5-8 key: 5-8). While turning, the left display shows "S1 -6.02dB" and the bar.
+- **DAW view**: V-pots = sends 1-4 (5-8 key: 5-8). While turning, the left display shows "S1 <destination> -6.02dB" ("S1 -" for an empty slot) and the bar; SENDS cells: no "1" for an empty slot.
   Smooth on fast turns; after stopping, the value matches the MixConsole. Push = send on / off.
 - **SENDS view**: the four cells show the send names and levels at all times; they follow a turn, a mouse change in
   the MixConsole, a track change, 5-8.
