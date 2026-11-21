@@ -34,9 +34,9 @@ public:
     ~MidiOutPort();
     // Returns false (and prints why) if the port could not be created or found.
     bool open(const std::string& name);
-    // False if the message could not be sent (logged). Never throws: a send that fails is tried twice more, 100 ms
-    // apart, then dropped (21.11.2026: right after login, a port Windows had just let the bridge open refused the
-    // first SysEx, "error preparing sysex header", and the uncaught error ended the bridge).
+    // False if the message could not be sent (logged). Never throws: on a failed send the port is opened again (at
+    // most every 2 s) and the message sent once more (21.11.2026: right after login, a port Windows had just let the
+    // bridge open refused every send; the uncaught error ended the bridge, and a fresh open worked).
     bool send(std::vector<unsigned char>& msg);
 private:
     struct Impl;
