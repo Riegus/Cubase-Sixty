@@ -197,21 +197,35 @@ bool MidiOutPort::open(const std::string& name)
     return true;
 }
 
-void MidiOutPort::send(std::vector<unsigned char>& msg)
+bool MidiOutPort::send(std::vector<unsigned char>& msg)
 {
 #ifdef _WIN32
     if (impl_->vp) {
         if (!vm().send(impl_->vp, msg.data(), DWORD(msg.size()))) {
             static std::atomic<int> failures{0};
             if (failures++ < 5) std::fprintf(stderr, "Virtual port send failed (error %lu)\n", GetLastError());
-        } else if (g_trace) {
+            return false;
+        }
+        if (g_trace) {
             static std::atomic<int> sent{0};
             if (sent++ < 5) std::printf("[virtual port out] %zu bytes sent ok\n", msg.size());
         }
-        return;
+        return true;
     }
 #endif
-    if (impl_->rtOpen) impl_->rt.sendMessage(&msg);
+    if (!impl_->rtOpen) return false;
+    for (int attempt = 1;; ++attempt) {
+        try {
+            impl_->rt.sendMessage(&msg);
+            if (attempt > 1) std::printf("MIDI send went through on try %d.\n", attempt);
+            return true;
+        } catch (const RtMidiError& e) {
+            static std::atomic<int> logged{0};
+            if (logged++ < 20) std::fprintf(stderr, "MIDI send failed (try %d, %zu bytes): %s\n", attempt, msg.size(), e.getMessage().c_str());
+            if (attempt == 3) return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

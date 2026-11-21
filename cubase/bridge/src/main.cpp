@@ -1979,8 +1979,7 @@ bool helperSend(const std::vector<unsigned char>& msg)
     if (!g_helperOpen) return false;
     std::vector<unsigned char> copy = msg;
     std::lock_guard<std::mutex> lk(g_helperMx);
-    try { g_helperOut.send(copy); } catch (const RtMidiError& e) { std::fprintf(stderr, "helper out: %s\n", e.getMessage().c_str()); return false; }
-    return true;
+    return g_helperOut.send(copy);
 }
 } // namespace cs
 
