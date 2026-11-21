@@ -437,10 +437,49 @@ bool jogNav(uint8_t id)   // 0x28 up, 0x29 left, 0x2A centre, 0x2B right, 0x2C d
     return true;
 }
 
-// The motor to a 14-bit fader value (as Cubase's pitch bend).
-void motorTo(uint16_t v14)
+// The fader on the UF1's printed dB scale (21.11.2026; until then Cubase's position went straight onto the motor, so
+// Cubase's top, +6.02 dB, sat on the "+12" mark, while the UF8 already placed its faders by dB). As on the UF8 (see
+// kUf8Marks in main.cpp): a track volume goes Cubase position -> dB (levelDbOf) -> the UF1's position for that dB on
+// its scale, and the hand back the same way. Pan (FLIP) and an SSL strip's fader (Strip Mode) stay linear.
+// The marks: each one's position (0..32767) when the fader was set on it by hand, measured on Geir's UF1
+// (21.11.2026, "UF1 fader let go at ..." in bridge.log). About 1 dB higher on the travel than the UF8's scaled. The
+// "+12" one is about the end of the travel; above +6 the hand gives Cubase's top (+6.02 dB) anyway.
+struct Uf1Mark { double db; int pos; };
+constexpr Uf1Mark kUf1Marks[] = {
+    {12, 32696}, {6, 29060}, {0, 25908}, {-5, 22641}, {-10, 19422}, {-20, 14733}, {-30, 11282}, {-40, 7601}, {-60, 4056},
+};
+constexpr double kUf1BottomDb = -100.0;   // below -60 straight on to the bottom
+uint16_t dbToUf1(double db)
 {
-    const uint16_t pos = uf1m::midi14ToPos15(v14);
+    if (db >= kUf1Marks[0].db) return uint16_t(kUf1Marks[0].pos);
+    for (size_t i = 1; i < std::size(kUf1Marks); ++i) {
+        if (db < kUf1Marks[i].db) continue;
+        const auto& a = kUf1Marks[i - 1];
+        const auto& b = kUf1Marks[i];
+        return uint16_t(std::lround(b.pos + (a.pos - b.pos) * (db - b.db) / (a.db - b.db)));
+    }
+    const auto& last = kUf1Marks[std::size(kUf1Marks) - 1];
+    if (db <= kUf1BottomDb) return 0;
+    return uint16_t(std::lround(last.pos * (db - kUf1BottomDb) / (last.db - kUf1BottomDb)));
+}
+double uf1ToDb(int pos)
+{
+    if (pos <= 0) return -200.0;
+    if (pos >= kUf1Marks[0].pos) return kUf1Marks[0].db;
+    for (size_t i = 1; i < std::size(kUf1Marks); ++i) {
+        if (pos < kUf1Marks[i].pos) continue;
+        const auto& a = kUf1Marks[i - 1];
+        const auto& b = kUf1Marks[i];
+        return b.db + (a.db - b.db) * double(pos - b.pos) / double(a.pos - b.pos);
+    }
+    const auto& last = kUf1Marks[std::size(kUf1Marks) - 1];
+    return kUf1BottomDb + (last.db - kUf1BottomDb) * double(pos) / double(last.pos);
+}
+std::atomic<int> g_handPos{-1};   // the hand's last fader position (0..32767), logged when the fader is let go
+
+// The motor to a UF1 position (0..32767).
+void motorPos(uint16_t pos)
+{
     bool first;
     { std::lock_guard<std::mutex> lk(g_engMx); first = !g_engaged; g_engaged = true; }
     if (first) {
@@ -449,6 +488,11 @@ void motorTo(uint16_t v14)
     }
     g_dev.send(::uf1::buildMotorPosition(pos));
 }
+// The motor to a 14-bit fader value (as Cubase's pitch bend), placed linearly (pan, an SSL strip's fader).
+void motorTo(uint16_t v14) { motorPos(uf1m::midi14ToPos15(v14)); }
+// The motor to Cubase's track volume, placed by dB on the scale (or linearly under FLIP, where the fader is the
+// V-pot's parameter).
+void motorToVolume(uint16_t v14) { motorPos(g_flip ? uf1m::midi14ToPos15(v14) : dbToUf1(levelDbOf(v14))); }
 
 void onUf1Event(const ::uf1::InputEvent& ev)
 {
@@ -470,12 +514,19 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             g_dev.sendPriority(::uf1::buildMotorEnable(false));
         }
         note(uf1m::kNoteFaderTouch, ev.pressed);
+        if (!ev.pressed && g_handPos >= 0)
+            std::printf("UF1 fader let go at %d (of 32767) = %.1f dB on the scale\n", g_handPos.load(), uf1ToDb(g_handPos));
         break;
     case K::FaderPosition: {
         if (!g_touched) break;   // otherwise it is only the motor reporting back
-        const uint16_t v = uf1m::pos15ToMidi14(ev.position);
-        if (g_stripFader) plugEvent(6, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F));
-        else sendMidi({0xE0, uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
+        g_handPos = ev.position;
+        if (g_stripFader) {
+            const uint16_t v = uf1m::pos15ToMidi14(ev.position);
+            plugEvent(6, uint8_t((v >> 7) & 0x7F), uint8_t(v & 0x7F));
+        } else {
+            const uint16_t v = g_flip ? uf1m::pos15ToMidi14(ev.position) : uint16_t(std::clamp(levelPosOf(uf1ToDb(ev.position)), 0, 16383));
+            sendMidi({0xE0, uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
+        }
         g_dev.send(::uf1::buildMotorPosition(ev.position));   // keep the target under the hand
         break;
     }
@@ -1652,7 +1703,7 @@ void uf1NoProject(const char* label = "No Proj.")
     valueHome("");
     // The fader to 0 dB (as the UF8's; 13.11.2026, they used to stay where they were). Not into the cache: what
     // Cubase sent before the close goes back when the project opens.
-    if (const int z = fader0dbPos(); z >= 0 && !g_touched) motorTo(uint16_t(z));
+    if (const int z = fader0dbPos(); z >= 0 && !g_touched) motorPos(dbToUf1(0.0));
     // Only "No Proj." on the strip display: no BYPASS label, channel number, plug-in model or V-pot bar.
     g_noProject = true;
     screenText(::uf1::scr::kChSoftKey, "");
@@ -1871,7 +1922,7 @@ void onSysex(const std::vector<unsigned char>& m)
         g_stripFader = m[5] != 0;
         g_stripPan = m.size() >= 8 && m[6] == 1;
         if (g_trace) std::printf("UF1 strip mode: fader on %s\n", g_stripFader ? "the channel strip" : "the track's volume");
-        if (!g_stripFader && g_volPos >= 0 && !g_touched) motorTo(uint16_t(g_volPos.load()));
+        if (!g_stripFader && g_volPos >= 0 && !g_touched) motorToVolume(uint16_t(g_volPos.load()));
     } else if (m[4] == 0x5B && m.size() >= 8) {
         if (g_stripFader && !g_touched) motorTo(uint16_t((m[5] << 7) | m[6]));
     } else if (m[4] == 0x54) {
@@ -2052,14 +2103,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         g_volPos = v;
         if (!g_flip && !g_stripFader && !g_noProject) { std::string t; { std::lock_guard<std::mutex> lk(g_cellMx); t = g_levelNow; } fader0dbSeen(t, v); }
         if (g_touched || g_stripFader) return;
-        const uint16_t pos = uf1m::midi14ToPos15(v);
-        bool first;
-        { std::lock_guard<std::mutex> lk(g_engMx); first = !g_engaged; g_engaged = true; }
-        if (first) {
-            g_dev.send(::uf1::buildMotorPosition(pos));
-            g_dev.send(::uf1::buildMotorEnable(true));
-        }
-        g_dev.send(::uf1::buildMotorPosition(pos));
+        motorToVolume(v);
         return;
     }
     if ((status == 0x90 || status == 0x80 || status == 0xA0)) {

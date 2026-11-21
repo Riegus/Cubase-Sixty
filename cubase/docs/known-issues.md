@@ -78,6 +78,12 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF1
 
+- **Fixed (21.11.2026): the UF1's fader did not match its printed dB scale.** A track at +6.02 dB (Cubase's top) put
+  it on the "+12" mark while the UF8 showed +6: the UF1 still put Cubase's fader position straight onto the motor (the
+  UF8 has placed by dB since 15.11). Now the same way as the UF8: Cubase's position -> dB -> the UF1's position for
+  that dB, and the hand back, with the marks measured on the hardware (`kUf1Marks`, about 1 dB higher on the travel
+  than the UF8's scaled). FLIP and Strip Mode stay linear. Tested both ways. (Neither surface goes past +6.02 dB:
+  that is Cubase's top.)
 - **V-pots not smooth: fixed on wip/uf1-vpot-test (10.11.2026), to be merged after the test checklist.** Cause: a
   MIDI Remote value binding on a send level makes Cubase pause ~0.8 s at a time while the level keeps changing (it
   answered about 1 step in 20); the scripts' own work was not it. The UF1's send V-pots now write and read the send
