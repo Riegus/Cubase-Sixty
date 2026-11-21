@@ -1,6 +1,7 @@
 #include "MidiPorts.h"
 
 #include <atomic>
+#include <mutex>
 #include <chrono>
 #include <thread>
 #include <cstdio>
@@ -167,6 +168,31 @@ bool midiPortsAreVirtual() { return g_anyVirtual; }
 struct MidiOutPort::Impl {
     RtMidiOut rt;
     bool rtOpen = false;
+    std::string name;
+    std::mutex mx;   // (a send and a reopen are not to overlap)
+    std::chrono::steady_clock::time_point nextReopen{};
+    // A fresh open of the same port, at most every 2 s, about 1 s of tries. False if it did not open.
+    bool reopen()
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (now < nextReopen) return false;
+        nextReopen = now + std::chrono::seconds(2);
+        if (rtOpen) { try { rt.closePort(); } catch (const RtMidiError&) {} rtOpen = false; }
+        for (int tries = 1; tries <= 4; ++tries) {
+            const int p = findPortNow(rt, name);
+            if (p >= 0) {
+                try {
+                    rt.openPort(unsigned(p), name);
+                    rtOpen = true;
+                    std::printf("MIDI port \"%s\" opened again (try %d).\n", name.c_str(), tries);
+                    return true;
+                } catch (const RtMidiError&) {}
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        }
+        std::fprintf(stderr, "MIDI port \"%s\" could not be opened again.\n", name.c_str());
+        return false;
+    }
 #ifdef _WIN32
     VmPort* vp = nullptr;
 #endif
@@ -192,6 +218,7 @@ bool MidiOutPort::open(const std::string& name)
                      name.c_str(), GetLastError());
     }
 #endif
+    impl_->name = name;
     if (!openPortRetrying(impl_->rt, name)) return false;
     impl_->rtOpen = true;
     return true;
@@ -213,19 +240,25 @@ bool MidiOutPort::send(std::vector<unsigned char>& msg)
         return true;
     }
 #endif
-    if (!impl_->rtOpen) return false;
-    for (int attempt = 1;; ++attempt) {
+    if (impl_->name.empty()) return false;   // (never opened)
+    std::lock_guard<std::mutex> lk(impl_->mx);
+    // A port opened right after login could refuse every send (21.11.2026: "error preparing sysex header", then
+    // "error sending MIDI message" for each message), while a fresh open of the same port worked: such a port is
+    // opened again and the message sent once more.
+    for (int attempt = 1; attempt <= 2; ++attempt) {
+        if (!impl_->rtOpen && !impl_->reopen()) return false;
         try {
             impl_->rt.sendMessage(&msg);
-            if (attempt > 1) std::printf("MIDI send went through on try %d.\n", attempt);
+            if (attempt > 1) std::printf("MIDI send on \"%s\" went through after opening it again.\n", impl_->name.c_str());
             return true;
         } catch (const RtMidiError& e) {
             static std::atomic<int> logged{0};
-            if (logged++ < 20) std::fprintf(stderr, "MIDI send failed (try %d, %zu bytes): %s\n", attempt, msg.size(), e.getMessage().c_str());
-            if (attempt == 3) return false;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (logged++ < 20)
+                std::fprintf(stderr, "MIDI send on \"%s\" failed (%zu bytes): %s\n", impl_->name.c_str(), msg.size(), e.getMessage().c_str());
+            if (!impl_->reopen()) return false;
         }
     }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
