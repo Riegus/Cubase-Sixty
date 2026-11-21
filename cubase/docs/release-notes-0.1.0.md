@@ -56,7 +56,12 @@ your PC.
 
 Cubase gives controllers less than REAPER does. Among other things, marker names, the global automation mode and
 some plug-in states (A/B, HQ MODE) are out of reach, and a track's colour reaches the displays a little late. A
-second UF8 is not supported yet. The full lists:
+second UF8 is not supported yet.
+
+On Windows 11 with the new Windows MIDI Services, quitting Cubase-Sixty from the tray leaves a copy that only a PC
+restart ends. It holds nothing you need (a new copy starts and works), and updating still works: the installer puts
+the held files aside, and they are removed after the next restart. Moving to Windows' own loopback ports, which ends
+this, is planned once Microsoft's API for them is part of Windows. The full lists:
 [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),
 [what Cubase does not allow](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md),
 [what Rea-Sixty has that Cubase-Sixty does not](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/missing-features.md).

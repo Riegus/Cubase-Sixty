@@ -31,8 +31,18 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
     Mackie Control device have to know (the old names kept where loopMIDI is used).
   - The tray app's replay of Cubase's last values to a restarted bridge stays: it listens on the ports as a second
     program (multi-client).
-  Next: install the runtime, make one pair in MIDI Settings (A "CS Test (bridge)", B "CS Test"), and see the names
-  in `midi endpoint list` and in Cubase's MIDI Port Setup. The design follows from those names.
+  21.11.2026: the separate runtime is gone. Microsoft withdrew the runtime releases (rc-1, rc-3: 404; winget still
+  points there) and now ships "In-box Previews": a Tools package (MIDI Settings, the console, the API files the apps
+  use) and a Transports package, all labelled preview, for Windows 11 25H2 and later. The API itself is meant to come
+  with Windows, but on Geir's Windows 11 26H2 (build 26300.10075) it is not there yet (no Windows.Devices.Midi2
+  classes registered). **Decided: 0.1.0 stays on teVirtualMIDI** with the two workarounds (the installer moves held
+  files aside; a port that refuses sends is opened again). After the release, two ways to measure:
+  - The service makes the ports: loopback pairs saved in its configuration file are made by the service itself, no
+    API needed; the installer would write the five pairs once (administrator) and restart the service. The file is
+    not a documented interface: to see first what MIDI Settings writes (the Tools preview on Geir's PC only).
+  - Or the API, once it is part of Windows (or by depending on the Tools preview).
+  Either way: one pair per surface, new port names in the scripts' detection, the Cubase setup and the Mackie device,
+  and the old names kept for PCs without the new stack.
 - **Nuendo** (19.11.2026). It has the same MIDI Remote system, but the installer puts the scripts in Cubase's folder
   only, the bridge and the installer recognise Cubase's program only, and the Cubase setup reads Cubase's preferences
   only. A small change (Nuendo's script folder, Nuendo.exe, the "Nuendo <n>_64" preferences), but untested without
