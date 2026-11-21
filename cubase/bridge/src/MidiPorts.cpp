@@ -218,9 +218,12 @@ bool MidiOutPort::open(const std::string& name)
                      name.c_str(), GetLastError());
     }
 #endif
-    impl_->name = name;
     if (!openPortRetrying(impl_->rt, name)) return false;
+    // Only now do sends start (and may open the port again): one sent while the first open was still trying had a
+    // second open running beside it (21.11.2026).
+    std::lock_guard<std::mutex> lk(impl_->mx);
     impl_->rtOpen = true;
+    impl_->name = name;
     return true;
 }
 
@@ -240,8 +243,8 @@ bool MidiOutPort::send(std::vector<unsigned char>& msg)
         return true;
     }
 #endif
-    if (impl_->name.empty()) return false;   // (never opened)
     std::lock_guard<std::mutex> lk(impl_->mx);
+    if (impl_->name.empty()) return false;   // (not opened yet)
     // A port opened right after login could refuse every send (21.11.2026: "error preparing sysex header", then
     // "error sending MIDI message" for each message), while a fresh open of the same port worked: such a port is
     // opened again and the message sent once more.
