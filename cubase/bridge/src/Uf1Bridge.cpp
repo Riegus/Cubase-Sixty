@@ -441,11 +441,12 @@ bool jogNav(uint8_t id)   // 0x28 up, 0x29 left, 0x2A centre, 0x2B right, 0x2C d
 // Cubase's top, +6.02 dB, sat on the "+12" mark, while the UF8 already placed its faders by dB). As on the UF8 (see
 // kUf8Marks in main.cpp): a track volume goes Cubase position -> dB (levelDbOf) -> the UF1's position for that dB on
 // its scale, and the hand back the same way. Pan (FLIP) and an SSL strip's fader (Strip Mode) stay linear.
-// The marks: each one's position (0..32767) when the fader was set on it. To be measured on Geir's UF1 ("UF1 fader
-// let go at ..." in bridge.log); until then the UF8's positions, scaled to the UF1's range.
+// The marks: each one's position (0..32767) when the fader was set on it by hand, measured on Geir's UF1
+// (21.11.2026, "UF1 fader let go at ..." in bridge.log). About 1 dB higher on the travel than the UF8's scaled. The
+// "+12" one is about the end of the travel; above +6 the hand gives Cubase's top (+6.02 dB) anyway.
 struct Uf1Mark { double db; int pos; };
 constexpr Uf1Mark kUf1Marks[] = {
-    {12, 31167}, {6, 28217}, {0, 25187}, {-5, 21923}, {-10, 18761}, {-20, 14336}, {-30, 10974}, {-40, 7170}, {-60, 3844},
+    {12, 32696}, {6, 29060}, {0, 25908}, {-5, 22641}, {-10, 19422}, {-20, 14733}, {-30, 11282}, {-40, 7601}, {-60, 4056},
 };
 constexpr double kUf1BottomDb = -100.0;   // below -60 straight on to the bottom
 uint16_t dbToUf1(double db)
