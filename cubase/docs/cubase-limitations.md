@@ -30,6 +30,12 @@ window follows and it reports the new value back). Other plug-ins in the Control
   Marker, which passes over a marker exactly at the cursor; and Locate Previous Marker with no marker before goes to
   the project start, so a step back cannot tell the two apart (14.11.2026). A marker right at the project start is
   therefore passed over.
+- **The selection after a project opens.** Cubase restores the Project window's selected track but not the
+  MixConsole's, and "Sync Selection in Project Window and MixConsole" only acts on a new click (clicking the track
+  that is already selected does nothing). MIDI Remote follows the MixConsole's selection and cannot read the Project
+  window's, so the surfaces showed nothing for a selected folder / group track (22.11.2026: the UC1 "mixer channel
+  index -1", the UF1 no EQ and no plug-in) until another track and then it were selected. Not worked around (a
+  script cannot select by the Project window); the guide's troubleshooting says what to do.
 - **Receives.** No access to a channel's receives (no Receive views).
 - **Send pan and send solo.** A send slot has level, on / off and pre / post only.
 - **Project-wide solo state.** No "anything soloed" value: the Helper script counts the soloed channels itself.

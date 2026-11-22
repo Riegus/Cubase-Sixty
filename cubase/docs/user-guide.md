@@ -644,6 +644,7 @@ starting the other).
 | An instrument plays when you touch a control | "In 'All MIDI Inputs'" is ticked for a Cubase-Sixty port: Settings > Setup shows it and can fix it (see setup). |
 | SCRUB only nudges | The Mackie Control device is missing: Settings > Setup shows it and can add it (see setup). |
 | SCRUB moves the cursor but there is no sound | Cubase does not scrub audio played by an ARA extension such as SpectraLayers (Cubase's own Scrub tool is silent there too). Scrub over events without the extension, or render the extension into the event. |
+| Right after opening a project, the surfaces do not show the selected track | Cubase has restored the Project window's selection but not the MixConsole's, which is the one the surfaces follow. Click another track, then the one you want. (Clicking the track that is already selected does nothing.) |
 | The UC1's knobs do nothing on a track | The track has neither an SSL strip nor Cubase's strip reachable (an instrument return, for example), or loading modules is set to "never". |
 | A top soft key on the UF8 shows "-" | That track has no SSL channel strip. |
 | A surface is odd after *Reload Scripts* | Restart Cubase; a reload does not always set the scripts up fully. |
