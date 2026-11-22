@@ -1781,8 +1781,15 @@ function onParameterChange(activeDevice, objectID, tag) {
 		else paintLeds(activeDevice)
 	} catch (e) {}
 }
+// PROBE (22.11.2026, to be removed): does Cubase report its strip meters' changes here, and how often? Counted per
+// second for the compressor's and the gate's gain reduction, logged from the idle callback (at most 20 lines).
+var grCb = { comp: 0, gate: 0, other: 0, at: 0, lines: 0 }
 da.mOnParameterChange = function (activeDevice, activeMapping, objectID, tag) {
 	am = activeMapping
+	var g = state.cs && state.cs.gr
+	if (g && objectID === g.comp && tag === g.compTag) ++grCb.comp
+	else if (g && objectID === g.gate && tag === g.gateTag) ++grCb.gate
+	else if (g && (objectID === g.comp || objectID === g.gate)) ++grCb.other
 	onParameterChange(activeDevice, objectID, tag)
 }
 // Objects added or removed (a plug-in inserted, removed or replaced): look again shortly.
@@ -1866,6 +1873,14 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
 	}
 	cubaseGr(activeDevice, now)
+	if (now >= grCb.at + 1000) {
+		if ((grCb.comp || grCb.gate || grCb.other) && grCb.lines < 20) {
+			++grCb.lines
+			log('GR CALLBACKS last ' + (now - grCb.at) + ' ms: compressor meter ' + grCb.comp + ', gate meter ' + grCb.gate + ', other parameters of the two ' + grCb.other)
+		}
+		grCb.comp = grCb.gate = grCb.other = 0
+		grCb.at = now
+	}
 	if (fav.commitAt && now >= fav.commitAt) { try { favCommit(activeDevice) } catch (e) { log('favourite swap: ' + e) } }
 	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0
