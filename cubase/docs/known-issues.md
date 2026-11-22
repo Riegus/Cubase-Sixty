@@ -78,6 +78,13 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
 
 ## UF1
 
+- **Open (22.11.2026, Geir): with no markers, First Marker and Last Marker are swapped.** First Marker is Return to
+  Zero + Locate Next Marker, Last Marker Goto End + Locate Previous Marker (Uf1SoftKeys.h). With no marker, Locate
+  Previous Marker goes to the project start (measured 14.11.2026) and Locate Next Marker apparently to the project
+  end, so First lands on the end and Last on the start. Wanted: First -> project start, Last -> project end when
+  there is no marker. Cubase tells scripts nothing about markers (cubase-limitations.md), so to measure first:
+  where Locate Next Marker goes with none ahead, and whether the bridge can see that from the time display (the
+  position after the jump vs. Goto End's).
 - **Fixed (21.11.2026): the UF1's fader did not match its printed dB scale.** A track at +6.02 dB (Cubase's top) put
   it on the "+12" mark while the UF8 showed +6: the UF1 still put Cubase's fader position straight onto the motor (the
   UF8 has placed by dB since 15.11). Now the same way as the UF8: Cubase's position -> dB -> the UF1's position for
