@@ -1473,7 +1473,6 @@ var SOFT_KEYS = {
 }
 var PLUG_STEP = 0.02   // per detent (Rea-Sixty's kUf1CsVPotStep: about 50 detents end to end)
 
-var emptyScan = { base: null, tries: 0 }   // (plugRescan: a selected track that answered with an empty tree)
 var plug = { obj: -1, kind: null, title: '', ordinal: 0, page: 0, params: [], byName: {}, rescanAt: 0,
 	sentInfo: null, sentCells: [null, null, null, null], sentKeys: [null, null, null, null], wanted: {}, missing: {} }
 
@@ -1588,15 +1587,6 @@ function plugRescan(activeDevice) {
 			}
 		}
 	}
-	// A track selected when the project opens (or the scripts start) can answer with an empty tree (22.11.2026, a
-	// folder track: no EQ, no input filter, no plug-ins until it was selected again). Cubase says nothing more until the
-	// selection changes, so a scan without an input filter (every mixer channel has one) is tried again every 500 ms,
-	// at most 10 times per track.
-	if (base !== emptyScan.base) { emptyScan.base = base; emptyScan.tries = 0 }
-	if (filterObj >= 0) {
-		if (emptyScan.tries) out('[CubaseSixty UF1] selected track: filled in after ' + emptyScan.tries + ' more look(s)')
-		emptyScan.tries = 0
-	} else if (emptyScan.tries < 10) { ++emptyScan.tries; plug.rescanAt = Date.now() + 500 }
 	var eqWhere = (eqObj >= 0 ? 'EQ' : 'no EQ') + ', ' + (filterObj >= 0 ? 'input filter' : 'no input filter')
 	if (!strip && eqWhere !== cubaseEq.logged) { cubaseEq.logged = eqWhere; out('[CubaseSixty UF1] EQ graph: Cubase channel (' + eqWhere + ', ' + Object.keys(cubaseEq.tags).length + ' parameters)') }
 	cubaseEqSend(activeDevice)
