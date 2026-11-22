@@ -743,32 +743,30 @@ function markerJumpIdle(activeMapping) {
 	} catch (e) { out('[CubaseSixty] Nav Mode: marker ' + n + ': ' + e) }
 }
 // PROBE (22.11.2026, to be removed): does the transport's Direct Access show whether the project has markers (or where
-// it ends)? Every 2 s, the display / process values of its parameters about markers, cycle, start, end or length,
-// logged when they change (at most 30 times).
-var markerProbe = { at: 0, last: '', lines: 0 }
+// it ends)? Every 2 s, each of its parameters about markers, cycle, start, end, length or position, one line per
+// parameter whose value changed (a log line is cut at about 360 characters), at most 300 lines.
+var markerProbe = { at: 0, last: {}, lines: 0 }
 function markerProbeIdle(activeMapping) {
 	var now = Date.now()
-	if (now < markerProbe.at || markerProbe.lines >= 30) return
+	if (now < markerProbe.at || markerProbe.lines >= 300) return
 	markerProbe.at = now + 2000
 	var da = curView && curView.transportDa
 	if (!da) return
-	var out1 = []
 	try {
 		var id = da.getBaseObjectID(activeMapping)
 		var n = da.getNumberOfParameters(activeMapping, id)
 		for (var i = 0; i < n; ++i) {
 			var tag = da.getParameterTagByIndex(activeMapping, id, i)
 			var title = da.getParameterTitle(activeMapping, id, tag, 40)
-			if (!/marker|cycle|start|end|length|locator|position/i.test(title)) continue
-			out1.push(title + '(' + tag + ')=' + String(da.getParameterDisplayValue(activeMapping, id, tag)).replace(/^\s+/, '')
-				+ '[' + da.getParameterProcessValue(activeMapping, id, tag).toFixed(4) + ']')
+			if (!/marker|cycle|start|end|length|locator|position|time/i.test(title)) continue
+			var v = String(da.getParameterDisplayValue(activeMapping, id, tag)).replace(/^\s+/, '')
+				+ ' [' + da.getParameterProcessValue(activeMapping, id, tag).toFixed(4) + ']'
+			if (markerProbe.last[tag] === v) continue
+			markerProbe.last[tag] = v
+			if (++markerProbe.lines > 300) return
+			out('[CubaseSixty] MARKER PROBE ' + title + ' (' + tag + ') = ' + v)
 		}
-	} catch (e) { out1.push('error ' + e) }
-	var line = out1.join(', ')
-	if (line === markerProbe.last) return
-	markerProbe.last = line
-	++markerProbe.lines
-	out('[CubaseSixty] MARKER PROBE ' + line)
+	} catch (e) { out('[CubaseSixty] MARKER PROBE error ' + e) }
 }
 // Command keys: the button is made once, the command bound on every page.
 var commandKeys = []
