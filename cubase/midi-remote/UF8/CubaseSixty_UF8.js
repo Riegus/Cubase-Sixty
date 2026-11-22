@@ -742,6 +742,34 @@ function markerJumpIdle(activeMapping) {
 		out('[CubaseSixty] Nav Mode: marker ' + n + ' (the transport\'s "' + da.getParameterTitle(activeMapping, id, tag, 32) + '")')
 	} catch (e) { out('[CubaseSixty] Nav Mode: marker ' + n + ': ' + e) }
 }
+// PROBE (22.11.2026, to be removed): does the transport's Direct Access show whether the project has markers (or where
+// it ends)? Every 2 s, the display / process values of its parameters about markers, cycle, start, end or length,
+// logged when they change (at most 30 times).
+var markerProbe = { at: 0, last: '', lines: 0 }
+function markerProbeIdle(activeMapping) {
+	var now = Date.now()
+	if (now < markerProbe.at || markerProbe.lines >= 30) return
+	markerProbe.at = now + 2000
+	var da = curView && curView.transportDa
+	if (!da) return
+	var out1 = []
+	try {
+		var id = da.getBaseObjectID(activeMapping)
+		var n = da.getNumberOfParameters(activeMapping, id)
+		for (var i = 0; i < n; ++i) {
+			var tag = da.getParameterTagByIndex(activeMapping, id, i)
+			var title = da.getParameterTitle(activeMapping, id, tag, 40)
+			if (!/marker|cycle|start|end|length|locator|position/i.test(title)) continue
+			out1.push(title + '(' + tag + ')=' + String(da.getParameterDisplayValue(activeMapping, id, tag)).replace(/^\s+/, '')
+				+ '[' + da.getParameterProcessValue(activeMapping, id, tag).toFixed(4) + ']')
+		}
+	} catch (e) { out1.push('error ' + e) }
+	var line = out1.join(', ')
+	if (line === markerProbe.last) return
+	markerProbe.last = line
+	++markerProbe.lines
+	out('[CubaseSixty] MARKER PROBE ' + line)
+}
 // Command keys: the button is made once, the command bound on every page.
 var commandKeys = []
 eachPage(function (page, bankZone, view) {
@@ -1802,6 +1830,7 @@ var startViewWanted = -1, startedAt = Date.now()
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	try { markerJumpIdle(activeMapping) } catch (e) { out('[CubaseSixty] Nav Mode: ' + e) }
+	try { markerProbeIdle(activeMapping) } catch (e) { out('[CubaseSixty] MARKER PROBE: ' + e) }
 	if (startViewWanted >= 0) {
 		var sv = views[startViewWanted]
 		startViewWanted = -1
