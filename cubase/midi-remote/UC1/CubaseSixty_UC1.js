@@ -395,6 +395,20 @@ function info(acc, id) {
 }
 
 var scans = 0
+// A track selected when the project opens (or the scripts start) can answer with an empty tree: no input filter, no
+// inserts, mixer channel index -1 (22.11.2026, a folder track; reselecting it worked). Cubase says nothing more until
+// the selection changes, so a scan that finds no input filter (every mixer channel has one) is tried again every
+// 500 ms, at most 10 times per track.
+var emptyScan = { base: null, tries: 0 }
+function emptyRetry(objects, base, schedule, logFn) {
+	var filled = false
+	for (var i = 0; i < objects.length && !filled; ++i) if (objects[i].type === 'InputFilter') filled = true
+	if (base !== emptyScan.base) { emptyScan.base = base; emptyScan.tries = 0 }
+	if (filled) { if (emptyScan.tries) logFn('selected track: filled in after ' + emptyScan.tries + ' more look(s)'); emptyScan.tries = 0; return }
+	if (emptyScan.tries >= 10) return
+	++emptyScan.tries
+	schedule(Date.now() + 500)
+}
 function rescan(activeDevice) {
 	if (!am) return
 	state.cs = null
@@ -461,6 +475,7 @@ function rescan(activeDevice) {
 	favApplyPending(activeDevice, list.concat(state.bcSelected ? [state.bcSelected] : []))
 	log('selected track: channel strip ' + (state.cs ? '"' + state.cs.name + '"' : 'none')
 		+ ', bus comp ' + (state.bcSelected ? '"' + state.bcSelected.name + '" #' + state.bcSelected.obj : 'none'))
+	emptyRetry(objects, base, function (when) { state.rescanAt = when }, log)
 	showNumber(activeDevice, base)
 	paintAll(activeDevice)
 }
