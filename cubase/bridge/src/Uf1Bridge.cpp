@@ -959,6 +959,9 @@ void softKeyPress(int k, bool pressed)
             auto cmd = [](int n) { sendMidi({0x92, uint8_t(n), 127}); sendMidi({0x82, uint8_t(n), 0}); };
             auto settle = [] { std::this_thread::sleep_for(std::chrono::milliseconds(250)); };
             const int zero = 0, end = 1, prev = 2, next = 3;   // the soft keys' notes (Uf1SoftKeys.h)
+            // Cubase sends the position only when it changes: with none seen yet and the cursor already on the far
+            // end, that jump told nothing (the first press after a restart, 22.11.2026). So the near end first then.
+            if (posText().empty()) { cmd(first ? zero : end); settle(); }
             cmd(first ? end : zero);
             settle();
             const std::string far = posText();
