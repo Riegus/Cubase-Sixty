@@ -50,6 +50,10 @@ window follows and it reports the new value back). Other plug-ins in the Control
 
 ## Works, but with a catch
 
+- **Meters are not reported as they change.** Cubase's strip compressor gives its gain reduction as a Direct Access
+  parameter ("Gain Reduction", tag 4241 on the Standard Compressor), live while playing with no window open, but
+  mOnParameterChange never fires for it (22.11.2026). The UC1 script reads it on each idle tick, about ten times a
+  second, so its Dyn LEDs move a little steppier than with an SSL strip (whose plug-in streams to the bridge).
 - **Back-to-back MIDI notes can be lost or merged.** Two or more notes sent to a script in a row sometimes arrive as
   one. The bridge spaces them 40 ms apart (FLIP's two route notes, bank steps, Nav Mode's cycle key).
 - **New selection is reported late.** After a next / previous track action, the new track's name comes up to a second

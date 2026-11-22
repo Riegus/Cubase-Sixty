@@ -501,6 +501,7 @@ the project has an EQ, a gate and a compressor under your hands.
 | The four EQ bands | Cubase's channel EQ, bands 1–4: gain, frequency, Q. Turning a band's knob switches the band on. The **bell keys** switch the outer bands between shelf and bell. **EQ IN** is the EQ's bypass. |
 | Compressor | The strip's compressor module: threshold, ratio, release. **DYN IN** is its bypass. With the Tube or Vintage Compressor, the Ratio knob is Input Gain and the Threshold knob Output Gain (those have no threshold or ratio). |
 | Gate | The strip's Noise Gate: threshold, range, release, hold. **EXP** is its bypass. |
+| Dyn and Gate LED rows | The compressor's gain reduction as it happens (about ten times a second, a little steppier than with an SSL strip); the Gate row too if the gate reports one. |
 | F.ATK (either one) | Switches that section's **Release knob to Attack** (lit) and back; the UC1 has no attack knobs. The choice stays as you change tracks. |
 
 **Loading a module by reaching for it.** If the track's strip has no gate or compressor yet:
