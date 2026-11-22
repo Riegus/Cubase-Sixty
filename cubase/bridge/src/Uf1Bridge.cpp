@@ -74,6 +74,9 @@ std::atomic<bool> g_trace{false};
 bool g_engaged = false;
 std::mutex g_engMx;
 std::vector<uint8_t> g_tcShown;               // last time-field payload sent
+std::mutex g_posMx;
+std::string g_posText;                         // the transport position as Cubase last sent it (SysEx 0D)
+std::string posText() { std::lock_guard<std::mutex> lk(g_posMx); return g_posText; }
 // The last display / LED message from Cubase per kind, replayed after the UF1 is reopened (Cubase only
 // sends what changes, so a reopened UF1 would otherwise stay blank).
 std::mutex g_cacheMx;
@@ -944,6 +947,33 @@ void softKeyPress(int k, bool pressed)
     const auto* c = softKeyCommand(k);
     if (!c || c->steps[0] < 0) return;
     std::printf("UF1 soft key %d: %s\n", k + 1, c->name);
+    // First / last marker with no marker in the project (22.11.2026): Cubase's Locate Next Marker then goes to the
+    // project end, Locate Previous Marker to the start, so the two landed swapped. Cubase tells scripts nothing about
+    // markers (the transport's marker buttons read the same with and without), but the position does: the far end is
+    // visited first and its position noted; if the jump lands there, there was no marker, and the near end is taken.
+    // (The cursor visits the far end for a moment; about half a second in all.)
+    const std::string key = c->key;
+    if (key == "first-marker" || key == "last-marker") {
+        const bool first = key == "first-marker";
+        std::thread([first] {
+            auto cmd = [](int n) { sendMidi({0x92, uint8_t(n), 127}); sendMidi({0x82, uint8_t(n), 0}); };
+            auto settle = [] { std::this_thread::sleep_for(std::chrono::milliseconds(250)); };
+            const int zero = 0, end = 1, prev = 2, next = 3;   // the soft keys' notes (Uf1SoftKeys.h)
+            cmd(first ? end : zero);
+            settle();
+            const std::string far = posText();
+            cmd(first ? zero : end);
+            std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            cmd(first ? next : prev);
+            settle();
+            const std::string landed = posText();
+            const bool none = !far.empty() && landed == far;
+            std::printf("UF1 %s marker: landed on %s, the project %s is %s%s\n", first ? "first" : "last", landed.c_str(),
+                        first ? "end" : "start", far.c_str(), none ? first ? ": no marker, to the start" : ": no marker, to the end" : "");
+            if (none) cmd(first ? zero : end);
+        }).detach();
+        return;
+    }
     std::vector<int> steps;
     for (int st : c->steps) if (st >= 0) steps.push_back(st);
     // Channel 3, one note per step, 40 ms apart (Cubase merges notes sent back to back; banking.md).
@@ -2026,6 +2056,7 @@ void onSysex(const std::vector<unsigned char>& m)
         // '.', ':' and ',' fold into the dot of the cell before them. Right-aligned; if the text needs more
         // than ten cells, the leftmost ones (normally padding) are dropped.
         std::string t(m.begin() + 5, m.end() - 1);
+        { std::lock_guard<std::mutex> lk(g_posMx); g_posText = t; }
         // Readability: a ':' becomes a blank cell instead of a dot, so "0:00:47.691" reads "0 00 47.691"
         // (dots stay for decimals and the bars/beats separators). If that does not fit, a leading group of
         // zeros (hours) is dropped first: "00:00:47:12" -> "00 47 12".

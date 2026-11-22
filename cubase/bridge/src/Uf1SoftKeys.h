@@ -30,7 +30,8 @@ inline const std::vector<Command>& commands()
         // would not be skipped, went to the project start instead: with no marker before, Cubase's Locate Previous
         // Marker goes to the project start, 14.11.2026.) A marker exactly at the project start is passed over (Locate
         // Next Marker skips a marker at the cursor; measured): cubase-limitations.md. The last: project end, then the
-        // previous marker.
+        // previous marker. With no marker, those land on the other end: Uf1Bridge.cpp (softKey) checks the position
+        // and takes the right end then; these steps are not used for the two.
         {"first-marker", "First marker", "First Marker", {0, 3, -1}},
         {"prev-marker", "Previous marker", "Prev Marker", {2, -1, -1}},
         {"next-marker", "Next marker", "Next Marker", {3, -1, -1}},

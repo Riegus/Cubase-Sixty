@@ -742,32 +742,6 @@ function markerJumpIdle(activeMapping) {
 		out('[CubaseSixty] Nav Mode: marker ' + n + ' (the transport\'s "' + da.getParameterTitle(activeMapping, id, tag, 32) + '")')
 	} catch (e) { out('[CubaseSixty] Nav Mode: marker ' + n + ': ' + e) }
 }
-// PROBE (22.11.2026, to be removed): does the transport's Direct Access show whether the project has markers (or where
-// it ends)? Every 2 s, each of its parameters about markers, cycle, start, end, length or position, one line per
-// parameter whose value changed (a log line is cut at about 360 characters), at most 300 lines.
-var markerProbe = { at: 0, last: {}, lines: 0 }
-function markerProbeIdle(activeMapping) {
-	var now = Date.now()
-	if (now < markerProbe.at || markerProbe.lines >= 300) return
-	markerProbe.at = now + 2000
-	var da = curView && curView.transportDa
-	if (!da) return
-	try {
-		var id = da.getBaseObjectID(activeMapping)
-		var n = da.getNumberOfParameters(activeMapping, id)
-		for (var i = 0; i < n; ++i) {
-			var tag = da.getParameterTagByIndex(activeMapping, id, i)
-			var title = da.getParameterTitle(activeMapping, id, tag, 40)
-			if (!/marker|cycle|start|end|length|locator|position|time/i.test(title)) continue
-			var v = String(da.getParameterDisplayValue(activeMapping, id, tag)).replace(/^\s+/, '')
-				+ ' [' + da.getParameterProcessValue(activeMapping, id, tag).toFixed(4) + ']'
-			if (markerProbe.last[tag] === v) continue
-			markerProbe.last[tag] = v
-			if (++markerProbe.lines > 300) return
-			out('[CubaseSixty] MARKER PROBE ' + title + ' (' + tag + ') = ' + v)
-		}
-	} catch (e) { out('[CubaseSixty] MARKER PROBE error ' + e) }
-}
 // Command keys: the button is made once, the command bound on every page.
 var commandKeys = []
 eachPage(function (page, bankZone, view) {
@@ -1828,7 +1802,6 @@ var startViewWanted = -1, startedAt = Date.now()
 function pageIdle(activeDevice, activeMapping) {
 	skAm = activeMapping
 	try { markerJumpIdle(activeMapping) } catch (e) { out('[CubaseSixty] Nav Mode: ' + e) }
-	try { markerProbeIdle(activeMapping) } catch (e) { out('[CubaseSixty] MARKER PROBE: ' + e) }
 	if (startViewWanted >= 0) {
 		var sv = views[startViewWanted]
 		startViewWanted = -1
