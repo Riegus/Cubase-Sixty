@@ -520,7 +520,7 @@ function cubaseStrip(objects) {
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
 	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', emptySlots: emptySlots,
-		compSlot: compSlot, compTitle: compTitle, gateSlot: gateSlot, compObj: comp, gateObj: gate,
+		compSlot: compSlot, compTitle: compTitle, gateSlot: gateSlot,
 		noGate: !gate, noComp: !comp, knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
 	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
@@ -617,6 +617,14 @@ function cubaseStrip(objects) {
 			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none') + ', EXP ' + (gateBypass ? '"' + gateBypass.title + '"' : 'none') + ', SC LISTEN ' + (scMonitor ? '"' + scMonitor.title + '"' : 'none'))
 		for (var f = 0; f < found.length; ++f) log('Cubase strip:   ' + found[f])
 	}
+	// The modules' own gain-reduction meter (the Standard Compressor's "Gain Reduction", tag 4241: live while
+	// playing, also with no window open; measured 22.11.2026), for the UC1's Dyn / Gate LED rows (cubaseGr).
+	var grExclude = [/max|reset|ph$|hold/i]
+	var compGr = comp ? findParam(compList, [/gain\s*red/i], grExclude) : null
+	var gateGr = gate ? findParam(gateList, [/gain\s*red|reduction/i], grExclude) : null
+	t.gr = { comp: comp, compTag: compGr ? compGr.tag : null, gate: gate, gateTag: gateGr ? gateGr.tag : null }
+	if (stripLogs <= 5) log('Cubase strip: gain reduction from ' + (compGr ? 'compressor "' + compGr.title + '"' : 'no compressor meter')
+		+ ', ' + (gateGr ? 'gate "' + gateGr.title + '"' : 'no gate meter'))
 	indexKnobs(t)
 	return t
 }
@@ -1827,31 +1835,25 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	state.mixScanAt = Date.now() + 200
 	numberShown = -2
 }
-// PROBE (22.11.2026, to be removed): does Cubase's strip compressor report its gain reduction while playing? Every
-// 100 ms, the display values of its parameters named "Gain Reduction" / "Gain Red ..." on the selected track's Cubase
-// strip, logged when they change (at most 80 lines).
-var grProbeAt = 0, grProbeLines = 0, grProbeLast = ''
-function grProbe(now) {
-	if (now < grProbeAt || grProbeLines >= 80) return
-	grProbeAt = now + 100
+// Gain reduction of Cubase's own strip (the SSL plug-ins stream theirs to the bridge themselves): on each idle tick
+// (~10 a second) the selected track's compressor and gate meters, in 0.1 dB, to the bridge (SysEx 46) while they are
+// not both silent. The bridge uses them while no SSL strip is the source and they are fresh (dropped after 0.5 s).
+var grSent = ''
+function grTenths(t, obj, tag) {
+	if (!obj || tag === null) return 0
+	var d = 0
+	try { d = parseFloat(String(t.da.getParameterDisplayValue(am, obj, tag)).replace(/^\s+/, '')) } catch (e) { return 0 }
+	if (!isFinite(d)) return 0
+	return Math.min(16383, Math.round(Math.abs(d) * 10))
+}
+function cubaseGr(activeDevice, now) {
 	var t = state.cs
-	if (!t || !t.compObj) return
-	var obj = t.compObj, out = []
-	try {
-		var n = t.da.getNumberOfParameters(am, obj)
-		for (var i = 0; i < n && i < 200; ++i) {
-			var tag = t.da.getParameterTagByIndex(am, obj, i)
-			var title = t.da.getParameterTitle(am, obj, tag, 40)
-			if (/gain\s*red/i.test(title))
-				out.push(title + ' (' + tag + ')=' + String(t.da.getParameterDisplayValue(am, obj, tag)).replace(/^\s+/, '')
-					+ ' [' + t.da.getParameterProcessValue(am, obj, tag).toFixed(3) + ']')
-		}
-	} catch (e) { out.push('error ' + e) }
-	var line = out.join(', ')
-	if (line === grProbeLast) return
-	grProbeLast = line
-	++grProbeLines
-	log('GR PROBE ' + line)
+	if (!t || !t.gr) { grSent = ''; return }
+	var c = grTenths(t, t.gr.comp, t.gr.compTag), g = grTenths(t, t.gr.gate, t.gr.gateTag)
+	var key = c + '/' + g
+	if (key === grSent && c === 0 && g === 0) return   // (still silent: nothing to keep fresh)
+	grSent = key
+	sysex(activeDevice, [0x46, (c >> 7) & 0x7F, c & 0x7F, (g >> 7) & 0x7F, g & 0x7F])
 }
 page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
@@ -1863,7 +1865,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		numberCheckAt = now + 1000
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
 	}
-	grProbe(now)
+	cubaseGr(activeDevice, now)
 	if (fav.commitAt && now >= fav.commitAt) { try { favCommit(activeDevice) } catch (e) { log('favourite swap: ' + e) } }
 	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0

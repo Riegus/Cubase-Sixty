@@ -118,6 +118,11 @@ bool menuOn() { return g_presetsOn || g_routingOn || g_extOn; }
 // (0 = none), ordinal = the plug-in's position among the SSL plug-ins on that channel (insert order).
 std::mutex g_grMx;
 int g_grCsTrack = 0, g_grCsOrd = 0, g_grBcTrack = 0, g_grBcOrd = 0;
+// Cubase's own strip (SysEx 46 from the script, 0.1 dB): the compressor's and gate's gain reduction, used while no SSL
+// strip is the source and fresh (at most 0.5 s old; the script sends on each idle tick while it is not silent).
+std::atomic<int> g_cbCompGr{0}, g_cbGateGr{0};
+std::atomic<long long> g_cbGrAt{0};   // steady_clock ms of the last one
+long long steadyMs() { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 std::string g_grCsModel;
 void renderRouting();   // the ROUTING screen (below)
 
@@ -673,6 +678,13 @@ void onSysex(const std::vector<unsigned char>& m)
             g_grCsModel = decodeName(m, 11);
         }
         break;
+    case 0x46:   // Cubase's own strip: the compressor's and gate's gain reduction (0.1 dB)
+        if (m.size() >= 10) {
+            g_cbCompGr = (m[5] << 7) | m[6];
+            g_cbGateGr = (m[7] << 7) | m[8];
+            g_cbGrAt = steadyMs();
+        }
+        break;
     case 0x3A: if (m.size() >= 8) sendMidi({0xB0, uint8_t(m[5] & 0x7F), uint8_t(m[6] & 0x7F)}); break;
     case 0x47:   // a command bound to a CC (the MixConsole key job): the CC up, then down 40 ms later
         if (m.size() >= 7) {
@@ -1124,19 +1136,26 @@ void grLoop()
     std::string lastSummary;
     while (g_grRun) {
         std::this_thread::sleep_for(milliseconds(33));
-        if (!g_open || !sslcore::isRunning()) continue;
+        if (!g_open) continue;
+        const bool core = sslcore::isRunning();
         int csT, csO, bcT, bcO;
         std::string model;
         { std::lock_guard<std::mutex> lk(g_grMx); csT = g_grCsTrack; csO = g_grCsOrd; bcT = g_grBcTrack; bcO = g_grBcOrd; model = g_grCsModel; }
-        const int compType = int(sslcore::ChannelStripMeter::CompGain), gateType = int(sslcore::ChannelStripMeter::GateGain);
-        const float comp = readGr(compType, csT, csO, model);
-        const float gate = readGr(gateType, csT, csO, model);
-        float bc = 0.0f;
-        if (bcT > 0 && sslcore::getBusCompGr(bcT, bcO, bc)) bc = std::fabs(bc); else bc = 0.0f;
+        float comp = 0.0f, gate = 0.0f, bc = 0.0f;
+        if (core) {
+            const int compType = int(sslcore::ChannelStripMeter::CompGain), gateType = int(sslcore::ChannelStripMeter::GateGain);
+            comp = readGr(compType, csT, csO, model);
+            gate = readGr(gateType, csT, csO, model);
+            if (bcT > 0 && sslcore::getBusCompGr(bcT, bcO, bc)) bc = std::fabs(bc); else bc = 0.0f;
+        }
+        if (csT <= 0 && steadyMs() - g_cbGrAt < 500) {   // no SSL strip: Cubase's own strip, if it reports
+            comp = g_cbCompGr / 10.0f;
+            gate = g_cbGateGr / 10.0f;
+        }
         g_dev.setGainReduction(bc);
         pushGrStrip(0x5C, comp, g_compStrip);
         pushGrStrip(0x61, gate, g_gateStrip);
-        if (steady_clock::now() >= nextLog) {
+        if (core && steady_clock::now() >= nextLog) {
             nextLog = steady_clock::now() + seconds(3);
             stopSslCore();   // the plug-ins start it again when they cannot find a Core
             std::string sum = sslcore::debugSummary();
