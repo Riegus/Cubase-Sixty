@@ -436,6 +436,7 @@ little from the plug-in's own.
 ### Transport and time
 
 - **Transport keys**: rewind, forward, stop, play, record, **cycle** and **click**, each with its LED.
+- **SHIFT + rewind / forward**: the project start / end.
 - The **time display** shows the project position in Cubase's primary format. **360°** swaps it with the secondary
   format (bars and beats ↔ time, as set in Cubase's transport).
 - **SCRUB** (a tap) switches scrubbing on; the jog then scrubs audio. This needs the Mackie Control device from the

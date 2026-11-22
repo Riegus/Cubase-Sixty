@@ -106,9 +106,6 @@ What Cubase does not allow is listed in [Cubase limitations](cubase-limitations.
 
 ## UF1
 
-- **Dedicated keys for the project start and end** (22.11.2026, Geir misses them). Today only as two of the soft
-  keys' commands (Settings > UF1 soft keys: "Go to the project start / end"), which costs two marker keys. Idea:
-  SHIFT + REW / SHIFT + FF (a common controller convention), if those are free; to check.
 - **Jog modes**: Playhead, Scrub, Items, Envelope, Range and Fades are done; missing are Lanes (Cubase has no lane
   commands), the Range's top / bottom edge (Nudge Top / Bottom did nothing in the Project window), the Envelope points' value (no command; Nudge Up / Down moves them to another lane;
   later: try two Project Logical Editor presets, Trim > Multiply by slightly above / below 1 on selected automation,

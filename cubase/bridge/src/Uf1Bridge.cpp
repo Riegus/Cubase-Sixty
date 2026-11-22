@@ -650,6 +650,17 @@ void onUf1Event(const ::uf1::InputEvent& ev)
             }
             break;
         }
+        // SHIFT + REW / FFW: the project start / end (22.11.2026; Geir missed dedicated keys). The soft keys' own
+        // commands (MIDI channel 3, notes 0 Return to Zero / 1 Goto End; SOFT_KEY_COMMANDS in the script).
+        if (g_shift && (ev.id == 0x3A || ev.id == 0x3B)) {
+            if (ev.pressed) {
+                const uint8_t n = ev.id == 0x3A ? 0 : 1;
+                sendMidi({0x92, n, 127});
+                sendMidi({0x82, n, 0});
+                g_shiftUsed.insert(ev.id);
+            }
+            break;
+        }
         if (!ev.pressed && g_shiftUsed.erase(ev.id)) break;   // release of a key pressed with SHIFT
         // ◀ ▶ in the quick-key row (without SHIFT): the previous / next marker (14.11.2026; with SHIFT they are Read /
         // Write, above). The same notes as SHIFT + jog: Locate Previous / Next Marker.
