@@ -520,7 +520,7 @@ function cubaseStrip(objects) {
 	}
 	if (!inputFilter && !eq && !gate && !comp) return null
 	var t = { da: da, label: 'CUBASE', name: 'Cubase channel strip', header: '', emptySlots: emptySlots,
-		compSlot: compSlot, compTitle: compTitle, gateSlot: gateSlot,
+		compSlot: compSlot, compTitle: compTitle, gateSlot: gateSlot, compObj: comp, gateObj: gate,
 		noGate: !gate, noComp: !comp, knobs: {}, buttons: {}, bypass: null, objs: {} }
 	var found = [], missing = []
 	function knob(id, name, obj, list, patterns, exclude, enable, offAt) {
@@ -1827,6 +1827,32 @@ page.mOnActivate = function (activeDevice, activeMapping) {
 	state.mixScanAt = Date.now() + 200
 	numberShown = -2
 }
+// PROBE (22.11.2026, to be removed): does Cubase's strip compressor report its gain reduction while playing? Every
+// 100 ms, the display values of its parameters named "Gain Reduction" / "Gain Red ..." on the selected track's Cubase
+// strip, logged when they change (at most 80 lines).
+var grProbeAt = 0, grProbeLines = 0, grProbeLast = ''
+function grProbe(now) {
+	if (now < grProbeAt || grProbeLines >= 80) return
+	grProbeAt = now + 100
+	var t = state.cs
+	if (!t || !t.compObj) return
+	var obj = t.compObj, out = []
+	try {
+		var n = t.da.getNumberOfParameters(am, obj)
+		for (var i = 0; i < n && i < 200; ++i) {
+			var tag = t.da.getParameterTagByIndex(am, obj, i)
+			var title = t.da.getParameterTitle(am, obj, tag, 40)
+			if (/gain\s*red/i.test(title))
+				out.push(title + ' (' + tag + ')=' + String(t.da.getParameterDisplayValue(am, obj, tag)).replace(/^\s+/, '')
+					+ ' [' + t.da.getParameterProcessValue(am, obj, tag).toFixed(3) + ']')
+		}
+	} catch (e) { out.push('error ' + e) }
+	var line = out.join(', ')
+	if (line === grProbeLast) return
+	grProbeLast = line
+	++grProbeLines
+	log('GR PROBE ' + line)
+}
 page.mOnIdle = function (activeDevice, activeMapping) {
 	am = activeMapping
 	flushLog(activeDevice)
@@ -1837,6 +1863,7 @@ page.mOnIdle = function (activeDevice, activeMapping) {
 		numberCheckAt = now + 1000
 		try { showNumber(activeDevice, numberBase) } catch (e) {}
 	}
+	grProbe(now)
 	if (fav.commitAt && now >= fav.commitAt) { try { favCommit(activeDevice) } catch (e) { log('favourite swap: ' + e) } }
 	if (state.rescanAt && now >= state.rescanAt) {
 		state.rescanAt = 0
