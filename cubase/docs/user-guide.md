@@ -293,7 +293,7 @@ Two views, both left with the same key that entered them (or with CHANNEL):
 - **One send across all tracks, on the faders.** Press one of the eight **SEND / PLUGIN** keys: the
   faders are now send N of each track. Use it to build a headphone mix or to ride a reverb send across a bank.
   The displays keep the track names and show the send level in dB, and each strip's bottom line names the send and
-  where it goes ("S1 Hall.Rvb", with the pan on the right; a space in the name shows as a dot); **CUT switches the send on / off** (lit: the send is on,
+  where it goes ("S1 RvrbVcl" for a send to "Reverb Vocal": shortened as the track names are, with the pan on the right); **CUT switches the send on / off** (lit: the send is on,
   not a mute). A track that
   does not have that send has its fader at the bottom and no value. The V-pots stay on pan.
 - **All sends of the selected track, on the V-pots.** **Hold FLIP** for about half a second (it lights): the eight
