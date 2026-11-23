@@ -21,7 +21,8 @@ user setting also goes on the [settings wishlist](settings-wishlist.md).
   the fader and V-pot back while they are on. The fader moves the parameter's range in a straight line.
 - **Send views** (forced, partly). As Rea-Sixty: SEND / PLUGIN 1–8 put send N of each track on the faders, a long
   FLIP the selected track's sends on the V-pots, CHANNEL is home. Differences: no send pan (the API has none), so the
-  V-pot stays on the track's pan in Send N and FLIP does not swap a send's level and pan; SOLO stays the track's solo
+  V-pot stays on the track's pan in Send N, and FLIP there (23.11.2026) puts the send's level on the V-pots and the
+  track's pan on the faders (Rea-Sixty: the send's level and pan swapped); SOLO stays the track's solo
   (no exclusive send solo); CUT follows the faders' view only; no Receive views (no receives in the API); eight sends,
   so no paging; a track without that send shows a blank name and its fader does nothing.
 - **Nav Mode** (forced). Rea-Sixty lists the project's markers and regions by name and colour across the strips.
