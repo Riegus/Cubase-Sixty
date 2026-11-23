@@ -19,6 +19,13 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   the tray app, which replaces the MIDI ports; Cubase half reconnected, and switched its scripts off 4 s after a
   project opened (the script console: "inactive (no project)" with the project open; nothing more reached the bridge).
   A Cubase restart brought them back. The installer and the uninstaller now ask for Cubase to be closed first.
+- **Fixed (23.11.2026, confirmed at a login): a port opened at login could refuse every send.** Right after login
+  (with Windows MIDI Services running) the bridge opened "UF8 to Cubase" on its 11th-13th try, then the first SysEx
+  failed ("MidiOutWinMM::sendMessage: error preparing sysex header"); the error was not caught, so the bridge ended
+  and the tray app said it had restarted it (21.11.2026). Catching and retrying alone did not help: every send on
+  that open failed, and the UF8 never reached Cubase; a fresh open did. Now a failed send opens the port again (at
+  most every 2 s) and sends once more, and sends start only once the first open is done. Seen working at the
+  23.11.2026 login: one failed send, "opened again (try 1)", "went through after opening it again", the UF8 fine.
 - **Fixed (19.11.2026, confirmed at a restart): "The bridge stopped and was started again" right after logging in.**
   The tray app makes the MIDI ports at login and starts the bridge, which found a port but could not open it yet
   ("MidiOutWinMM::openPort: error creating Windows MM MIDI output port") and ended; the tray app started it again
