@@ -300,7 +300,8 @@ Two views, both left with the same key that entered them (or with CHANNEL):
   pan on the faders (its value in the dB field). Tap again to swap back.
 - **All sends of the selected track, on the V-pots.** **Hold FLIP** for about half a second (it lights): the eight
   V-pots are sends 1–8 of the selected track, the displays show where each goes and its level. **Push a V-pot** to
-  switch that send on / off. The faders stay on volume. Select another track and the V-pots show its sends.
+  switch that send on / off. The faders are on volume (a send view or FLIP that was on is left). Select another
+  track and the V-pots show its sends. A tap on FLIP (or holding it again) leaves.
 
 ### FLIP and SSL Strip Mode
 

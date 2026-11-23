@@ -638,15 +638,19 @@ void handleFrame(const uf8frames::Frame& fr)
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
                     if (g != gen || !down) return;
                     held = true;
+                    // One mode at a time (23.11.2026: a hold then a tap gave the selected track's sends on the V-pots
+                    // and pan on the faders, which nothing drew). The selected track's sends: the faders on volume.
                     g_routeSelSends = !g_routeSelSends;
+                    if (g_routeSelSends) { g_routeFlip = false; g_routeSend = -1; }
                     if (g_routeSelSends && g_focus >= 0) unfocus();
                     applyRoute();
                 }).detach();
             } else if (down) {
                 down = false;
                 ++gen;
-                if (!held) {   // a tap
-                    g_routeFlip = !g_routeFlip;
+                if (!held) {   // a tap: out of the selected track's sends (FLIP is lit), else FLIP on / off
+                    if (g_routeSelSends) g_routeSelSends = false;
+                    else g_routeFlip = !g_routeFlip;
                     applyRoute();
                 }
             }
@@ -656,6 +660,7 @@ void handleFrame(const uf8frames::Frame& fr)
             if (pressed) {
                 const int n = d[3] - 0x48;
                 g_routeSend = g_routeSend == n ? -1 : n;
+                g_routeSelSends = false;   // (one mode at a time)
                 applyRoute();
             }
             break;
