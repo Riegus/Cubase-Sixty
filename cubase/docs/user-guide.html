@@ -85,6 +85,7 @@ mark.cur { background: #f0a030; }
 <li><a href="#what-you-need">What you need</a></li>
 <li><a href="#installing">Installing</a><ul>
 <li><a href="#what-the-installer-changes-on-your-pc">What the installer changes on your PC</a></li>
+<li><a href="#updating">Updating</a></li>
 </ul>
 </li>
 <li><a href="#setting-up-cubase-once">Setting up Cubase (once)</a></li>
@@ -205,6 +206,13 @@ preferences as they are (to undo those changes, see Setting up Cubase below).</p
 Give them back to SSL 360</strong> before uninstalling: that removes the driver and the certificate (see
 <a href="#going-back-to-ssl-360">Going back to SSL 360</a>). A recent Windows restore point or backup before installing the
 driver is a sensible precaution.</p>
+<h3 id="updating">Updating</h3>
+<p>Run the new version's installer over the old one; there is no need to uninstall first. Close Cubase first (the
+installer asks you to). Your settings, favourites and Cubase's settings for Cubase-Sixty stay as they are.</p>
+<p>On Windows 11 with Windows' new MIDI system (Windows MIDI Services), the installer may pause for about 10 seconds while
+closing Cubase-Sixty: the old copy cannot fully end there until the PC restarts. The installer then puts the files the
+old copy still holds aside (as <code>.old</code> files in the program folder) and installs the new ones beside them, and the new
+version starts as usual. The <code>.old</code> files are removed by themselves after the next restart.</p>
 </div><div class="card"><h2 id="setting-up-cubase-once">Setting up Cubase (once)</h2>
 <p>Start Cubase with Cubase-Sixty running. Cubase finds the scripts and the ports by itself: <em>Studio &gt; MIDI Remote
 Manager</em> lists CubaseSixty - UF8, UF1, UC1 and Helper (the Helper has no hardware; it keeps lists for the others).

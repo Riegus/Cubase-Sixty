@@ -106,6 +106,16 @@ Give them back to SSL 360** before uninstalling: that removes the driver and the
 [Going back to SSL 360](#going-back-to-ssl-360)). A recent Windows restore point or backup before installing the
 driver is a sensible precaution.
 
+### Updating
+
+Run the new version's installer over the old one; there is no need to uninstall first. Close Cubase first (the
+installer asks you to). Your settings, favourites and Cubase's settings for Cubase-Sixty stay as they are.
+
+On Windows 11 with Windows' new MIDI system (Windows MIDI Services), the installer may pause for about 10 seconds while
+closing Cubase-Sixty: the old copy cannot fully end there until the PC restarts. The installer then puts the files the
+old copy still holds aside (as `.old` files in the program folder) and installs the new ones beside them, and the new
+version starts as usual. The `.old` files are removed by themselves after the next restart.
+
 ## Setting up Cubase (once)
 
 Start Cubase with Cubase-Sixty running. Cubase finds the scripts and the ports by itself: *Studio > MIDI Remote
