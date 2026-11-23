@@ -403,6 +403,7 @@ void updateIcon()
 
 void notify(const std::wstring& title, const std::wstring& text)
 {
+    if (g_quitting) return;   // (also while Windows shuts down: nothing left to read it)
     g_nid.uFlags = NIF_INFO;
     wcsncpy_s(g_nid.szInfoTitle, title.c_str(), _TRUNCATE);
     wcsncpy_s(g_nid.szInfo, text.c_str(), _TRUNCATE);
@@ -738,6 +739,22 @@ LRESULT CALLBACK wndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     switch (msg) {
+    // Windows is shutting down or signing out (23.11.2026: a message flashed at shutdown; the tray app did not know,
+    // took the bridge being ended for a crash and started it again). Nothing is restarted or shown from here on.
+    case WM_QUERYENDSESSION:
+        if (!g_quitting) trayLog(L"Windows is shutting down or signing out");
+        g_quitting = true;
+        return TRUE;
+    case WM_ENDSESSION:
+        if (wp) {
+            trayLog(L"the session ends: stopping the bridge");
+            stopBridge();
+        } else {
+            trayLog(L"the shutdown was cancelled: carrying on");
+            g_quitting = false;
+            if (!g_bridgeRunning) startBridge();
+        }
+        return 0;
     case kTrayMsg:
         // A click opens the Settings page (the menu while there is none); the right button the menu.
         // (Version 4 icons: a click comes as NIN_SELECT, the right button as WM_CONTEXTMENU; each once.)
@@ -926,6 +943,14 @@ void removeSetAside()
 
 } // namespace
 
+// The running copy's window: a hidden top-level window since 23.11.2026 (message-only before, which Windows does not
+// tell about shutting down; a copy from before is still found).
+HWND findRunning()
+{
+    if (HWND w = FindWindowW(L"CubaseSixtyTray", nullptr)) return w;
+    return FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr);
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
 {
     wchar_t self[MAX_PATH];
@@ -935,7 +960,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     // --quit (the installer, before replacing or removing files): asks the running copy to quit, as its menu's Quit
     // does (the bridge stops and blanks the surfaces), and waits until it has (10 s at most).
     if (cmdLine && wcsstr(cmdLine, L"--quit")) {
-        if (HWND running = FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr)) {
+        if (HWND running = findRunning()) {
             DWORD pid = 0;
             GetWindowThreadProcessId(running, &pid);
             HANDLE proc = OpenProcess(SYNCHRONIZE, FALSE, pid);
@@ -955,7 +980,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     // --restart (dev-restart.ps1 -BridgeOnly): asks the running copy to restart the bridge, as its menu does; the
     // ports stay.
     if (cmdLine && wcsstr(cmdLine, L"--restart")) {
-        if (HWND running = FindWindowExW(HWND_MESSAGE, nullptr, L"CubaseSixtyTray", nullptr))
+        if (HWND running = findRunning())
             PostMessageW(running, WM_COMMAND, kCmdRestart, 0);
         return 0;
     }
@@ -985,7 +1010,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR cmdLine, int)
     wc.hInstance = inst;
     wc.lpszClassName = L"CubaseSixtyTray";
     RegisterClassW(&wc);
-    g_wnd = CreateWindowW(wc.lpszClassName, L"Cubase-Sixty", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, inst, nullptr);
+    // A hidden top-level window (never shown; a tool window, so no taskbar button), not a message-only one: only
+    // top-level windows are told that Windows is shutting down (WM_QUERYENDSESSION / WM_ENDSESSION).
+    g_wnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"Cubase-Sixty", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, inst, nullptr);
 
     g_icons[0] = makeIcon(RGB(220, 50, 47));
     g_icons[1] = makeIcon(RGB(240, 180, 30));
