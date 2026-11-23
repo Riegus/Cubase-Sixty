@@ -351,11 +351,47 @@ void driveFader(int s, uint16_t v14, bool db = false)
     for (auto& f : frames) g_dev.send(std::move(f));
 }
 std::atomic<bool> g_routeSelSends{false}, g_routeFlip{false};
+// FLIP in a fader send view (23.11.2026, as Rea-Sixty swaps a send's level and pan; Cubase gives no send pan): each
+// track's send on its V-pot, the track's pan on the fader. faderOnSend / vpotOnSend: where a send level is.
+bool flipSend() { return g_routeSend >= 0 && g_routeFlip && !g_routeSelSends; }
+bool faderOnSend() { return g_routeSend >= 0 && !flipSend(); }
+bool vpotOnSend() { return (g_routeSelSends && g_routeSend < 0) || flipSend(); }
 // The fader send view names the send in each strip's value line, the pan value kept on the right (20.11.2026: CUT is
 // the send's on switch there, and a lit CUT was taken for a mute). Where each strip's sends go: script SysEx 3A.
 std::mutex g_sendDestMx;
 std::array<std::array<std::string, 8>, 8> g_sendDest;   // [strip][send]
 std::array<std::string, 8> g_panText;                   // Cubase's pan text per strip (the value line's right part)
+// "S1 RvrbVcl": the send's number and where it goes, inside the value line's left field (about 10 characters),
+// shortened as track names are (Settings: Long track names). Past it the UF8 draws in the value's colour and the value
+// field clips from the left: "S1 Reverb.Vocal" showed as "S1 Reverb. ocal" beside the pan, and as "S1 Reverb.V" +
+// "ocal" in yellow without one, 23.11.2026. dest: Cubase's title with the slot number taken off.
+std::string sendLabel(int send, std::string dest)
+{
+    const std::string tag = "S" + std::to_string(send + 1) + " ";
+    if (!dest.empty()) dest = cs::fitName(dest, int(10 - tag.size()));
+    for (char& c : dest) if (c == ' ') c = '.';
+    return tag + (dest.empty() ? std::string("-") : dest);
+}
+// Cubase's send title without its slot number ("1- Roo Rvb" -> "Roo Rvb"; an empty slot, "1", -> "").
+std::string sendDestName(std::string dest)
+{
+    size_t at = 0;
+    while (at < dest.size() && std::isdigit(static_cast<unsigned char>(dest[at]))) ++at;
+    if (at > 0 && at < dest.size() && dest[at] == '-') {
+        ++at;
+        while (at < dest.size() && dest[at] == ' ') ++at;
+        dest.erase(0, at);
+    } else if (at > 0 && dest.find_first_not_of(' ', at) == std::string::npos) dest.clear();
+    return dest;
+}
+// The V-pot send line's left part: the send's name under FLIP in a send view, else "Send" (the selected track's).
+std::string vpotSendLabel(int s)
+{
+    if (!flipSend()) return "Send";
+    std::string dest;
+    { std::lock_guard<std::mutex> lk(g_sendDestMx); dest = g_sendDest[size_t(s)][size_t(g_routeSend.load())]; }
+    return sendLabel(g_routeSend, sendDestName(dest));
+}
 std::string valueLineFor(int s)
 {
     std::string right, left;
@@ -364,26 +400,10 @@ std::string valueLineFor(int s)
     if (send >= 0 && !g_routeSelSends) {
         std::string dest;
         { std::lock_guard<std::mutex> lk(g_sendDestMx); dest = g_sendDest[size_t(s)][size_t(send)]; }
-        // Cubase's title carries the slot number ("1- Roo Rvb"): taken off. A space in the name is shown as a dot: the
-        // UF8 takes the first space after about the tenth character for the start of the value and draws the rest in
-        // the value's colour ("Roo" white, "Rvb" yellow; 20.11.2026).
-        size_t at = 0;
-        while (at < dest.size() && std::isdigit(static_cast<unsigned char>(dest[at]))) ++at;
-        if (at > 0 && at < dest.size() && dest[at] == '-') {
-            ++at;
-            while (at < dest.size() && dest[at] == ' ') ++at;
-            dest.erase(0, at);
-        }
-        // An empty slot is named by its number alone ("1", "2"): no send.
-        else if (at > 0 && dest.find_first_not_of(' ', at) == std::string::npos) dest.clear();
-        // The name stays inside the line's left field (about 10 characters), shortened as track names are
-        // (Settings: Long track names). Past it the UF8 draws in the value's colour and the value field clips from
-        // the left: "S1 Reverb.Vocal" showed as "S1 Reverb. ocal" beside the pan, and as "S1 Reverb.V" + "ocal" in
-        // yellow without one (FLIP), 23.11.2026.
-        const std::string tag = "S" + std::to_string(send + 1) + " ";
-        if (!dest.empty()) dest = cs::fitName(dest, int(10 - tag.size()));
-        for (char& c : dest) if (c == ' ') c = '.';
-        left = tag + (dest.empty() ? std::string("-") : dest);
+        // Cubase's title carries the slot number ("1- Roo Rvb"): taken off; an empty slot ("1") is no send. A space
+        // is shown as a dot (the UF8 takes a space after about the tenth character for the start of the value).
+        dest = sendDestName(dest);
+        left = sendLabel(send, dest);
     } else left = "Pan";
     if (right.size() > 15) right.resize(15);
     const size_t room = 19 - right.size() - (right.empty() ? 0 : 1);
@@ -498,7 +518,9 @@ void applyRoute()
     const int send = g_routeSend;
     const bool flip = g_routeFlip, sel = g_routeSelSends;
     // 40 ms apart: Cubase now and then lost the second of two back-to-back notes (the V-pots kept the old route).
-    const uint8_t faderNote = uint8_t(send >= 0 ? 82 + send : flip ? 81 : 80), vpotNote = uint8_t(sel ? 92 : flip ? 91 : 90);
+    const bool fs = flipSend();
+    const uint8_t faderNote = uint8_t(fs ? 81 : send >= 0 ? 82 + send : flip ? 81 : 80),
+                  vpotNote = uint8_t(sel ? 92 : fs ? 110 + send : flip ? 91 : 90);   // (110-117: 100-107 are the views)
     note2(faderNote);
     std::thread([vpotNote] { std::this_thread::sleep_for(std::chrono::milliseconds(40)); note2(vpotNote); }).detach();
     static const uf8::Uf8GlobalLed sp[8] = { uf8::Uf8GlobalLed::SendPlugin1, uf8::Uf8GlobalLed::SendPlugin2, uf8::Uf8GlobalLed::SendPlugin3,
@@ -507,8 +529,8 @@ void applyRoute()
     for (int i = 0; i < 8; ++i) sendLedFrames(uf8::buildUf8GlobalLed(sp[i], i == send));
     sendLedFrames(uf8::buildUf8GlobalLed(uf8::Uf8GlobalLed::Flip, flip || sel));
     paintPanFine();
-    // The value lines: the send's name in a fader send view, "Pan" outside it (the V-pot send view draws its own).
-    if (!sel)
+    // The value lines: the send's name in a fader send view, "Pan" outside it (the V-pot send views draw their own).
+    if (!sel && !fs)
         for (int s = 0; s < kStrips; ++s) {
             bool has;
             { std::lock_guard<std::mutex> lk(g_sendDestMx); has = !g_panText[size_t(s)].empty(); }
@@ -548,13 +570,13 @@ void handleFrame(const uf8frames::Frame& fr)
         const auto r = uf8fader::read(pb14, (d[4] & 0x80) != 0, /*grabValid=*/false);
         if (!r.usable) return;
         // A level (volume, or a send in a fader send view) by dB; pan (FLIP) and an SSL strip's fader linear.
-        const bool dbScale = g_routeSend >= 0 || (!g_stripFader[s] && !g_routeFlip);
+        const bool dbScale = faderOnSend() || (!g_stripFader[s] && !g_routeFlip);
         const uint16_t v = dbScale ? uint16_t(std::clamp(cs::levelPosOf(motorToDb(r.pbOut)), 0, 16383)) : pbToMidi14(r.pbOut);
         g_handHw[s] = r.pbOut;   // (the motor's own units: the fader-scale calibration logs it on release)
         // Strip mode, and always in a fader send view (the fader's binding there is a placeholder on the send's on switch).
-        if (g_stripFader[s] || g_routeSend >= 0) sendHandToScript(s, v);
+        if (g_stripFader[s] || faderOnSend()) sendHandToScript(s, v);
         else sendMidi({uint8_t(0xE0 | s), uint8_t(v & 0x7F), uint8_t((v >> 7) & 0x7F)});
-        if (g_routeSend >= 0 && !g_stripEmpty[s]) {   // the dB field at once, from the send level curve
+        if (faderOnSend() && !g_stripEmpty[s]) {   // the dB field at once, from the send level curve
             // From the whole curve (built-in points, a fit below the lowest): the learnt one alone had a gap below about
             // -18 dB, where nothing was drawn and Cubase's late text showed (15.11.2026).
             const std::string t = levelFieldText(cs::levelDbOf(int(v)));
@@ -601,21 +623,36 @@ void handleFrame(const uf8frames::Frame& fr)
     case 0x22: {   // button: FF 22 03 id 00 state ck
         const bool pressed = d[5] == 0x01;
         if (d[3] == 0x54) {   // FLIP: a tap swaps faders and V-pots; held 0.4 s: the selected track's sends on the V-pots
+            // As NAV: gen is one per press (a release or a new press makes the timer of the last press do nothing),
+            // held says the timer of this press fired, so its release is no tap. (Until 23.11.2026 the timer set gen
+            // to -1 instead; the next press counted up to 0, its release was not taken for a tap and its timer fired:
+            // after one hold every tap was a hold.)
             static std::atomic<int> gen{0};
+            static std::atomic<bool> held{false};
+            static std::atomic<bool> down{false};   // (a release without its press is no tap)
             if (pressed) {
+                down = true;
+                held = false;
                 const int g = ++gen;
                 std::thread([g] {
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
-                    if (g != gen) return;
-                    gen = -1;   // the release does nothing more
+                    if (g != gen || !down) return;
+                    held = true;
+                    // One mode at a time (23.11.2026: a hold then a tap gave the selected track's sends on the V-pots
+                    // and pan on the faders, which nothing drew). The selected track's sends: the faders on volume.
                     g_routeSelSends = !g_routeSelSends;
+                    if (g_routeSelSends) { g_routeFlip = false; g_routeSend = -1; }
                     if (g_routeSelSends && g_focus >= 0) unfocus();
                     applyRoute();
                 }).detach();
-            } else if (gen > 0) {
-                ++gen;   // a tap
-                g_routeFlip = !g_routeFlip;
-                applyRoute();
+            } else if (down) {
+                down = false;
+                ++gen;
+                if (!held) {   // a tap: out of the selected track's sends (FLIP is lit), else FLIP on / off
+                    if (g_routeSelSends) g_routeSelSends = false;
+                    else g_routeFlip = !g_routeFlip;
+                    applyRoute();
+                }
             }
             break;
         }
@@ -623,6 +660,7 @@ void handleFrame(const uf8frames::Frame& fr)
             if (pressed) {
                 const int n = d[3] - 0x48;
                 g_routeSend = g_routeSend == n ? -1 : n;
+                g_routeSelSends = false;   // (one mode at a time)
                 applyRoute();
             }
             break;
@@ -793,7 +831,7 @@ void handleFrame(const uf8frames::Frame& fr)
         }
         // Strip mode: centre the strip's pan; the V-pot send view: the selected track's send on / off (always the script's
         // way there: the V-pot's binding is a placeholder on the send's on switch).
-        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && (g_stripPan[d[3] - 0x08] || (g_routeSelSends && g_routeSend < 0))) {
+        if (d[3] >= 0x08 && d[3] <= 0x0F && g_focus < 0 && (g_stripPan[d[3] - 0x08] || vpotOnSend())) {
             if (pressed) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x29, uint8_t(d[3] - 0x08), 0xF7});
             break;
         }
@@ -910,7 +948,7 @@ void handleFrame(const uf8frames::Frame& fr)
         // FINE: a quarter of the way. A send level (kept here) takes a quarter step; the others go on as whole steps,
         // one for every four (the rest kept for the next frame; it starts again when the direction changes).
         const bool fine = fineOn();
-        const bool sendTurn = g_focus < 0 && g_routeSelSends && g_routeSend < 0;
+        const bool sendTurn = g_focus < 0 && vpotOnSend();
         int delta = raw;
         if (fine && !sendTurn) {
             static int acc[8] = {};
@@ -922,8 +960,8 @@ void handleFrame(const uf8frames::Frame& fr)
         }
         const double sendStep = raw / (fine ? 400.0 : 100.0);
         if (g_focus >= 0) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x22, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});   // the focused parameter
-        else if (g_stripPan[s] || (g_routeSelSends && g_routeSend < 0)) {   // strip mode's pan; a send (V-pot send view)
-            const bool sends = g_routeSelSends && g_routeSend < 0;
+        else if (g_stripPan[s] || vpotOnSend()) {   // strip mode's pan; a send (the V-pot send views)
+            const bool sends = vpotOnSend();
             if (!sends) sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x28, s, uint8_t(std::clamp(64 + delta, 1, 127)), 0xF7});
             if (sends && !g_selSendHas[s]) ++g_selSendLog[s].refused;
             if (sends && g_selSendHas[s]) {   // (an empty send slot: nothing to turn)
@@ -963,8 +1001,8 @@ void handleFrame(const uf8frames::Frame& fr)
                 ++(t.empty() ? g_selSendLog[s].gap : g_selSendLog[s].curve);
                 if (!t.empty() && g_focus < 0) {
                     if (const size_t at = t.rfind("dB"); at != std::string::npos && at > 0 && t[at - 1] != ' ') t.insert(at, " ");
-                    std::string line = "Send";
-                    if (t.size() > 14) t.resize(14);
+                    std::string line = vpotSendLabel(s);
+                    if (t.size() > 18 - line.size()) t.resize(18 - line.size());
                     line.append(19 - line.size() - t.size(), ' ');
                     line += t;
                     g_dev.send(uf8::buildValueLine(s, line));
@@ -1465,7 +1503,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
             g_dbText[m[5]] = v;
             if (g_routeSend < 0 && !g_routeFlip && !g_stripFader[m[5]] && !g_noProject) cs::fader0dbSeen(v, g_volPb[m[5]]);
             const uint8_t s = m[5];
-            if (g_routeSend >= 0 && (g_touched[s] || nowMs8() < g_dbOwnUntil[s])) {
+            if (faderOnSend() && (g_touched[s] || nowMs8() < g_dbOwnUntil[s])) {
                 // The hand is on it (fader send view): this one shown once the hand has been off for 0.5 s, unless a
                 // newer one comes.
                 const int gen = ++g_dbHeldGen[s];
@@ -1475,7 +1513,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
                         if (gen != g_dbHeldGen[s]) return;
                         if (g_touched[s] || nowMs8() < g_dbOwnUntil[s]) continue;
                         const bool late = lateDbText(s, v);
-                        if (g_routeSend >= 0 && !g_stripEmpty[s] && !late) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+                        if (faderOnSend() && !g_stripEmpty[s] && !late) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
                         std::string drawn; int pos = 0;
                         { std::lock_guard<std::mutex> lk(g_dbDrawnMx); drawn = g_dbDrawn[s]; pos = g_dbDrawnPos[s]; }
                         std::printf("UF8 send fader %d stopped at %d: drawn %s, Cubase %s%s\n", s + 1, pos, drawn.c_str(), v.c_str(),
@@ -1485,9 +1523,10 @@ void onMidiIn(std::vector<unsigned char>& msg)
                 }).detach();
             } else {
                 ++g_dbHeldGen[s];   // (a held one is older)
-                const bool recent = g_routeSend >= 0 && nowMs8() < g_dbOwnUntil[s] + 3000;
+                const bool recent = faderOnSend() && nowMs8() < g_dbOwnUntil[s] + 3000;
                 const bool late = recent && lateDbText(s, v);
-                if (!g_stripEmpty[s] && !late) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() ? "" : "dB"));
+                // (FLIP in a send view: the fader's pan here, no "dB".)
+                if (!g_stripEmpty[s] && !late) g_dev.send(uf8::buildFaderDbReadout(s, v, v.empty() || flipSend() ? "" : "dB"));
                 if (recent) std::printf("UF8 send fader %d: Cubase later %s%s\n", s + 1, v.c_str(), late ? " (late: not shown)" : "");
             }
         } else if (m.size() >= 7 && m[4] == 0x1C) {
@@ -1624,7 +1663,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         } else if (m.size() >= 8 && m[4] == 0x3A && m[5] < kStrips && m[6] < 8) {
             // Where a strip's send goes (its name in the fader send view's value line).
             { std::lock_guard<std::mutex> lk(g_sendDestMx); g_sendDest[m[5]][m[6]].assign(m.begin() + 7, m.end() - 1); }
-            if (g_routeSend == m[6] && !g_routeSelSends) {
+            if (g_routeSend == m[6] && !g_routeSelSends && !flipSend()) {
                 g_panLine[m[5]] = valueLineFor(m[5]);
                 if (g_focus < 0 && !g_stripEmpty[m[5]]) g_dev.send(uf8::buildValueLine(uint8_t(m[5]), g_panLine[m[5]]));
             }
@@ -1658,13 +1697,13 @@ void onMidiIn(std::vector<unsigned char>& msg)
             if (g_stripFader[s] && !g_touched[s]) {
                 if (nowMs8() - g_handAt[s] < 3000 && std::abs(pos - g_handPos[s]) > 64)
                     std::printf("UF8 fader %d: late position %d from Cubase ignored (hand at %d)\n", s + 1, pos, g_handPos[s].load());
-                else driveFader(s, uint16_t(pos), g_routeSend >= 0);   // (a send level by dB; an SSL strip's fader linear)
+                else driveFader(s, uint16_t(pos), faderOnSend());   // (a send level by dB; an SSL strip's fader linear)
             }
         } else if (m.size() >= 7 && m[4] == 0x0D && m[5] < kStrips) {
             // A send level on the V-pot (the selected track's sends): "Send" left, the level right.
             std::string v(m.begin() + 6, m.end() - 1);
-            if (v.size() > 14) v.resize(14);
-            std::string line = "Send";
+            std::string line = vpotSendLabel(m[5]);
+            if (v.size() > 18 - line.size()) v.resize(18 - line.size());
             line.append(19 - line.size() - v.size(), ' ');
             line += v;
             g_panLine[m[5]] = line;
@@ -1744,7 +1783,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         const uint16_t v = uint16_t((m[1] & 0x7F) | ((m[2] & 0x7F) << 7));
         // A fader send view: the faders are the script's (27, the send levels through Direct Access); what Cubase sends
         // here is a placeholder binding and must not move the motors, nor be kept as the volume.
-        if (g_routeSend >= 0) return;
+        if (faderOnSend()) return;
         g_volPb[s] = v;
         if (!g_routeFlip && !g_stripFader[s] && !g_noProject) cs::fader0dbSeen(g_dbText[s], v);
         if (g_touched[s] || g_stripFader[s]) return;   // hand wins; strip mode: the strip's fader drives it

@@ -211,7 +211,7 @@ function sharedVariable(name, setup) {
 //   V-pots: note 90 = track pan, 91 = track volume (FLIP), 92 = sends 1-8 of the selected track (long FLIP,
 //           Rea-Sixty's "8 sends of focused track")
 // The strip's name shows the send's destination while a send view is on (the faders' one wins).
-var route = { fader: 'vol', send: -1, vpot: 'pan' }   // fader: vol / pan / send (send = 0..7); vpot: pan / vol / sends
+var route = { fader: 'vol', send: -1, vpot: 'pan', vsend: -1 }   // fader: vol / pan / send (send = 0..7); vpot: pan / vol / sends / trackSend (vsend = 0..7)
 var uf8FlipActive = false   // (the fader on pan)
 var flipResets = []
 var sendTitles = []       // [strip][send]: each banked track's send destinations
@@ -248,6 +248,10 @@ function paintStripName(activeDevice, index) {
 	key(90, function (v) { return v.vpotPan }, function () { route.vpot = 'pan' })
 	key(91, function (v) { return v.vpotVol }, function () { route.vpot = 'vol' })
 	key(92, function (v) { return v.vpotSends }, function () { route.vpot = 'sends' })
+	// FLIP in a fader send view (23.11.2026, as Rea-Sixty swaps a send's level and pan; Cubase gives no send pan): each
+	// track's send N on its V-pot (notes 110-117; 100-107 are the track views), the faders on pan. One sub page per
+	// send, so going from one to another activates.
+	for (var vn = 0; vn < 8; ++vn) (function (n) { key(110 + n, function (v) { return v.vpotTrackSend[n] }, function () { route.vpot = 'trackSend'; route.vsend = n }) })(vn)
 	eachPage(function (page, bankZone, view) {
 		var faderArea = page.makeSubPageArea('Faders')
 		var vpotArea = page.makeSubPageArea('VPots')
@@ -258,6 +262,8 @@ function paintStripName(activeDevice, index) {
 		view.vpotPan = vpotArea.makeSubPage('Pan')
 		view.vpotVol = vpotArea.makeSubPage('Volume')
 		view.vpotSends = vpotArea.makeSubPage('SelectedSends')
+		view.vpotTrackSend = []
+		for (var vs = 0; vs < 8; ++vs) view.vpotTrackSend.push(vpotArea.makeSubPage('TrackSend' + (vs + 1)))
 		view.routeSelected = page.mHostAccess.mTrackSelection.mMixerChannel
 		for (var k = 0; k < keys.length; ++k) (function (key) {
 			var sub = key.sub(view)
@@ -304,13 +310,14 @@ eachPage(function (page, bankZone, view) {
 			var sendSlot = channel.mSends.getByIndex(sn)
 			page.makeValueBinding(strip.fader.mSurfaceValue, sendSlot.mOn).setSubPage(view.faderSend[sn])   // (placeholder: see "Send views")
 			page.makeValueBinding(strip.cut.mSurfaceValue, sendSlot.mOn).setTypeToggle().setSubPage(view.faderSend[sn])
+			page.makeValueBinding(strip.vpot.mSurfaceValue, sendSlot.mOn).setSubPage(view.vpotTrackSend[sn])   // (placeholder: the level through Direct Access)
 			;(function (index, n) {
 				sendSlot.mOnTitleChange = function (activeDevice, activeMapping, title) {
 					// Where the send goes, to the bridge (SysEx 3A <strip> <send> <name>): the fader send view names it in
 					// each strip's value line (20.11.2026: CUT there is the send's on switch, easy to take for mute).
 					if ((title || '') !== sendTitles[index][n]) sendMidi(activeDevice, SYSEX_HEADER.concat([0x3A, index, n], toAscii7(title || ''), [0xF7]))
 					sendTitles[index][n] = title || ''
-					if (route.fader === 'send' && route.send === n) skRescanAt = Date.now() + 150   // a send added / removed: the fader's target
+					if ((route.fader === 'send' && route.send === n) || (route.vpot === 'trackSend' && route.vsend === n)) skRescanAt = Date.now() + 150   // a send added / removed: the fader's / V-pot's target
 				}
 			})(i, sn)
 		}
@@ -464,23 +471,24 @@ for (var i = 0; i < STRIPS; ++i) {
 		function vpotDisplay(activeDevice, value, units) {
 			vpotShown.value = value; vpotShown.units = units
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || { pos: 0.5 }; trackPan[index].value = value; trackPan[index].units = units }
-			if (route.vpot === 'sends') return   // (the send levels are shown from Direct Access)
+			if (route.vpot === 'sends' || route.vpot === 'trackSend') return   // (the send levels are shown from Direct Access)
 			else if (route.vpot === 'vol') dbText(activeDevice, value)
 			else panText(activeDevice, value, units)
 		}
 		function vpotProcess(activeDevice, value) {
 			vpotShown.pos = value
 			if (route.vpot === 'pan') { trackPan[index] = trackPan[index] || {}; trackPan[index].pos = value }
-			if (route.vpot === 'sends') return
+			if (route.vpot === 'sends' || route.vpot === 'trackSend') return
 			else if (route.vpot === 'pan') panPos(activeDevice, value)
 		}
 		function faderDisplay(activeDevice, value, units) {
 			faderShown.value = value; faderShown.units = units
-			if (route.fader === 'pan') panText(activeDevice, value, units); else dbText(activeDevice, value)
+			// (With a send on the V-pot, its level has the value line and the ring: the fader's pan goes to the dB field.)
+			if (route.fader === 'pan' && route.vpot !== 'trackSend') panText(activeDevice, value, units); else dbText(activeDevice, value)
 		}
 		function faderProcess(activeDevice, value) {
 			faderShown.pos = value
-			if (route.fader === 'pan') panPos(activeDevice, value)
+			if (route.fader === 'pan' && route.vpot !== 'trackSend') panPos(activeDevice, value)
 		}
 		vpot.mSurfaceValue.mOnDisplayValueChange = vpotDisplay
 		vpot.mSurfaceValue.mOnProcessValueChange = vpotProcess
@@ -1452,6 +1460,12 @@ function stripModeUpdate(activeDevice, index) {
 		if (fTag >= 0) { fKind = 'plugin'; fObj = st.obj }
 		if (vTag >= 0) { vKind = 'plugin'; vObj = st.obj; vDa = skDa[index] }
 	}
+	if (route.vpot === 'trackSend' && route.vsend >= 0) {   // each track's send N on its V-pot (FLIP in a send view)
+		vKind = 'send'; vDa = skDa[index]; vObj = -1; vTag = -1
+		var ts = null
+		if (!emptySend(sendTitles[index][route.vsend])) { try { ts = sendSlotLevel(skDa[index], route.vsend) } catch (e) {} }
+		if (ts) { vObj = ts.obj; vTag = ts.tag; vOn = ts.on }
+	}
 	if (route.vpot === 'sends' && route.fader !== 'send') {
 		vKind = 'send'; vDa = selDa; vObj = -1; vTag = -1
 		var vs = null
@@ -1813,11 +1827,11 @@ function pageIdle(activeDevice, activeMapping) {
 	if (armed.dirty && curView && curView.armed) { armed.dirty = false; try { armedLayout(activeDevice) } catch (e) { out('[CubaseSixty] ARMED: ' + e) } }
 	if (curView && curView.armed) { armedIdle(activeDevice); armedCheck(activeDevice) }
 	if (selWin.job) { try { selWinIdle(activeDevice) } catch (e) { selWin.job = null; out('[CubaseSixty] SSL strip window: ' + e) } }
-	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { sendViewPoll(activeDevice) } catch (e) {} }
+	if (stripModeOn || route.fader === 'send' || route.vpot === 'sends' || route.vpot === 'trackSend') { try { sendViewPoll(activeDevice) } catch (e) {} }
 	if (skRescanAt && Date.now() >= skRescanAt) {
 		skRescanAt = 0
 		if (skFocus) { try { skReportAll(activeDevice) } catch (e) { out('[CubaseSixty] soft keys: ' + e) } }
-		if (stripModeOn || route.fader === 'send' || route.vpot === 'sends') { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
+		if (stripModeOn || route.fader === 'send' || route.vpot === 'sends' || route.vpot === 'trackSend') { try { stripModeUpdateAll(activeDevice) } catch (e) { out('[CubaseSixty] strip mode: ' + e) } }
 	}
 }
 
