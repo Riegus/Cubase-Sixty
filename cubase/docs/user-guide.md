@@ -239,8 +239,7 @@ Mode. Switching views keeps the fader and V-pot mode, and the strips land on the
 view.
 
 **ARMED** shows the armed tracks in project order, eight at a time; BANK and PAGE go through them, and selecting an
-armed track that is not on the strips brings its eight. Arming or disarming a track (with the mouse, a top soft key,
-SEL in REC) adds or removes it at once. Strips without an armed track are dark and do nothing. Arming a VCA arms
+armed track that is not on the strips brings its eight. Arming or disarming a track (with the mouse, or SEL in REC) adds or removes it at once. Strips without an armed track are dark and do nothing. Arming a VCA arms
 the tracks linked to it; those show in ARMED, the VCA does not.
 
 The view the UF8 starts on (ALL, any view, or the last one used) and which views the picker offers are in
