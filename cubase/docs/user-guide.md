@@ -307,7 +307,7 @@ Two views, both left with the same key that entered them (or with CHANNEL):
 
 - **FLIP** (a tap) swaps faders and V-pots: pan on the faders, volume on the V-pots. Tap again to swap back. In a
   send view a tap puts the send on the V-pots and the pan on the faders (see [Sends on the UF8](#sends-on-the-uf8)).
-  A tap or a hold, not both at once: FLIP is always in one of these, and CHANNEL leaves any of them.
+  FLIP, the send views and the selected track's sends are never on together; CHANNEL leaves any of them.
 - **PLUGIN** is **SSL Strip Mode**: each fader moves the *fader inside the track's SSL channel strip*
   (its output level) instead of the track's volume, and the V-pot its pan. Use it when you mix "inside" the SSL
   strips and want the track faders left alone. Tracks without an SSL strip keep volume and pan. Press PLUGIN again
