@@ -376,11 +376,12 @@ std::string valueLineFor(int s)
         }
         // An empty slot is named by its number alone ("1", "2"): no send.
         else if (at > 0 && dest.find_first_not_of(' ', at) == std::string::npos) dest.clear();
-        // The name stays inside the line's left field (about 10 characters; the value field on the right is
-        // narrower than its 9 characters and clips from the left: "S1 Reverb.Vocal" showed as "S1 Reverb. ocal",
-        // 23.11.2026), shortened as track names are (Settings: Long track names), with the pan on the right.
+        // The name stays inside the line's left field (about 10 characters), shortened as track names are
+        // (Settings: Long track names). Past it the UF8 draws in the value's colour and the value field clips from
+        // the left: "S1 Reverb.Vocal" showed as "S1 Reverb. ocal" beside the pan, and as "S1 Reverb.V" + "ocal" in
+        // yellow without one (FLIP), 23.11.2026.
         const std::string tag = "S" + std::to_string(send + 1) + " ";
-        if (!right.empty() && !dest.empty()) dest = cs::fitName(dest, int(10 - tag.size()));
+        if (!dest.empty()) dest = cs::fitName(dest, int(10 - tag.size()));
         for (char& c : dest) if (c == ' ') c = '.';
         left = tag + (dest.empty() ? std::string("-") : dest);
     } else left = "Pan";
