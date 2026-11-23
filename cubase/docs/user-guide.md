@@ -189,7 +189,7 @@ Eight strips on a bank of the MixConsole's channels.
 
 | Control | What it does |
 |---------|--------------|
-| Fader | The track's volume, with touch: Touch and Latch automation write while your finger is on it. |
+| Fader | The track's volume, with touch: Touch and Latch automation write while your finger is on it. It sits on the printed dB scale; Cubase's faders stop at +6 dB, so the top of the scale (+12) is not reached. |
 | Display | Track name, number (top left, as in the MixConsole and on the UF1) and colour, the SSL plug-in on the track in the colour bar (CS 2, 4K E, Link, BC 2 …, as on the UF1; the selected track's number box is dimmed), the level in dB, a stereo meter, and a value line (pan, or what the V-pot is on). |
 | V-pot | Pan, with a position bar on the display. **Push: centres the pan** (Settings > Behaviour can make it open the track's channel editor instead). |
 | SOLO, CUT | Solo and mute. |
@@ -305,7 +305,9 @@ Two views, both left with the same key that entered them (or with CHANNEL):
 
 ### FLIP and SSL Strip Mode
 
-- **FLIP** (a tap) swaps faders and V-pots: pan on the faders, volume on the V-pots. Tap again to swap back.
+- **FLIP** (a tap) swaps faders and V-pots: pan on the faders, volume on the V-pots. Tap again to swap back. In a
+  send view a tap puts the send on the V-pots and the pan on the faders (see [Sends on the UF8](#sends-on-the-uf8)).
+  A tap or a hold, not both at once: FLIP is always in one of these, and CHANNEL leaves any of them.
 - **PLUGIN** is **SSL Strip Mode**: each fader moves the *fader inside the track's SSL channel strip*
   (its output level) instead of the track's volume, and the V-pot its pan. Use it when you mix "inside" the SSL
   strips and want the track faders left alone. Tracks without an SSL strip keep volume and pan. Press PLUGIN again
@@ -359,7 +361,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 
 | Control | What it does |
 |---------|--------------|
-| Fader | The selected track's volume, with touch. |
+| Fader | The selected track's volume, with touch, on the printed dB scale (up to Cubase's +6 dB). |
 | SOLO, CUT | Solo and mute. SEL shows the track's colour; bright while its channel editor is open. |
 | Knob above the fader | Pan. Push: the pan to the centre. |
 | Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
@@ -389,7 +391,8 @@ turn ("S1 Roo Rvb -6.02dB"; "S1 -" for an empty send).
 
 **The soft keys in DAW and SENDS** (the four keys under the display) jump to the **first, previous, next and last
 marker**, labelled. (A marker exactly at the project start is passed over by First Marker, which then lands on the
-one after it; Prev Marker from there goes back to it.) Settings > UF1 soft keys can put commands of your choice on them instead (undo, save, the
+one after it; Prev Marker from there goes back to it. In a project without markers, First and Last Marker go to the
+project start and end; the cursor stops at the other end for a moment on the way.) Settings > UF1 soft keys can put commands of your choice on them instead (undo, save, the
 MixConsole, the locators and more), or leave them free for Cubase's **Mapping Assistant** (MIDI Remote): they are
 then labelled USER 1–4, and you assign them in Cubase:
 

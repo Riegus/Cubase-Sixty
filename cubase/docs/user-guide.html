@@ -301,7 +301,7 @@ it: to undo, quit Cubase and rename it back to <code>Defaults.xml</code>.</p>
 <tbody>
 <tr>
 <td>Fader</td>
-<td>The track's volume, with touch: Touch and Latch automation write while your finger is on it.</td>
+<td>The track's volume, with touch: Touch and Latch automation write while your finger is on it. It sits on the printed dB scale; Cubase's faders stop at +6 dB, so the top of the scale (+12) is not reached.</td>
 </tr>
 <tr>
 <td>Display</td>
@@ -497,7 +497,9 @@ Q1 goes back to the channel strip.</p>
 </ul>
 <h3 id="flip-and-ssl-strip-mode">FLIP and SSL Strip Mode</h3>
 <ul>
-<li><strong>FLIP</strong> (a tap) swaps faders and V-pots: pan on the faders, volume on the V-pots. Tap again to swap back.</li>
+<li><strong>FLIP</strong> (a tap) swaps faders and V-pots: pan on the faders, volume on the V-pots. Tap again to swap back. In a
+  send view a tap puts the send on the V-pots and the pan on the faders (see <a href="#sends-on-the-uf8">Sends on the UF8</a>).
+  A tap or a hold, not both at once: FLIP is always in one of these, and CHANNEL leaves any of them.</li>
 <li><strong>PLUGIN</strong> is <strong>SSL Strip Mode</strong>: each fader moves the <em>fader inside the track's SSL channel strip</em>
   (its output level) instead of the track's volume, and the V-pot its pan. Use it when you mix "inside" the SSL
   strips and want the track faders left alone. Tracks without an SSL strip keep volume and pan. Press PLUGIN again
@@ -575,7 +577,7 @@ the selected event, like a double-click.</p>
 <tbody>
 <tr>
 <td>Fader</td>
-<td>The selected track's volume, with touch.</td>
+<td>The selected track's volume, with touch, on the printed dB scale (up to Cubase's +6 dB).</td>
 </tr>
 <tr>
 <td>SOLO, CUT</td>
@@ -622,7 +624,8 @@ the send on / off. The <strong>5–8</strong> key puts them on sends 5–8. The 
 turn ("S1 Roo Rvb -6.02dB"; "S1 -" for an empty send).</p>
 <p><strong>The soft keys in DAW and SENDS</strong> (the four keys under the display) jump to the <strong>first, previous, next and last
 marker</strong>, labelled. (A marker exactly at the project start is passed over by First Marker, which then lands on the
-one after it; Prev Marker from there goes back to it.) Settings &gt; UF1 soft keys can put commands of your choice on them instead (undo, save, the
+one after it; Prev Marker from there goes back to it. In a project without markers, First and Last Marker go to the
+project start and end; the cursor stops at the other end for a moment on the way.) Settings &gt; UF1 soft keys can put commands of your choice on them instead (undo, save, the
 MixConsole, the locators and more), or leave them free for Cubase's <strong>Mapping Assistant</strong> (MIDI Remote): they are
 then labelled USER 1–4, and you assign them in Cubase:</p>
 <ol>
