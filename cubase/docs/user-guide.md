@@ -206,7 +206,8 @@ Touching a fader can also select its track (Settings > Behaviour).
 - **The UF8 follows the selection.** Select a track that is not on the strips, with the mouse or from another
   surface, and the UF8 banks to it. A far jump takes a moment (Cubase can only bank step by step); the UF8 waits and
   shows the result in one go. At start-up it goes to the selected track too.
-- **CHANNEL** is "home": faders on volume, V-pots on pan, whatever view you were in.
+- **CHANNEL** takes the strips back to normal from the [send views](#sends-on-the-uf8) and FLIP: the faders on
+  track volume, the V-pots on pan. The track view (ALL, AUDIO …) stays as it is.
 - **PAN** puts the V-pots back on pan (out of a soft-key parameter, the V-pot send view or FLIP). It is lit while
   they are on pan.
 - **FINE**: while held, the V-pots move a quarter as far. Press it twice quickly to latch it (lit); a press
