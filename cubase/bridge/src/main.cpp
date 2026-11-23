@@ -601,21 +601,32 @@ void handleFrame(const uf8frames::Frame& fr)
     case 0x22: {   // button: FF 22 03 id 00 state ck
         const bool pressed = d[5] == 0x01;
         if (d[3] == 0x54) {   // FLIP: a tap swaps faders and V-pots; held 0.4 s: the selected track's sends on the V-pots
+            // As NAV: gen is one per press (a release or a new press makes the timer of the last press do nothing),
+            // held says the timer of this press fired, so its release is no tap. (Until 23.11.2026 the timer set gen
+            // to -1 instead; the next press counted up to 0, its release was not taken for a tap and its timer fired:
+            // after one hold every tap was a hold.)
             static std::atomic<int> gen{0};
+            static std::atomic<bool> held{false};
+            static std::atomic<bool> down{false};   // (a release without its press is no tap)
             if (pressed) {
+                down = true;
+                held = false;
                 const int g = ++gen;
                 std::thread([g] {
                     std::this_thread::sleep_for(std::chrono::milliseconds(400));
-                    if (g != gen) return;
-                    gen = -1;   // the release does nothing more
+                    if (g != gen || !down) return;
+                    held = true;
                     g_routeSelSends = !g_routeSelSends;
                     if (g_routeSelSends && g_focus >= 0) unfocus();
                     applyRoute();
                 }).detach();
-            } else if (gen > 0) {
-                ++gen;   // a tap
-                g_routeFlip = !g_routeFlip;
-                applyRoute();
+            } else if (down) {
+                down = false;
+                ++gen;
+                if (!held) {   // a tap
+                    g_routeFlip = !g_routeFlip;
+                    applyRoute();
+                }
             }
             break;
         }
