@@ -19,6 +19,10 @@ Bugs seen in testing and noted for later. Each entry: what happens, where, and w
   the tray app, which replaces the MIDI ports; Cubase half reconnected, and switched its scripts off 4 s after a
   project opened (the script console: "inactive (no project)" with the project open; nothing more reached the bridge).
   A Cubase restart brought them back. The installer and the uninstaller now ask for Cubase to be closed first.
+- **Fixed (23.11.2026, tested at a restart): a message flashed when Windows shut down.** The tray app's window was
+  message-only, which Windows does not tell about shutting down, so it took the bridge being ended for a crash and
+  started it again (a notice could show). Its window is now a hidden top-level tool window; on Windows shutting down
+  it logs "Windows is shutting down or signing out", stops the bridge and restarts or shows nothing.
 - **Fixed (23.11.2026, confirmed at a login): a port opened at login could refuse every send.** Right after login
   (with Windows MIDI Services running) the bridge opened "UF8 to Cubase" on its 11th-13th try, then the first SysEx
   failed ("MidiOutWinMM::sendMessage: error preparing sysex header"); the error was not caught, so the bridge ended
