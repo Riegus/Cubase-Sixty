@@ -1167,24 +1167,6 @@ void paintVpots()
 // one favourite, the shown one's top soft key lit, as the job picker; 2 s after the last step the displays go back.
 // Only after a UF8 step (the UC1's own encoder leaves the UF8 alone: g_favStepAt).
 std::atomic<int> g_favGen{0};
-namespace cs {
-void uf8ShowFavourites(int domain, int index, const std::vector<std::string>& names)
-{
-    if (nowMs8() - g_favStepAt > 1500 || g_encHeld || g_noProject) return;
-    std::printf("UF8 %s favourite %d of %zu\n", domain ? "BC" : "CS", index + 1, names.size());
-    for (int s = 0; s < kStrips; ++s) {
-        g_dev.send(uf8::buildStripTextUpper(uint8_t(s), s < int(names.size()) ? names[size_t(s)] : std::string()));
-        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s == index ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
-    }
-    const int g = ++g_favGen;
-    std::thread([g] {
-        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-        if (g != g_favGen || g_encHeld) return;
-        restoreStripNames();
-        paintSoftKeys();
-    }).detach();
-}
-} // namespace cs
 void paintEncPicker()
 {
     for (int s = 0; s < kStrips; ++s) {
@@ -2042,6 +2024,22 @@ void uf8Poll()
 
 // To the helper script (track steps: Uf1Bridge.cpp). False if its ports are not open.
 namespace cs {
+void uf8ShowFavourites(int domain, int index, const std::vector<std::string>& names)
+{
+    if (nowMs8() - g_favStepAt > 1500 || g_encHeld || g_noProject) return;
+    std::printf("UF8 %s favourite %d of %zu\n", domain ? "BC" : "CS", index + 1, names.size());
+    for (int s = 0; s < kStrips; ++s) {
+        g_dev.send(uf8::buildStripTextUpper(uint8_t(s), s < int(names.size()) ? names[size_t(s)] : std::string()));
+        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s == index ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
+    }
+    const int g = ++g_favGen;
+    std::thread([g] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        if (g != g_favGen || g_encHeld) return;
+        restoreStripNames();
+        paintSoftKeys();
+    }).detach();
+}
 bool helperSend(const std::vector<unsigned char>& msg)
 {
     if (!g_helperOpen) return false;
