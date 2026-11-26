@@ -1196,6 +1196,19 @@ function favShow(activeDevice, domain, index, track) {
 	for (var n = 0; n < list.length && n < 8; ++n) all = all.concat(n ? sep : [], encodeName(favShort(list[n])))
 	sysex(activeDevice, all)
 }
+// The UF8 picked CS Fav / BC Fav (26.11.2026: nothing showed until the first turn): the list and the current one
+// to the UF8 only (SysEx 48; index 7F = none of them), nothing loaded or picked.
+function favPeek(activeDevice, domain) {
+	if (Date.now() - fav.askedAt > 5000) favAsk(activeDevice)
+	var list = fav.lists[domain]
+	if (!list.length) return
+	var ctx = favContext(domain)
+	var cur = !ctx ? -1 : fav.pick && fav.pick.domain === domain && fav.pick.slotObj === ctx.slotObj ? fav.pick.index : favIndex(domain, ctx.name)
+	var sep = [0x7F, 0x7F, 0x7F]
+	var all = [0x48, domain === 'cs' ? 0 : 1, cur < 0 ? 0x7F : cur & 0x7F]
+	for (var n = 0; n < list.length && n < 8; ++n) all = all.concat(n ? sep : [], encodeName(favShort(list[n])))
+	sysex(activeDevice, all)
+}
 function favStep(activeDevice, domain, dir) {
 	if (Date.now() - fav.askedAt > 5000) favAsk(activeDevice)   // the file may have changed; the next step has it
 	var list = fav.lists[domain]
@@ -1770,7 +1783,11 @@ midiInput.mOnSysex = function (activeDevice, message) {
 	if (cmd === 0x4E) { knobDiv = [128, 64, 32][message[5]] || 64; log('knob step: 1/' + knobDiv); return }   // Settings: UC1 knob steps
 	if (cmd === 0x4C) { if (!enc2.started) { enc2.started = true; enc2.mode = Math.min(ENC2_MODES.length - 1, message[5] || 0); log('secondary encoder at start: ' + ENC2_MODES[enc2.mode].name) } return }
 	if (cmd === 0x4D && am) { try { extEvent(activeDevice, message[5], message[6] - 64) } catch (e) { log('EXT FUNCS: ' + e) } return }
-	if (cmd === 0x44 && am) { try { favStep(activeDevice, message[5] === 0 ? 'cs' : 'bc', message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) } return }
+	if (cmd === 0x44 && am) {   // <domain> <0 back, 1 on, 2 show only (the UF8 picked the mode)>
+		var fd = message[5] === 0 ? 'cs' : 'bc'
+		try { if (message[6] === 2) favPeek(activeDevice, fd); else favStep(activeDevice, fd, message[6] ? 1 : -1) } catch (e) { log('favourite step: ' + e) }
+		return
+	}
 	if (cmd === 0x3E && am && message.length >= 11) { try { setRouting(activeDevice, message) } catch (e) { log('routing: ' + e) } return }
 	if (cmd !== 0x20 && cmd !== 0x21) return
 	if (!am) { if (++sysexErrors <= 3) log('UC1 event before the page was active; ignored'); return }

@@ -712,6 +712,9 @@ void handleFrame(const uf8frames::Frame& fr)
                 restoreStripNames();
                 paintSoftKeys();
                 paintEncLeds();
+                // CS Fav / BC Fav: the list shows at once (26.11.2026: only after the first turn), the track names
+                // come back after 2 s as after a step.
+                if (g_encMode == kEncCsFav || g_encMode == kEncBcFav) { g_favStepAt = nowMs8(); cs::uc1FavouriteStep(g_encMode == kEncBcFav, 0); }
             }
             break;
         }
@@ -2027,7 +2030,8 @@ namespace cs {
 void uf8ShowFavourites(int domain, int index, const std::vector<std::string>& names)
 {
     if (nowMs8() - g_favStepAt > 1500 || g_encHeld || g_noProject) return;
-    std::printf("UF8 %s favourite %d of %zu\n", domain ? "BC" : "CS", index + 1, names.size());
+    if (index >= 0 && index < int(names.size())) std::printf("UF8 %s favourite %d of %zu\n", domain ? "BC" : "CS", index + 1, names.size());
+    else std::printf("UF8 %s favourites (%zu), none loaded\n", domain ? "BC" : "CS", names.size());
     for (int s = 0; s < kStrips; ++s) {
         g_dev.send(uf8::buildStripTextUpper(uint8_t(s), s < int(names.size()) ? names[size_t(s)] : std::string()));
         sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s == index ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));

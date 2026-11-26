@@ -584,8 +584,8 @@ against a 4K G on a vocal without opening a menu.
 - Choose them in **Settings > Favourites**.
 - **Step through them** with the UF8's CHANNEL encoder in *CS Fav* / *BC Fav* mode, or the UC1's secondary encoder
   in its favourites jobs. The UC1's name row shows previous / current / next; with the UF8's encoder, the UF8's
-  strips show the whole list too (one favourite per strip, the current one's top key lit) until 2 s after the last
-  step.
+  strips show the whole list too (one favourite per strip, the current one's top key lit): as soon as you pick the
+  mode, and until 2 s after the last step.
 - A moment after you stop, the plug-in on the track is **replaced** by the favourite shown, and the settings the two
   have in common are carried across by value (an HMF at 2.5 kHz stays at 2.5 kHz). On a track without one, the
   favourite goes into the first free insert slot.

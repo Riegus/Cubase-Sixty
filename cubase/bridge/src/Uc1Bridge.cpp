@@ -1309,7 +1309,8 @@ void uc1FollowStrip(int kind, int ordinal)
 
 void uc1FavouriteStep(int domain, int dir)
 {
-    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x44, uint8_t(domain ? 1 : 0), uint8_t(dir > 0 ? 1 : 0), 0xF7});
+    // dir 0: show the list on the UF8 only (the UF8 has just picked CS Fav / BC Fav)
+    sendMidi({0xF0, 0x7D, 0x52, 0x36, 0x44, uint8_t(domain ? 1 : 0), uint8_t(dir > 0 ? 1 : dir < 0 ? 0 : 2), 0xF7});
 }
 
 // Opens the UC1 and draws the last state Cubase sent (the cache is kept while the UC1 is away). Used at start,
