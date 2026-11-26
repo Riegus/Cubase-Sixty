@@ -554,7 +554,7 @@ it stays there while you select and work on other tracks. The needle meter shows
 |---------|--------------|
 | **CHANNEL encoder** (left of the screen) | Previous / next track. |
 | **Secondary encoder** (right of the screen) | Its job is shown when you **hold its push and turn**: the Bus Comp section through the project's bus comps (start job), the track's channel strips (like the magnifier), CS favourites, BC favourites. A **short push** opens / closes the window of the plug-in it is on (a bus comp's only when it is on the selected track). |
-| SOLO, CUT, Ø | The selected track's solo, mute and polarity. **Solo Clear** clears every solo. |
+| SOLO, CUT, Ø | The selected track's solo and mute; Ø the polarity of the strip the UC1 is on (the SSL plug-in's, or the Pre section's on Cubase's own strip), lit while inverted. **Solo Clear** clears every solo. |
 | Magnifier | The next channel strip on the track. |
 | 360° | Opens / closes the channel strip's plug-in window. |
 | 7-segment display | The track's number in the MixConsole. |
