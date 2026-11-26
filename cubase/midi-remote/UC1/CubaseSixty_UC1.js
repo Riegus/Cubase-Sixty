@@ -316,6 +316,11 @@ function indexKnobs(t) {
 	t.knobByKey = {}
 	for (var k in t.knobs) t.knobByKey[t.knobs[k].obj + ':' + t.knobs[k].tag] = Number(k)
 }
+// The knobs whose 0 (dB) is the middle of their range, on SSL's strips and Cubase's: the EQ gains and the input
+// trim. They have Rea-Sixty's centre notch (onKnob); NOTCH_ZONE is its zone (Rea-Sixty's notch_zone, 0.02).
+var CENTRED = {}
+CENTRED[0x02] = CENTRED[0x04] = CENTRED[0x07] = CENTRED[0x0B] = CENTRED[0x0C] = true   // HF, HMF, LMF, LF gain; input trim
+var NOTCH_ZONE = 0.02
 // One knob click moves a value by 1 / knobDiv of its range (Settings: UC1 knob steps; the bridge sends it, SysEx 4E).
 var knobDiv = 64
 var state = {
@@ -1514,6 +1519,13 @@ function onKnob(activeDevice, id, clicks) {
 	var now = Date.now()
 	var base = rf.wanted !== undefined && now - rf.turnedAt < 1000 ? rf.wanted : acc.getParameterProcessValue(am, rf.obj, rf.tag)
 	var v = Math.max(0, Math.min(1, base + step))
+	// Rea-Sixty's centre notch (VirtualNotch.h, applyVirtualNotch) on the knobs with 0 dB in the middle: a turn that
+	// crosses the centre, or ends within the zone moving inward, lands on it exactly; outward from it is free
+	// (26.11.2026: an HF gain went -0.2 / +0.2 and never 0.0, also with FINE).
+	if (CENTRED[id]) {
+		var dCur = Math.abs(base - 0.5), dNext = Math.abs(v - 0.5)
+		if ((base - 0.5) * (v - 0.5) < 0 || (dNext <= NOTCH_ZONE && dNext < dCur)) v = 0.5
+	}
 	acc.setParameterProcessValue(am, rf.obj, rf.tag, v)
 	rf.wanted = v
 	rf.turnedAt = now
