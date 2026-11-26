@@ -639,13 +639,14 @@ void onUf1Event(const ::uf1::InputEvent& ev)
         sendMidi({0xB0, uint8_t(uf1m::kCcEncoder + ev.id), vpotToCc(ev.delta)});
         break;
     case K::Button:
-        // SHIFT is a modifier held in the bridge. SHIFT + the transport soft keys and Cycle / Click = the
-        // automation keys printed on them: < READ (56), > WRITE (57), CYCLE = Cross-Over (58), CLICK = TRIM
-        // (59), 1 = LATCH (60), 2 = TOUCH (61). One pulse per press.
+        // SHIFT is a modifier held in the bridge. SHIFT + the quick-key row = the automation keys printed under them
+        // (26.11.2026, from Geir's panel: OFF / READ / WRT / TRIM / LTCH / TOUCH; until then < was Read, > Write and
+        // CYCLE Cross-Over): < OFF = Cross-Over (58), > READ (56), CYCLE = WRITE (57), CLICK = TRIM (59), 1 = LATCH
+        // (60), 2 = TOUCH (61). One pulse per press.
         if (ev.id == 0x36) { g_shift = ev.pressed; break; }
         if (g_shift && ev.id >= 0x30 && ev.id <= 0x35) {
             if (ev.pressed) {
-                static const uint8_t autoNote[6] = {56, 57, 58, 59, 60, 61};
+                static const uint8_t autoNote[6] = {58, 56, 57, 59, 60, 61};
                 note(autoNote[ev.id - 0x30], true);
                 note(autoNote[ev.id - 0x30], false);
                 if (autoNote[ev.id - 0x30] >= 58) autoModePressed(autoNote[ev.id - 0x30]);
