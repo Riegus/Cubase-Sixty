@@ -241,6 +241,7 @@ enum { kEncSelect = 0, kEncNudge, kEncMarkers, kEncBank, kEncCsFav, kEncBcFav, k
 const char* const kEncNames[kEncModes] = { "Ch Sel", "Nudge", "Markers", "Bank 1", "CS Fav", "BC Fav", "Mouse" };
 std::atomic<int> g_encMode{kEncSelect};
 std::atomic<bool> g_encHeld{false};
+std::atomic<long long> g_favStepAt{0};   // the UF8's last CS / BC Fav step (uf8ShowFavourites)
 int g_encPick = 0;
 void paintEncPicker();
 void paintEncLeds();
@@ -711,6 +712,9 @@ void handleFrame(const uf8frames::Frame& fr)
                 restoreStripNames();
                 paintSoftKeys();
                 paintEncLeds();
+                // CS Fav / BC Fav: the list shows at once (26.11.2026: only after the first turn), the track names
+                // come back after 2 s as after a step.
+                if (g_encMode == kEncCsFav || g_encMode == kEncBcFav) { g_favStepAt = nowMs8(); cs::uc1FavouriteStep(g_encMode == kEncBcFav, 0); }
             }
             break;
         }
@@ -933,7 +937,7 @@ void handleFrame(const uf8frames::Frame& fr)
             }
             for (int i = 0; i < std::min(std::abs(delta), 8); ++i) {
                 if (mode == kEncBank) { note(right ? kNotePageRight : kNotePageLeft, true); note(right ? kNotePageRight : kNotePageLeft, false); continue; }
-                if (mode == kEncCsFav || mode == kEncBcFav) { cs::uc1FavouriteStep(mode == kEncBcFav, right ? 1 : -1); continue; }
+                if (mode == kEncCsFav || mode == kEncBcFav) { g_favStepAt = nowMs8(); cs::uc1FavouriteStep(mode == kEncBcFav, right ? 1 : -1); continue; }
                 if (mode == kEncSelect && cs::settings::trackStepping() == cs::settings::Stepping::MixConsole && cs::uf1StepTrack(right ? 1 : -1)) continue;
                 // Select 0 / 1 (6 / 7 = Navigate Up / Down: only the tracks the Project window shows), Nudge 2 / 3, Markers 4 / 5
                 const uint8_t n = mode == kEncSelect && cs::settings::projectStepping() ? uint8_t(right ? 7 : 6) : uint8_t(mode * 2 + (right ? 1 : 0));
@@ -1162,6 +1166,10 @@ void paintVpots()
     g_dev.send(uf8::buildVPotMode(modes));
     if (focus < 0) for (int s = 0; s < kStrips; ++s) { if (!g_panLine[s].empty()) g_dev.send(uf8::buildValueLine(uint8_t(s), g_panLine[s])); }
 }
+// CS Fav / BC Fav on the UF8's CHANNEL encoder (26.11.2026: the names showed only on the UC1): each strip's top line
+// one favourite, the shown one's top soft key lit, as the job picker; 2 s after the last step the displays go back.
+// Only after a UF8 step (the UC1's own encoder leaves the UF8 alone: g_favStepAt).
+std::atomic<int> g_favGen{0};
 void paintEncPicker()
 {
     for (int s = 0; s < kStrips; ++s) {
@@ -2019,6 +2027,23 @@ void uf8Poll()
 
 // To the helper script (track steps: Uf1Bridge.cpp). False if its ports are not open.
 namespace cs {
+void uf8ShowFavourites(int domain, int index, const std::vector<std::string>& names)
+{
+    if (nowMs8() - g_favStepAt > 1500 || g_encHeld || g_noProject) return;
+    if (index >= 0 && index < int(names.size())) std::printf("UF8 %s favourite %d of %zu\n", domain ? "BC" : "CS", index + 1, names.size());
+    else std::printf("UF8 %s favourites (%zu), none loaded\n", domain ? "BC" : "CS", names.size());
+    for (int s = 0; s < kStrips; ++s) {
+        g_dev.send(uf8::buildStripTextUpper(uint8_t(s), s < int(names.size()) ? names[size_t(s)] : std::string()));
+        sendLedFrames(uf8::buildTopSoftKeyLed(uint8_t(s), s == index ? uf8::TopSoftKeyState::On : uf8::TopSoftKeyState::Off, uf8::ledColourWhite()));
+    }
+    const int g = ++g_favGen;
+    std::thread([g] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+        if (g != g_favGen || g_encHeld) return;
+        restoreStripNames();
+        paintSoftKeys();
+    }).detach();
+}
 bool helperSend(const std::vector<unsigned char>& msg)
 {
     if (!g_helperOpen) return false;
