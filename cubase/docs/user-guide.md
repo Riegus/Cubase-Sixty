@@ -374,8 +374,8 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 - **CHANNEL encoder** and **ARROW ◂ ▸**: previous / next track. Folder tracks and tracks hidden in the MixConsole
   are skipped (Settings > Behaviour changes this).
 - **Encoder push**: opens / closes a window: in the PLUGIN view the plug-in's window, otherwise the channel editor.
-- **SHIFT + turn**: the next / previous SSL plug-in on the track, for the PLUGIN view (after the last one: Quick
-  Controls).
+- **Hold SHIFT and turn the CHANNEL encoder**: the next / previous SSL plug-in on the track, for the PLUGIN view
+  (after the last one: Quick Controls).
 - **BANK ◂ ▸**: banks the UF8. Without a UF8 it moves the selection by eight tracks.
 - **SHIFT + ARROW**: the cursor one bar back / forward.
 - **◀ ▶** (the two keys left of CYCLE): the previous / next marker.
