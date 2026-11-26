@@ -592,7 +592,7 @@ against a 4K G on a vocal without opening a menu.
 - **UF8 + UC1**: bank and balance on the UF8, press SEL, and the track's channel strip is on the UC1. The UF8's top
   soft keys spread one strip control across eight tracks; the UC1 gives you one track's whole strip.
 - **UF1 + UF8**: the UF1's BANK keys bank the UF8, so the right hand never leaves the transport.
-- **UF1 + UC1**: the UF1's SHIFT + encoder and the UC1's magnifier pick the same channel strip, so the PLUGIN view
+- **UF1 + UC1**: the UF1's SHIFT + CHANNEL encoder and the UC1's magnifier pick the same channel strip, so the PLUGIN view
   and the UC1 always show the same plug-in.
 - **UF8 alone**: every send, the SSL strips through the soft keys, markers and automation are all reachable; that
   is what the send views, Nav Mode and the AUTO mode are for.
