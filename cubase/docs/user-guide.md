@@ -210,8 +210,8 @@ Touching a fader can also select its track (Settings > Behaviour).
   track volume, the V-pots on pan. The track view (ALL, AUDIO …) stays as it is.
 - **PAN** puts the V-pots back on pan (out of a soft-key parameter, the V-pot send view or FLIP). It is lit while
   they are on pan.
-- **FINE**: while held, the V-pots move a quarter as far. Press it twice quickly to latch it (lit); a press
-  unlatches.
+- **FINE**: while held (lit while your finger is on it), the V-pots move a quarter as far. Press it twice quickly
+  to latch it (it stays lit); a press unlatches. It works on the UF8 only; the UF1 has its own (quick key 2).
 - **360°** opens the Settings page in your browser.
 
 ### Track views: which tracks the strips show
