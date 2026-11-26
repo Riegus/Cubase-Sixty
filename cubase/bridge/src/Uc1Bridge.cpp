@@ -7,8 +7,8 @@
 //   UC1 -> script   SysEx 20 <knob id> <64 + clicks>     a knob turned (clicks signed, usually +-1..3)
 //                   SysEx 21 <button id> <1 pressed / 0 released>
 //                   note 100 / 101 (press + release)     CHANNEL encoder: next / previous track
-//                   note <id> (press only, velocity 127) Polarity 0x19, Solo Clear 0x1B, Solo 0x1C, Cut 0x1D:
-//                                                         bound to host values in the script
+//                   note <id> (press only, velocity 127) Solo Clear 0x1B, Solo 0x1C, Cut 0x1D: bound to host values in
+//                                                         the script (Ø, 0x19, is SysEx 21: it works the strip)
 //   script -> UC1   SysEx 30 <name>                       the selected track's name (3 x 7 bits per character)
 //                   SysEx 31 <r> <g> <b>                  its colour (7 bits each)
 //                   SysEx 32 <label>                      the plug-in shown (model field: "CS 2", "4K E", ...; empty = none)
@@ -32,7 +32,7 @@
 //                                                         set a host value it has bound to a CC (a strip module's on switch)
 // The two encoders send one step per detent (Rea-Sixty's accumulator: 3 ticks per step, reset after a 100 ms
 // pause or a change of direction): CHANNEL as notes 100 / 101, the Bus Comp encoder as SysEx 20 15 <64 + steps>.
-//                   note <id> (velocity > 0 = on)         LEDs of the note-bound buttons (Solo, Cut, Polarity)
+//                   note <id> (velocity > 0 = on)         LEDs of the note-bound buttons (Solo, Cut)
 //
 // Byte maps (knob / button ids, LED cells, frame layouts) are Rea-Sixty's (extension/src/UC1Protocol.h).
 
@@ -1060,7 +1060,7 @@ void onButton(const ::uc1::ButtonEvent& ev)
     if (sleep::key(2, ev.id, ev.pressed, "UC1 key")) return;   // Sleep when idle: the press that wakes, and its release
     namespace B = ::uc1::button;
     if (presetsButton(ev.id, ev.pressed)) return;
-    if (ev.id == B::kPolarity || ev.id == B::kSoloClear || ev.id == B::kSolo || ev.id == B::kCut) {
+    if (ev.id == B::kSoloClear || ev.id == B::kSolo || ev.id == B::kCut) {   // (Ø goes to the script: it works the strip)
         note(ev.id, ev.pressed);
         return;
     }

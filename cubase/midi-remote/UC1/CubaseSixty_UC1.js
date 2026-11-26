@@ -274,9 +274,8 @@ function noteButton(x, note) {
 }
 page.makeValueBinding(noteButton(0, B.Solo).mSurfaceValue, track.mSolo).setTypeToggle()
 page.makeValueBinding(noteButton(1, B.Cut).mSurfaceValue, track.mMute).setTypeToggle()
-try {
-	page.makeValueBinding(noteButton(2, B.Polarity).mSurfaceValue, selected.mPreFilter.mPhaseSwitch).setTypeToggle()
-} catch (e) { log('polarity could not be bound: ' + e) }
+// (Ø is no binding: it works the strip the UC1 is on, an SSL plug-in's Polarity or Cubase's Pre phase; see makeTarget,
+// cubaseStrip.)
 function commandButton(x, note, category, command) {
 	var button = cmdButton()
 	button.mSurfaceValue.mMidiBinding.setInputPort(midiInput).bindToNote(0, note)
@@ -309,6 +308,12 @@ function makeTarget(acc, obj, map, name) {
 	for (var b in map.buttons) t.buttons[b] = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.buttons[b]), false)
 	if (map.bypass >= 0) t.bypass = ref(acc, obj, acc.getParameterTagByIndex(am, obj, map.bypass), true)
 	if (map.routing) t.routing = map.routing.map(function (i) { return ref(acc, obj, acc.getParameterTagByIndex(am, obj, i), false) })
+	// Ø: the plug-in's own polarity, found by name on every model (26.11.2026: it worked Cubase's Pre phase, so on a
+	// 4K B nothing seemed to happen).
+	try {
+		var pol = findParam(paramList(obj), [/^polarity$/i, /^phase$/i])
+		if (pol) t.buttons[B.Polarity] = ref(acc, obj, pol.tag, false)
+	} catch (e) {}
 	indexKnobs(t)
 	return t
 }
@@ -617,6 +622,9 @@ function cubaseStrip(objects) {
 	if (gateBypass) { gateBypass.invert = true; t.buttons[B.Expand] = gateBypass; t.objs[gate] = true }
 	var scMonitor = sw(gate, gateList, [/^sc\s*monitor$/i])
 	if (scMonitor) { t.buttons[B.ScListen] = scMonitor; t.objs[gate] = true }
+	// Ø: the Pre section's phase switch.
+	var phase = sw(inputFilter, inList, [/^phase$/i])
+	if (phase) { t.buttons[B.Polarity] = phase; t.objs[inputFilter] = true }
 	if (++stripLogs <= 5) {
 		log('Cubase strip:' + (missing.length ? ' not found: ' + missing.join(', ') : ' everything found')
 			+ '; EQ IN ' + (eqBypass ? '"' + eqBypass.title + '"' : 'none') + ', DYN IN ' + (compBypass ? '"' + compBypass.title + '"' : 'none') + ', EXP ' + (gateBypass ? '"' + gateBypass.title + '"' : 'none') + ', SC LISTEN ' + (scMonitor ? '"' + scMonitor.title + '"' : 'none'))
@@ -1478,7 +1486,7 @@ function lit(target, rf) {
 }
 
 // Button LEDs from the plug-ins' parameters. IN keys: lit while the plug-in is not bypassed.
-var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen]
+var CS_BUTTONS = [B.HfBell, B.EqType, B.EqIn, B.LfBell, B.FastAttComp, B.Peak, B.DynIn, B.Expand, B.FastAttGate, B.ScListen, B.Polarity]
 function paintLeds(activeDevice) {
 	for (var i = 0; i < CS_BUTTONS.length; ++i) {
 		var b = CS_BUTTONS[i]
