@@ -942,7 +942,16 @@ if (mainOut) {
 function stripActivated(activeDevice, master, flip) {
 	masterActive = master
 	stripModeSend(activeDevice)
-	if (flip !== flipActive) { flipActive = flip; lastPanText = lastPanPos = lastLevelText = null; stripModeSend(activeDevice) }
+	if (flip !== flipActive) {
+		flipActive = flip; lastPanText = lastPanPos = lastLevelText = null; stripModeSend(activeDevice)
+		// The new bindings' values arrive before this activation (cubase-limitations.md, Sub-page changes), so they
+		// were drawn as if FLIP had not changed: the fader's pan in the dB field ("CdB"), the knob's level on the pan
+		// line ("Pan 0.00"), 26.11.2026. Drawn again now that flipActive is right.
+		if (knobShown.value !== null) knobDisplay(activeDevice, knobShown.value, knobShown.units)
+		if (faderShown.value !== null) faderDisplay(activeDevice, faderShown.value, faderShown.units)
+		if (knobShown.pos !== null) knobProcess(activeDevice, knobShown.pos)
+		if (faderShown.pos !== null) faderProcess(activeDevice, faderShown.pos)
+	}
 	showStrip(activeDevice)
 }
 stripSelected.mOnActivate = function (activeDevice) { stripActivated(activeDevice, false, false) }
