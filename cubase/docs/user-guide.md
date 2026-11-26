@@ -505,7 +505,9 @@ PEAK, DYN IN and EXP, S/C LISTEN, input and output trim, polarity.
 - The **Dyn and Gate LED rows** show the strip's gain reduction as it happens.
 - The **screen** shows the track's name and colour, the plug-in (the model field), and the name and value of what
   you are turning.
-- **CHANNEL IN** is the plug-in's own bypass. **FINE** makes the knobs finer.
+- **CHANNEL IN** is the plug-in's own bypass. **FINE** makes the knobs finer (a quarter of a step; lit while on).
+- The **EQ gain** and **input trim** knobs stop on exactly 0 dB when you turn across it; turn on for the other side.
+  (The same on Cubase's own strip.)
 - **Several SSL strips on one track?** The **magnifier** key steps to the next one (in insert order, then Cubase's
   own strip); the name row shows previous / current / next for a moment. The choice is remembered per track.
 

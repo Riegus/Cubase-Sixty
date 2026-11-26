@@ -155,7 +155,11 @@ banking have their own file: [banking.md](banking.md). Cubase's limits are in
   the plug-in's own units instead: 1 dB for the reference level and loudness target, 10–20 ms for times, 0.5 LU for
   loudness ranges; RTA scale top / bottom one value a notch (they are lists on the wire).
 
-- The UC1's knob step is a setting (SysEx 4E to the script).
+- The UC1's knob step is a setting (SysEx 4E to the script); FINE is a quarter of it.
+- **UC1 centre notch** (26.11.2026): the EQ gains (HF, HMF, LMF, LF) and the input trim stop on exactly 0 dB, as
+  Rea-Sixty's applyVirtualNotch: a turn that crosses the centre, or ends within 2 % of the range moving inward,
+  lands on it; outward from it is free, so small values stay reachable. Before, the steps skipped 0.0 (an HF gain went
+  -0.2 / +0.2, also with FINE). Tested on SSL's strips and Cubase's.
 - The CHANNEL encoders step tracks by selecting the next channel directly (the Helper script), not by counting
   Cubase's next / previous track: see banking.md.
 - **"In 'All MIDI Inputs'" must be off for every Cubase-Sixty port.** Left on, track steps were reported 600–800 ms
