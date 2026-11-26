@@ -1190,6 +1190,11 @@ function favShow(activeDevice, domain, index, track) {
 	sysex(activeDevice, [0x39].concat(encodeName(track || '')))
 	sysex(activeDevice, [0x35, domain === 'cs' ? ZONE_CS : ZONE_BC])
 	state.restoreBcAt = Date.now() + 1600
+	// For the UF8 (its CHANNEL encoder steps them too, 26.11.2026): the whole list, short names, and which is shown
+	// (SysEx 48 <domain> <index> <name> 7F 7F 7F <name> ...; the bridge shows them only after a UF8 step).
+	var all = [0x48, domain === 'cs' ? 0 : 1, index & 0x7F]
+	for (var n = 0; n < list.length && n < 8; ++n) all = all.concat(n ? sep : [], encodeName(favShort(list[n])))
+	sysex(activeDevice, all)
 }
 function favStep(activeDevice, domain, dir) {
 	if (Date.now() - fav.askedAt > 5000) favAsk(activeDevice)   // the file may have changed; the next step has it

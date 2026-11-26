@@ -324,7 +324,7 @@ letting go keeps the one shown.
 | Nudge | Moves the project cursor by Cubase's nudge value. The **NUDGE** key switches to this and back. |
 | Markers | Jumps to the previous / next marker. The **NAV** key (a tap) switches to this and back. |
 | Bank by 1 | Moves the strips one track at a time. |
-| CS Fav / BC Fav | Steps through your favourite channel strips / bus comps (see [Favourites](#favourites)). |
+| CS Fav / BC Fav | Steps through your favourite channel strips / bus comps; the strips show the list while you turn (see [Favourites](#favourites)). Needs a UC1: it swaps the strip the UC1 is on. |
 | Mouse | Changes **the value under Cubase's mouse pointer**: point at any knob or fader in Cubase (a plug-in, the MixConsole) and turn. The **FOCUS** key switches to this and back. With FINE it moves a quarter as far. |
 
 ### Markers and Nav Mode
@@ -583,7 +583,9 @@ against a 4K G on a vocal without opening a menu.
 
 - Choose them in **Settings > Favourites**.
 - **Step through them** with the UF8's CHANNEL encoder in *CS Fav* / *BC Fav* mode, or the UC1's secondary encoder
-  in its favourites jobs. The UC1's name row shows previous / current / next.
+  in its favourites jobs. The UC1's name row shows previous / current / next; with the UF8's encoder, the UF8's
+  strips show the whole list too (one favourite per strip, the current one's top key lit) until 2 s after the last
+  step.
 - A moment after you stop, the plug-in on the track is **replaced** by the favourite shown, and the settings the two
   have in common are carried across by value (an HMF at 2.5 kHz stays at 2.5 kHz). On a track without one, the
   favourite goes into the first free insert slot.

@@ -653,6 +653,19 @@ void onSysex(const std::vector<unsigned char>& m)
         if (!menuOn()) send(largeRow());
         break;
     }
+    case 0x48: {   // the favourites and which is shown, for the UF8 (it shows them after its own step)
+        if (m.size() < 8) break;
+        std::vector<std::string> names;
+        size_t at = 7;
+        while (at + 1 < m.size() && names.size() < 8) {
+            size_t end = at;
+            names.push_back(decodeName(m, at, &end));
+            if (end + 3 >= m.size() || m[end] != 0x7F) break;
+            at = end + 3;   // past the separator
+        }
+        uf8ShowFavourites(m[5], m[6], names);
+        break;
+    }
     case 0x39: showHeader(decodeName(m, 5)); break;
     case 0x3B: {
         size_t end = 5;
@@ -733,7 +746,7 @@ void onMidiIn(std::vector<unsigned char>& msg)
         std::lock_guard<std::mutex> lk(g_stateMx);
         if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x34) g_cache[0x200 + m[5]] = m;   // per LED
         else if (m.size() >= 6 && m[0] == 0xF0 && m[4] == 0x36) g_cache[0x300 + m[5]] = m;   // per ring
-        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42 && m[4] != 0x4A && m[4] != 0x4B && m[4] != 0x47) g_cache[0x100 + m[4]] = m;   // (not the requests)
+        else if (m.size() >= 6 && m[0] == 0xF0 && m[4] != 0x33 && m[4] != 0x39 && m[4] != 0x3A && m[4] != 0x3B && m[4] != 0x3F && m[4] != 0x42 && m[4] != 0x4A && m[4] != 0x4B && m[4] != 0x47 && m[4] != 0x48) g_cache[0x100 + m[4]] = m;   // (not the requests)
         else if (m.size() >= 3 && ((m[0] & 0xF0) == 0x90 || (m[0] & 0xF0) == 0x80)) g_cache[m[1]] = m;
     }
     if (m[0] == 0xF0) { onSysex(m); return; }
