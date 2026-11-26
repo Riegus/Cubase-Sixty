@@ -311,7 +311,7 @@ function makeTarget(acc, obj, map, name) {
 	// Ø: the plug-in's own polarity, found by name on every model (26.11.2026: it worked Cubase's Pre phase, so on a
 	// 4K B nothing seemed to happen).
 	try {
-		var pol = findParam(paramList(obj), [/^polarity$/i, /^phase$/i])
+		var pol = findParam(paramList(obj), [/^(polarity|phase)$/i])   // (one pattern: findParam wants all of them to match)
 		if (pol) t.buttons[B.Polarity] = ref(acc, obj, pol.tag, false)
 	} catch (e) {}
 	indexKnobs(t)
