@@ -364,7 +364,7 @@ One strip for the **selected track**, a large display with four V-pots, transpor
 | Fader | The selected track's volume, with touch, on the printed dB scale (up to Cubase's +6 dB). |
 | SOLO, CUT | Solo and mute. SEL shows the track's colour; bright while its channel editor is open. |
 | Knob above the fader | Pan. Push: the pan to the centre. |
-| Small display | Track name, number (as in the MixConsole) and colour; the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
+| Small display | Track name, number (as in the MixConsole) and colour; the SSL plug-in the UF1 is on (4K E, CS 2 …; CUBASE without one, as on the UC1); the level; a meter; and a **value line**: pan, or for two seconds what a V-pot is changing. |
 | MASTER | Puts the strip on the main output instead of the selected track. Press again to return. |
 | FLIP | Swaps the fader and the pan knob. |
 | BYPASS | Bypasses all inserts of the track (dim: inserts active; bright: all bypassed; off: no inserts). Press again to switch them back on; inserts that were bypassed beforehand stay bypassed (Settings > Behaviour can make it switch all on). |
