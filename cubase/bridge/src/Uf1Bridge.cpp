@@ -1539,7 +1539,9 @@ void paintCsType(bool force)
     if (!g_open) return;
     static std::string shown = "\x01";
     std::string t;
-    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_plugPresent && !g_noProject ? g_plugModel : std::string(); }
+    // Without an SSL plug-in (or stepped past them with SHIFT + the CHANNEL encoder) the UC1 is on Cubase's own strip
+    // and says CUBASE: so does this label (26.11.2026; it was blank).
+    { std::lock_guard<std::mutex> lk(g_cellMx); t = g_noProject ? std::string() : g_plugPresent ? g_plugModel : std::string("CUBASE"); }
     if (t.empty()) t.assign(12, ' ');
     if (!force && t == shown) return;
     shown = t;
