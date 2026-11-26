@@ -1,5 +1,9 @@
 # Release plan (first public beta)
 
+**Released 26.11.2026:** Cubase-Sixty 0.1.0 (beta), a GitHub pre-release with tag `cubase-v0.1.0` (Rea-Sixty's
+old tags v0.1.0 to v0.8.1 came over with the fork, so Cubase-Sixty's tags have the `cubase-` prefix). What comes
+next is in [Missing features](missing-features.md).
+
 What has to happen before Cubase-Sixty can go out as a beta, in this order. Features still missing are in
 [Missing features](missing-features.md); they do not hold the beta back.
 
@@ -108,3 +112,9 @@ What has to happen before Cubase-Sixty can go out as a beta, in this order. Feat
   starts Cubase without a project.
 - A user guide: what each key does on each surface, the setup steps that stay manual (the Mackie Control device for
   scrubbing, SSL 360 not running), with links to the known issues and the Cubase limitations.
+- 26.11.2026: the guide read against the hardware (UF8, UF1, UC1, then the rest; fixes on the way: send names, the
+  FLIP gestures, the UF1's fader scale and marker ends, the UC1's Cubase compressor meter, notch and polarity, the
+  favourites on the UF8's strips). The tray's Quit and the installer handle a copy stuck by Windows MIDI Services
+  (held files moved aside); the uninstaller does too, and removes them at the next sign-in (tested with a restart).
+  The release installer built from `cubase`, installed, uninstalled (with Cubase open it asks first) and installed
+  again; the GitHub pre-release published.
