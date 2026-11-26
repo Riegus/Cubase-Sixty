@@ -702,7 +702,9 @@ The full lists: [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubas
 
 Close Cubase first (the uninstaller asks you to if it is running). Then Windows *Settings > Apps > Installed apps >
 Cubase-Sixty > Uninstall*. It stops Cubase-Sixty, removes the program
-and the scripts, and asks whether to remove your settings and favourites too.
+and the scripts, and asks whether to remove your settings and favourites too. On Windows 11 with Windows MIDI
+Services, a copy of Cubase-Sixty can stay stuck while exiting until the PC restarts (see Updating); the few files it
+still holds are then removed the next time you sign in.
 
 The USB driver and its certificate stay (Rea-Sixty may be using them). To give the controllers back to SSL 360 and
 remove the certificate, use the tray menu **SSL controllers > Give them back to SSL 360** **before** uninstalling, or run SSL 360's

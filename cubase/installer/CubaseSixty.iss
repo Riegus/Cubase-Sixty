@@ -95,17 +95,13 @@ Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -Fil
 Filename: "{app}\CubaseSixty.exe"; Parameters: "--setup-cubase"; Flags: waituntilterminated skipifsilent; StatusMsg: "Setting up Cubase..."; Tasks: cubasesetup
 Filename: "{app}\CubaseSixty.exe"; Description: "Start Cubase-Sixty now"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-; Stops the tray app and the bridge (which blanks the surfaces) before the files go.
-Filename: "{app}\CubaseSixty.exe"; Parameters: "--quit"; Flags: runhidden; RunOnceId: "QuitTray"
-
 [UninstallDelete]
 ; What the program wrote beside itself. (settings.txt and favourites.txt are the user's: kept unless they say so, see below.)
 Type: filesandordirs; Name: "{app}\logs"
 Type: files; Name: "{app}\level-curve.txt"
 Type: files; Name: "{app}\fader-0db.txt"
 Type: files; Name: "{app}\uf8-*-last-view.txt"
-Type: files; Name: "{app}\*.old"
+; (The *.old files: CurUninstallStepChanged, as they may still be held.)
 
 [Code]
 // The virtual MIDI driver (teVirtualMIDI) makes the bridge's ports. It comes with loopMIDI, and with SSL 360.
@@ -312,14 +308,46 @@ begin
   Result := CubaseClosed('uninstalling', UninstallSilent());
 end;
 
-// Uninstall: the user's settings and favourites are kept unless they say otherwise; the scripts are removed.
-procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+// Deletes the set-aside files that are free; True if any is still held.
+function DeleteSetAside(dir: String): Boolean;
+var rec: TFindRec;
 begin
-  if CurUninstallStep <> usPostUninstall then exit;
-  if FileExists(ExpandConstant('{app}\settings.txt')) or FileExists(ExpandConstant('{app}\favourites.txt')) then
-    if MsgBox('Remove your Cubase-Sixty settings and favourites too?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then begin
-      DeleteFile(ExpandConstant('{app}\settings.txt'));
-      DeleteFile(ExpandConstant('{app}\favourites.txt'));
-      RemoveDir(ExpandConstant('{app}'));
+  Result := False;
+  dir := AddBackslash(dir);
+  if FindFirst(dir + '*.old', rec) then
+    try
+      repeat if not DeleteFile(dir + rec.Name) then Result := True; until not FindNext(rec);
+    finally
+      FindClose(rec);
     end;
+end;
+
+// Uninstall: the user's settings and favourites are kept unless they say otherwise; the scripts are removed.
+// Before the files go, the tray app and the bridge are stopped (the bridge blanks the surfaces), and what a copy stuck
+// while exiting still holds is moved aside (26.11.2026: such files were left with "Some elements could not be
+// removed"). Set-aside files still held at the end are deleted at the next sign-in (RunOnce), with the folder if it is
+// empty then.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var code: Integer; app, exe: String;
+begin
+  app := ExpandConstant('{app}');
+  if CurUninstallStep = usUninstall then begin
+    exe := app + '\CubaseSixty.exe';
+    if FileExists(exe) then Exec(exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, code);
+    EndProgramsIn(app);
+    MoveInUseAside(app);
+    exit;
+  end;
+  if CurUninstallStep <> usPostUninstall then exit;
+  if FileExists(app + '\settings.txt') or FileExists(app + '\favourites.txt') then
+    if MsgBox('Remove your Cubase-Sixty settings and favourites too?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then begin
+      DeleteFile(app + '\settings.txt');
+      DeleteFile(app + '\favourites.txt');
+    end;
+  if DeleteSetAside(app) then begin
+    Log('Set-aside files still held: deleted at the next sign-in');
+    RegWriteStringValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\RunOnce', 'Cubase-Sixty cleanup',
+      '"' + ExpandConstant('{cmd}') + '" /c del /f /q "' + app + '\*.old" & rd "' + app + '"');
+  end;
+  RemoveDir(app);
 end;
