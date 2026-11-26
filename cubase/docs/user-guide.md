@@ -408,7 +408,7 @@ bar. They follow the mouse and automation too.
 
 **PLUGIN** — the track's SSL plug-in, laid out as on SSL's own UF1 pages.
 
-- The header shows the plug-in and the page ("2/8"). **◀ ▶** (the two outer keys under the display) turn the pages.
+- The header shows the plug-in and the page ("2/8"). The **arrow keys ◂ ▸** (right of 5-8) turn the pages.
 - Each page puts four of the plug-in's controls on the **V-pots** and four of its switches on the **display soft
   keys** (lit while on). A V-pot push puts a gain or trim back to the centre.
 - The graph shows the **EQ curve** of the channel strip (flat while its EQ is out).
@@ -438,7 +438,7 @@ The Meter's own settings are on the V-pots, as on SSL's UF1:
   nothing in METER.
 - **V-pots 2–4** are three of the Meter's settings for this screen, named above them with their values: on
   OVERVIEW for example True Peak, Digital Type and the Lissajous fade; on ANALOGUE VU / PPM, the 0 VU line-up and
-  the reference. **◄ ►** page through more (three pages; ten on LOUDNESS).
+  the reference. The **arrow keys ◂ ▸** page through more (three pages; ten on LOUDNESS).
 - **Soft key 3, FINE**, makes the settings that are not steps move a quarter as far; on LOUDNESS it is **PLAY**
   (start / pause the loudness measurement, lit while it runs).
 - **Soft key 4, PRESETS**, opens the Meter's own presets: V-pot 4 scrolls, its push loads, soft key 3 goes back.
@@ -481,8 +481,9 @@ the jog** to pick it:
 - **Key 1: Solo Clear** — clears every solo in the project. It is lit, and the display says SOLO ACTIVE, while
   anything is soloed.
 - **Key 2: FINE** — the V-pots move a quarter as far per click (sends, Quick Controls, plug-in controls).
-- **SHIFT + a key** is automation: **◀ Read** and **▶ Write** for the selected track; **Cycle** Cross-Over,
-  **Click** Trim, **key 1** Latch and **key 2** Touch as the global mode.
+- **SHIFT + a key** is automation, as printed under the keys: **◀ OFF** (Cubase's Cross-Over mode), **▶ READ** and
+  **Cycle WRT** (Read / Write of the selected track), **Click TRIM**, **key 1 LTCH** and **key 2 TOUCH** (the global
+  mode).
 - **SSL Strip Mode**: on the PLUGIN view's first page, soft key 4 (PLUG-IN) puts the fader on the SSL channel
   strip's own fader and the pan knob on its pan, as PLUGIN does on the UF8.
 - **FOOT 1 / 2**: foot switches.
