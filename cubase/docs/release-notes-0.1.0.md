@@ -48,7 +48,7 @@ your PC.
   Control Room).
 - **UC1:** the selected track's SSL channel strip, or Cubase's own channel strip when it has none, with a bus
   compressor anywhere in the project in the middle. SSL's preset library, routing, favourites to swap strips by
-  turning an encoder.
+  turning an encoder (the UC1's, or the UF8's CHANNEL encoder, with the list on the UF8's strips).
 - **Settings page** in your browser (click the tray icon), and a tray app that starts with Windows and keeps the
   surfaces connected while Cubase comes and goes.
 
@@ -59,8 +59,8 @@ some plug-in states (A/B, HQ MODE) are out of reach, and a track's colour reache
 second UF8 is not supported yet.
 
 On Windows 11 with the new Windows MIDI Services, quitting Cubase-Sixty from the tray leaves a copy that only a PC
-restart ends. It holds nothing you need (a new copy starts and works), and updating still works: the installer puts
-the held files aside, and they are removed after the next restart. Moving to Windows' own loopback ports, which ends
+restart ends. It holds nothing you need (a new copy starts and works), and updating and uninstalling still work: the
+held files are put aside, and they are removed after the next restart. Moving to Windows' own loopback ports, which ends
 this, is planned once Microsoft's API for them is part of Windows. The full lists:
 [known issues](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/known-issues.md),
 [what Cubase does not allow](https://github.com/Riegus/Cubase-Sixty/blob/cubase/cubase/docs/cubase-limitations.md),
